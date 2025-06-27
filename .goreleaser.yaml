@@ -1,0 +1,72 @@
+version: 2
+
+project_name: fastly-mcp
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: fastly-mcp
+    main: ./cmd/fastly-mcp
+    binary: fastly-mcp
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+      - 386
+    ignore:
+      - goos: darwin
+        goarch: 386
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: default
+    formats: ['tar.gz']
+    name_template: >-
+      {{ .ProjectName }}_v{{ .Version }}_
+      {{- .Os }}-
+      {{- if eq .Arch "amd64" }}amd64
+      {{- else if eq .Arch "386" }}386
+      {{- else if eq .Arch "arm64" }}arm64
+      {{- else }}{{ .Arch }}{{ end }}
+
+checksum:
+  name_template: '{{ .ProjectName }}_v{{ .Version }}_SHA256SUMS'
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - '^chore:'
+      - Merge pull request
+      - Merge branch
+
+# Release to GitHub
+release:
+  prerelease: auto
+  draft: false
+  mode: replace
+  replace_existing_draft: true
+  make_latest: true
+  name_template: "{{ .ProjectName }} v{{ .Version }}"
+  header: |
+    # {{ .ProjectName }} v{{ .Version }}
+
+    ## What's New
+    
+    For a full list of changes, see the [changelog](CHANGELOG.md).

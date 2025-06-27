@@ -1,0 +1,31 @@
+# Example allowed commands file for Fastly MCP Server
+# This file demonstrates how to create a custom allowlist of commands
+#
+# Format: One command per line
+# Lines starting with # are comments
+# Empty lines are ignored
+#
+# This example configuration allows only read-only operations
+
+# Basic information commands
+version
+help
+config
+
+# Service read operations (but not create/update/delete)
+service
+
+# Safe listing operations
+acl
+backend
+domain
+dictionary
+
+# Monitoring and stats (read-only)
+stats
+dashboard
+pops
+
+# Note: Commands like 'service' still allow subcommands (e.g., service list)
+# but dangerous subcommands (e.g., service delete) are blocked by
+# the dangerous operation protection mechanism
