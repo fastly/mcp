@@ -1,6 +1,9 @@
 # Changelog
 
-## [0.1.4] - Unreleased
+## [0.1.4] - 2025-06-27
+
+### Changed
+- Tweak descriptions to encourage agents to use the current_time tool
 
 ## [0.1.3] - 2025-06-24
 
