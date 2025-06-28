@@ -229,13 +229,13 @@ func TestCommandSplitting(t *testing.T) {
 				if result.Success {
 					t.Error("Expected command to fail due to invalid command")
 				}
-				if !strings.Contains(result.Error, "not in the allowed list") {
-					t.Errorf("Expected 'not in the allowed list' error, got: %s", result.Error)
+				if !strings.Contains(result.Error, "not available") {
+					t.Errorf("Expected 'not available' error, got: %s", result.Error)
 				}
 			} else {
 				// For valid commands, we can't easily verify the internal splitting
 				// but we can check that the command doesn't fail due to validation
-				if !result.Success && strings.Contains(result.Error, "not in the allowed list") {
+				if !result.Success && strings.Contains(result.Error, "not available") {
 					t.Errorf("Command should have been split properly, but got validation error: %s", result.Error)
 				}
 			}

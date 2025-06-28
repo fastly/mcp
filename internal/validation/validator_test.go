@@ -39,11 +39,11 @@ func TestValidateCommand(t *testing.T) {
 
 		// Invalid commands
 		{"empty command", "", true, "empty"},
-		{"command not in allowlist", "malicious", true, "not in the allowed list"},
+		{"command not in allowlist", "malicious", true, "not available"},
 		{"command with null byte", "service\x00", true, "null bytes"},
 		{"very long command", strings.Repeat("a", 100), true, "exceeds maximum length"},
-		{"command with spaces", "service list", true, "not in the allowed list"},
-		{"shell command injection", "service; rm -rf /", true, "not in the allowed list"},
+		{"command with spaces", "service list", true, "not available"},
+		{"shell command injection", "service; rm -rf /", true, "not available"},
 	}
 
 	for _, tt := range tests {
@@ -415,33 +415,33 @@ func TestValidateCommandEdgeCases(t *testing.T) {
 		errMsg  string
 	}{
 		// Unicode and special characters
-		{"unicode command", "service™", true, "not in the allowed list"},
-		{"command with emoji", "service😀", true, "not in the allowed list"},
-		{"RTL unicode", "service\u200f", true, "not in the allowed list"},
-		{"zero-width characters", "ser\u200bvice", true, "not in the allowed list"},
+		{"unicode command", "service™", true, "not available"},
+		{"command with emoji", "service😀", true, "not available"},
+		{"RTL unicode", "service\u200f", true, "not available"},
+		{"zero-width characters", "ser\u200bvice", true, "not available"},
 
 		// Case sensitivity
-		{"uppercase command", "SERVICE", true, "not in the allowed list"},
-		{"mixed case", "Service", true, "not in the allowed list"},
+		{"uppercase command", "SERVICE", true, "not available"},
+		{"mixed case", "Service", true, "not available"},
 
 		// Whitespace variations
-		{"leading space", " service", true, "not in the allowed list"},
-		{"trailing space", "service ", true, "not in the allowed list"},
-		{"tab character", "service\t", true, "not in the allowed list"},
-		{"multiple spaces", "service  list", true, "not in the allowed list"},
+		{"leading space", " service", true, "not available"},
+		{"trailing space", "service ", true, "not available"},
+		{"tab character", "service\t", true, "not available"},
+		{"multiple spaces", "service  list", true, "not available"},
 
 		// Command variations that might bypass validation
-		{"hyphen prefix", "-service", true, "not in the allowed list"},
-		{"double hyphen", "--service", true, "not in the allowed list"},
-		{"dot prefix", ".service", true, "not in the allowed list"},
-		{"slash prefix", "/service", true, "not in the allowed list"},
-		{"backslash prefix", "\\service", true, "not in the allowed list"},
+		{"hyphen prefix", "-service", true, "not available"},
+		{"double hyphen", "--service", true, "not available"},
+		{"dot prefix", ".service", true, "not available"},
+		{"slash prefix", "/service", true, "not available"},
+		{"backslash prefix", "\\service", true, "not available"},
 
 		// Length edge cases
-		{"single char", "s", true, "not in the allowed list"},
-		{"two chars", "sv", true, "not in the allowed list"},
-		{"exact max length", strings.Repeat("a", 50), true, "not in the allowed list"},
-		{"just under max", strings.Repeat("a", 49), true, "not in the allowed list"},
+		{"single char", "s", true, "not available"},
+		{"two chars", "sv", true, "not available"},
+		{"exact max length", strings.Repeat("a", 50), true, "not available"},
+		{"just under max", strings.Repeat("a", 49), true, "not available"},
 	}
 
 	for _, tt := range tests {

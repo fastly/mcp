@@ -198,7 +198,7 @@ func (v *Validator) ValidateCommand(command string) error {
 
 	// Check allowlist
 	if !v.allowedCommands[command] {
-		return fmt.Errorf("command '%s' is not in the allowed list", command)
+		return fmt.Errorf("command '%s' is not available", command)
 	}
 
 	return nil
