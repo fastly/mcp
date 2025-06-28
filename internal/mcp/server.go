@@ -315,6 +315,20 @@ func (ft *FastlyTool) makeExecuteHandler() server.ToolHandlerFunc {
 			}
 
 			var args []string
+
+			// Split command into parts if it contains spaces
+			// This supports both syntaxes:
+			// 1. {"command": "service", "args": ["list"]}
+			// 2. {"command": "service list"}
+			commandParts := strings.Fields(command)
+			if len(commandParts) > 1 {
+				// Extract the actual command (first part)
+				command = commandParts[0]
+				// Prepend the remaining parts to args
+				args = append(args, commandParts[1:]...)
+			}
+
+			// Add any explicit args from the request
 			if argsParam, ok := params["args"].([]interface{}); ok {
 				for _, arg := range argsParam {
 					if argStr, ok := arg.(string); ok {
