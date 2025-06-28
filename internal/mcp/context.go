@@ -4,6 +4,7 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -263,22 +264,77 @@ func requiresVersion(cmd string, args []string) bool {
 }
 
 // GetSuggestions provides intelligent suggestions based on context
-func GetSuggestions(error string) []string {
+func GetSuggestions(error string, command string, args []string) []string {
 	globalContext.mu.RLock()
 	defer globalContext.mu.RUnlock()
 
 	suggestions := []string{}
 
-	if strings.Contains(error, "Cannot find service") {
-		suggestions = append(suggestions, "Run 'fastly service list' to see available services")
-		if globalContext.LastServiceID != "" {
-			suggestions = append(suggestions, fmt.Sprintf("Try using service-id '%s' instead", globalContext.LastServiceID))
+	// Check for duplicate parameter patterns first
+	if len(args) > 0 {
+		// Check for duplicate subcommands like "service list list"
+		if len(args) >= 2 && args[0] == args[1] {
+			suggestions = append(suggestions, fmt.Sprintf("Duplicate subcommand detected: '%s' appears twice", args[0]))
+			suggestions = append(suggestions, fmt.Sprintf("Use command='%s' with args=['%s'] instead", command, args[0]))
+			return suggestions // Return early with specific suggestion
+		}
+
+		// Check if command is repeated in args like command="service" args=["service", "list"]
+		if args[0] == command {
+			suggestions = append(suggestions, fmt.Sprintf("Command '%s' should not be repeated in args", command))
+			suggestions = append(suggestions, fmt.Sprintf("Use command='%s' with args=%v instead", command, args[1:]))
+			return suggestions // Return early with specific suggestion
 		}
 	}
 
-	if strings.Contains(error, "unexpected 'true'") {
+	// Boolean flag errors
+	if strings.Contains(error, "unexpected 'true'") || strings.Contains(error, "unexpected 'false'") {
 		suggestions = append(suggestions, "For boolean flags like --json, omit the value or use empty string")
+		suggestions = append(suggestions, "Example: use '--json' instead of '--json=true'")
+	}
+
+	// Unknown flag errors
+	if strings.Contains(error, "unknown flag") || strings.Contains(error, "flag provided but not defined") {
+		flagMatch := extractFlagFromError(error)
+		if flagMatch != "" {
+			// Suggest similar flags based on common patterns
+			suggestions = append(suggestions, fmt.Sprintf("Check flag spelling: '%s' might not be valid", flagMatch))
+			if strings.HasPrefix(flagMatch, "-") && !strings.HasPrefix(flagMatch, "--") {
+				suggestions = append(suggestions, fmt.Sprintf("Try using double dash: '--%s'", strings.TrimPrefix(flagMatch, "-")))
+			}
+		}
+		suggestions = append(suggestions, "Use 'fastly [command] --help' to see available flags")
+	}
+
+	// Rate limit errors
+	if strings.Contains(error, "429") || strings.Contains(error, "rate limit") {
+		suggestions = append(suggestions, "Wait a moment before retrying the request")
+		suggestions = append(suggestions, "Consider using pagination flags like --page and --per-page for list operations")
+	}
+
+	// JSON parsing errors (might indicate wrong output format)
+	if strings.Contains(error, "invalid character") || strings.Contains(error, "JSON") {
+		suggestions = append(suggestions, "Try adding --json flag to get structured output")
+		suggestions = append(suggestions, "Remove --json flag if the command doesn't support JSON output")
 	}
 
 	return suggestions
+}
+
+// extractFlagFromError attempts to extract flag name from error messages
+func extractFlagFromError(error string) string {
+	// Look for patterns like "unknown flag: --foo" or "flag provided but not defined: -bar"
+	patterns := []string{
+		"unknown flag: ([^ ]+)",
+		"flag provided but not defined: ([^ ]+)",
+		"unknown shorthand flag: '([^']+)'",
+	}
+
+	for _, pattern := range patterns {
+		if matches := regexp.MustCompile(pattern).FindStringSubmatch(error); len(matches) > 1 {
+			return matches[1]
+		}
+	}
+
+	return ""
 }

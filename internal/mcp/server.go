@@ -76,17 +76,17 @@ func CreateServer() (*server.MCPServer, error) {
 
 			s.AddTool(mcp.Tool{
 				Name:        "fastly_execute",
-				Description: "Execute a Fastly operation with the specified parameters",
+				Description: "Execute a Fastly operation. Examples: For 'service list' use {\"command\":\"service\",\"args\":[\"list\"]}. For 'backend create' use {\"command\":\"backend\",\"args\":[\"create\"]}.",
 				InputSchema: mcp.ToolInputSchema{
 					Type: "object",
 					Properties: map[string]interface{}{
 						"command": map[string]interface{}{
 							"type":        "string",
-							"description": "The Fastly command to execute (e.g., 'service', 'backend', 'acl')",
+							"description": "The base Fastly command (e.g., 'service', 'backend', 'acl'). Do NOT include subcommands here.",
 						},
 						"args": map[string]interface{}{
 							"type":        "array",
-							"description": "Arguments for the command (e.g., ['list'], ['create'], ['delete'])",
+							"description": "Subcommands and arguments. For 'service list', use command='service' and args=['list']. Do NOT duplicate subcommands.",
 							"items": map[string]interface{}{
 								"type": "string",
 							},
@@ -418,7 +418,7 @@ func (ft *FastlyTool) makeExecuteHandler() server.ToolHandlerFunc {
 
 			// Enhance error responses with intelligent suggestions
 			if !response.Success && response.Error != "" {
-				suggestions := GetSuggestions(response.Error)
+				suggestions := GetSuggestions(response.Error, processedCmd, processedArgs)
 				if len(suggestions) > 0 {
 					response.NextSteps = append(suggestions, response.NextSteps...)
 				}
