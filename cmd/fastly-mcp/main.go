@@ -37,6 +37,7 @@ func main() {
 		sanitize        bool
 		allowedCmdsFile string
 		encryptTokens   bool
+		logCommandsFile string
 	)
 
 	// Parse and validate all arguments
@@ -70,6 +71,20 @@ func main() {
 				i++
 			} else {
 				fmt.Fprintf(os.Stderr, "Error: --allowed-commands requires a file path\n")
+				os.Exit(1)
+			}
+			continue
+		}
+		if arg == "--log-commands" {
+			if logCommandsFile != "" {
+				fmt.Fprintf(os.Stderr, "Error: --log-commands specified multiple times\n")
+				os.Exit(1)
+			}
+			if i+1 < len(os.Args) && !strings.HasPrefix(os.Args[i+1], "-") {
+				logCommandsFile = os.Args[i+1]
+				i++
+			} else {
+				fmt.Fprintf(os.Stderr, "Error: --log-commands requires a file path\n")
 				os.Exit(1)
 			}
 			continue
@@ -147,11 +162,16 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Loaded %d allowed commands from %s\n", len(allowedCommands), allowedCmdsFile)
 	}
 
+	// Show logging status if enabled
+	if logCommandsFile != "" {
+		fmt.Fprintf(os.Stderr, "Logging MCP commands to: %s\n", logCommandsFile)
+	}
+
 	if httpAddr != "" {
 		addr := mcp.NormalizeAddress(httpAddr)
-		mcp.RunHTTPServer(addr, useSSE)
+		mcp.RunHTTPServer(addr, useSSE, logCommandsFile)
 	} else {
-		runMCPServer()
+		runMCPServer(logCommandsFile)
 	}
 }
 
@@ -190,8 +210,8 @@ func validateCLIArgs(args []string) error {
 // runMCPServer starts the MCP server in stdio mode for communication with AI agents.
 // The server handles tool requests over standard input/output using the MCP protocol.
 // Setup validation is deferred to tool execution time to ensure proper JSON-RPC communication.
-func runMCPServer() {
-	if err := mcp.InitServer(); err != nil {
+func runMCPServer(logCommandsFile string) {
+	if err := mcp.InitServer(logCommandsFile); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to start MCP server: %v\n", err)
 		os.Exit(1)
 	}
@@ -224,6 +244,12 @@ func runCLIMode(sanitize bool, encryptTokens bool) {
 			continue
 		}
 		if os.Args[i] == "--allowed-commands" {
+			if i+1 < len(os.Args) {
+				i++ // Skip the file argument too
+			}
+			continue
+		}
+		if os.Args[i] == "--log-commands" {
 			if i+1 < len(os.Args) {
 				i++ // Skip the file argument too
 			}
@@ -364,6 +390,7 @@ Options:
   --sanitize               Enable sanitization of sensitive data (PII, tokens, secrets)
   --allowed-commands file  Use custom allowed commands list from file
   --encrypt-tokens         Encrypt secret tokens in tool responses (for LLM safety)
+  --log-commands file      Log MCP commands to the specified file
 
 CLI Commands:
   help            Show this help message

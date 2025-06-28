@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/fastly/mcp/internal/fastly"
 	"github.com/fastly/mcp/internal/types"
@@ -130,7 +131,13 @@ func CreateServer() (*server.MCPServer, error) {
 // InitServer initializes and starts the MCP server on stdio for standard input/output communication.
 // This is the default mode used when the server is launched without HTTP flags.
 // It enables direct communication with AI agents through stdin/stdout pipes.
-func InitServer() error {
+func InitServer(logCommandsFile string) error {
+	// Initialize command logger if specified
+	if err := InitializeCommandLogger(logCommandsFile); err != nil {
+		return fmt.Errorf("failed to initialize command logger: %w", err)
+	}
+	defer CloseCommandLogger()
+
 	// Initialize token crypto for encrypting sensitive data in responses
 	if err := InitializeTokenCrypto(fastly.GetTokenEncryptionEnabled()); err != nil {
 		return fmt.Errorf("failed to initialize token crypto: %w", err)
@@ -148,9 +155,16 @@ func InitServer() error {
 // Parameters:
 //   - addr: The address to bind the HTTP server to (e.g., "127.0.0.1:8080")
 //   - useSSE: If true, uses Server-Sent Events; otherwise uses StreamableHTTP
+//   - logCommandsFile: If non-empty, log commands to this file
 //
 // The server will print connection information and wait for incoming connections.
-func RunHTTPServer(addr string, useSSE bool) {
+func RunHTTPServer(addr string, useSSE bool, logCommandsFile string) {
+	// Initialize command logger if specified
+	if err := InitializeCommandLogger(logCommandsFile); err != nil {
+		log.Fatalf("Failed to initialize command logger: %v", err)
+	}
+	defer CloseCommandLogger()
+
 	// Initialize token crypto for encrypting sensitive data in responses
 	if err := InitializeTokenCrypto(fastly.GetTokenEncryptionEnabled()); err != nil {
 		log.Fatalf("Failed to initialize token crypto: %v", err)
@@ -243,7 +257,10 @@ func NormalizeAddress(addr string) string {
 // and suggested next steps for using the commands.
 func (ft *FastlyTool) makeListCommandsHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return executeWithSetupCheck(ctx, ft, "list_commands", func() (*mcp.CallToolResult, error) {
+		start := time.Now()
+		params := request.GetArguments()
+
+		result, err := executeWithSetupCheck(ctx, ft, "list_commands", func() (*mcp.CallToolResult, error) {
 			commands := fastly.GetCommandList()
 
 			return &mcp.CallToolResult{
@@ -255,6 +272,11 @@ func (ft *FastlyTool) makeListCommandsHandler() server.ToolHandlerFunc {
 				},
 			}, nil
 		})
+
+		// Log the command
+		LogCommand("fastly_list_commands", params, result, err, time.Since(start))
+
+		return result, err
 	}
 }
 
@@ -264,13 +286,16 @@ func (ft *FastlyTool) makeListCommandsHandler() server.ToolHandlerFunc {
 // The command parameter can be a single command or a command path (e.g., "service list").
 func (ft *FastlyTool) makeDescribeHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		start := time.Now()
 		params := request.GetArguments()
 		command, ok := params["command"].(string)
 		if !ok {
-			return nil, fmt.Errorf("command parameter must be a string")
+			err := fmt.Errorf("command parameter must be a string")
+			LogCommand("fastly_describe", params, nil, err, time.Since(start))
+			return nil, err
 		}
 
-		return executeWithSetupCheck(ctx, ft, "describe", func() (*mcp.CallToolResult, error) {
+		result, err := executeWithSetupCheck(ctx, ft, "describe", func() (*mcp.CallToolResult, error) {
 			// Decrypt any encrypted tokens in the command string
 			if tokenCrypto != nil && tokenCrypto.Enabled {
 				command = tokenCrypto.DecryptTokensInString(command)
@@ -288,6 +313,11 @@ func (ft *FastlyTool) makeDescribeHandler() server.ToolHandlerFunc {
 				},
 			}, nil
 		})
+
+		// Log the command
+		LogCommand("fastly_describe", params, result, err, time.Since(start))
+
+		return result, err
 	}
 }
 
@@ -301,14 +331,17 @@ func (ft *FastlyTool) makeDescribeHandler() server.ToolHandlerFunc {
 // The handler enforces safety measures to prevent accidental destructive operations.
 func (ft *FastlyTool) makeExecuteHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		start := time.Now()
 		params := request.GetArguments()
 
 		command, ok := params["command"].(string)
 		if !ok {
-			return nil, fmt.Errorf("command parameter must be a string")
+			err := fmt.Errorf("command parameter must be a string")
+			LogCommand("fastly_execute", params, nil, err, time.Since(start))
+			return nil, err
 		}
 
-		return executeWithSetupCheck(ctx, ft, "execute", func() (*mcp.CallToolResult, error) {
+		result, err := executeWithSetupCheck(ctx, ft, "execute", func() (*mcp.CallToolResult, error) {
 			// Decrypt any encrypted tokens in the command string
 			if tokenCrypto != nil && tokenCrypto.Enabled {
 				command = tokenCrypto.DecryptTokensInString(command)
@@ -366,5 +399,10 @@ func (ft *FastlyTool) makeExecuteHandler() server.ToolHandlerFunc {
 				},
 			}, nil
 		})
+
+		// Log the command
+		LogCommand("fastly_execute", params, result, err, time.Since(start))
+
+		return result, err
 	}
 }

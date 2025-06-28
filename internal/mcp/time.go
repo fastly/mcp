@@ -36,6 +36,9 @@ type TimeInfo struct {
 //   - Date/time calculations
 //   - Scheduling operations
 func getCurrentTime(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	start := time.Now()
+	params := request.GetArguments()
+
 	now := time.Now()
 
 	zone, offset := now.Zone()
@@ -61,15 +64,21 @@ func getCurrentTime(ctx context.Context, request mcp.CallToolRequest) (*mcp.Call
 
 	data, err := json.MarshalIndent(timeInfo, "", "  ")
 	if err != nil {
+		LogCommand("current_time", params, nil, err, time.Since(start))
 		return nil, err
 	}
 
-	return &mcp.CallToolResult{
+	result := &mcp.CallToolResult{
 		Content: []mcp.Content{
 			&mcp.TextContent{
 				Type: "text",
 				Text: string(data),
 			},
 		},
-	}, nil
+	}
+
+	// Log the command
+	LogCommand("current_time", params, result, nil, time.Since(start))
+
+	return result, nil
 }
