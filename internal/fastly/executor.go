@@ -68,6 +68,18 @@ func ExecuteCommand(req types.CommandRequest) types.CommandResponse {
 		validator = validation.NewValidator()
 	}
 
+	// Split command into parts if it contains spaces
+	// This supports both syntaxes:
+	// 1. {"command": "service", "args": ["list"]}
+	// 2. {"command": "service list"}
+	commandParts := strings.Fields(req.Command)
+	if len(commandParts) > 1 {
+		// Extract the actual command (first part)
+		req.Command = commandParts[0]
+		// Prepend the remaining parts to args
+		req.Args = append(commandParts[1:], req.Args...)
+	}
+
 	if err := validator.ValidateCommand(req.Command); err != nil {
 		return ValidationError(req.Command, err)
 	}

@@ -161,3 +161,84 @@ func TestUserReviewedFlagFiltering(t *testing.T) {
 		t.Error("Command line should contain --json flag")
 	}
 }
+
+func TestCommandSplitting(t *testing.T) {
+	// This test verifies that commands with spaces are properly split
+	tests := []struct {
+		name            string
+		req             types.CommandRequest
+		expectedCommand string
+		expectedArgs    []string
+		expectError     bool
+	}{
+		{
+			name: "command with space - backend list",
+			req: types.CommandRequest{
+				Command: "backend list",
+				Flags:   []types.Flag{{Name: "service-id", Value: "test"}},
+			},
+			expectedCommand: "backend",
+			expectedArgs:    []string{"list"},
+			expectError:     false,
+		},
+		{
+			name: "command with multiple spaces",
+			req: types.CommandRequest{
+				Command: "service version list",
+			},
+			expectedCommand: "service",
+			expectedArgs:    []string{"version", "list"},
+			expectError:     false,
+		},
+		{
+			name: "single command without spaces",
+			req: types.CommandRequest{
+				Command: "service",
+				Args:    []string{"list"},
+			},
+			expectedCommand: "service",
+			expectedArgs:    []string{"list"},
+			expectError:     false,
+		},
+		{
+			name: "command with space and explicit args",
+			req: types.CommandRequest{
+				Command: "backend list",
+				Args:    []string{"--verbose"},
+			},
+			expectedCommand: "backend",
+			expectedArgs:    []string{"list", "--verbose"},
+			expectError:     false,
+		},
+		{
+			name: "invalid command after splitting",
+			req: types.CommandRequest{
+				Command: "invalid-command list",
+			},
+			expectedCommand: "invalid-command",
+			expectedArgs:    []string{"list"},
+			expectError:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ExecuteCommand(tt.req)
+
+			if tt.expectError {
+				if result.Success {
+					t.Error("Expected command to fail due to invalid command")
+				}
+				if !strings.Contains(result.Error, "not in the allowed list") {
+					t.Errorf("Expected 'not in the allowed list' error, got: %s", result.Error)
+				}
+			} else {
+				// For valid commands, we can't easily verify the internal splitting
+				// but we can check that the command doesn't fail due to validation
+				if !result.Success && strings.Contains(result.Error, "not in the allowed list") {
+					t.Errorf("Command should have been split properly, but got validation error: %s", result.Error)
+				}
+			}
+		})
+	}
+}
