@@ -221,6 +221,23 @@ func RunHTTPServer(addr string, useSSE bool, logCommandsFile string) {
 	}
 }
 
+// Helper functions to convert between internal and external flag types
+func convertFlags(flags []types.Flag) []Flag {
+	result := make([]Flag, len(flags))
+	for i, f := range flags {
+		result[i] = Flag{Name: f.Name, Value: f.Value}
+	}
+	return result
+}
+
+func convertFlagsBack(flags []Flag) []types.Flag {
+	result := make([]types.Flag, len(flags))
+	for i, f := range flags {
+		result[i] = types.Flag{Name: f.Name, Value: f.Value}
+	}
+	return result
+}
+
 // NormalizeAddress normalizes the HTTP server address to ensure a valid host:port format.
 // It handles various input formats:
 //   - Empty string -> "127.0.0.1:8080"
@@ -382,13 +399,30 @@ func (ft *FastlyTool) makeExecuteHandler() server.ToolHandlerFunc {
 				}
 			}
 
+			// Apply intelligent preprocessing
+			processedCmd, processedArgs, processedFlags, err := IntelligentPreprocess(command, args, convertFlags(flags))
+			if err != nil {
+				return nil, fmt.Errorf("preprocessing failed: %w", err)
+			}
+
 			cmdReq := types.CommandRequest{
-				Command: command,
-				Args:    args,
-				Flags:   flags,
+				Command: processedCmd,
+				Args:    processedArgs,
+				Flags:   convertFlagsBack(processedFlags),
 			}
 
 			response := fastly.ExecuteCommand(cmdReq)
+
+			// Extract context from the response for future use
+			ExtractContext(processedCmd, processedArgs, processedFlags, response, response.Success)
+
+			// Enhance error responses with intelligent suggestions
+			if !response.Success && response.Error != "" {
+				suggestions := GetSuggestions(response.Error)
+				if len(suggestions) > 0 {
+					response.NextSteps = append(suggestions, response.NextSteps...)
+				}
+			}
 
 			return &mcp.CallToolResult{
 				Content: []mcp.Content{
