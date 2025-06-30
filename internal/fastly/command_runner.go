@@ -3,10 +3,13 @@ package fastly
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/fastly/mcp/internal/version"
 )
 
 // CommandRunConfig holds configuration for executing a command
@@ -42,8 +45,8 @@ func RunFastlyCommand(config CommandRunConfig) CommandRunResult {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	// Set environment with FASTLY_CLI_ADDON=mcp and any additional env vars
-	env := append(os.Environ(), "FASTLY_CLI_ADDON=mcp")
+	// Set environment with FASTLY_CLI_ADDON=mcp/version and any additional env vars
+	env := append(os.Environ(), fmt.Sprintf("FASTLY_CLI_ADDON=mcp/%s", version.GetVersion()))
 	if config.Env != nil {
 		env = append(env, config.Env...)
 	}

@@ -90,6 +90,17 @@ func TestValidateCLIArgs(t *testing.T) {
 			errorMsg:  "unknown command",
 		},
 		{
+			name:      "Version command",
+			args:      []string{"version"},
+			wantError: false,
+		},
+		{
+			name:      "Version with extra args",
+			args:      []string{"version", "extra"},
+			wantError: true,
+			errorMsg:  "does not accept additional arguments",
+		},
+		{
 			name:      "--help flag",
 			args:      []string{"--help"},
 			wantError: false,
@@ -219,6 +230,14 @@ func TestMainIntegration(t *testing.T) {
 			expectError: false,
 			expectContains: []string{
 				"Fastly MCP Server",
+			},
+		},
+		{
+			name:        "Version command",
+			args:        []string{"version"},
+			expectError: false,
+			expectContains: []string{
+				"fastly-mcp version",
 			},
 		},
 		{

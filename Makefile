@@ -13,7 +13,8 @@ GOVET=$(GOCMD) vet
 GOLINT=golangci-lint
 
 # Build flags
-LDFLAGS=-ldflags "-s -w"
+VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+LDFLAGS=-ldflags "-s -w -X github.com/fastly/mcp/internal/version.Version=$(VERSION)"
 
 .PHONY: all build test clean fmt lint vet tidy help
 

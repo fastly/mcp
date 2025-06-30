@@ -3,12 +3,14 @@ package fastly
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/fastly/mcp/internal/types"
 	"github.com/fastly/mcp/internal/validation"
+	"github.com/fastly/mcp/internal/version"
 )
 
 // commandExecutor is a function type for executing commands.
@@ -24,8 +26,8 @@ var defaultCommandExecutor commandExecutor = func(ctx context.Context, name stri
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	// Set environment with FASTLY_CLI_ADDON=mcp
-	cmd.Env = append(os.Environ(), "FASTLY_CLI_ADDON=mcp")
+	// Set environment with FASTLY_CLI_ADDON=mcp/version
+	cmd.Env = append(os.Environ(), fmt.Sprintf("FASTLY_CLI_ADDON=mcp/%s", version.GetVersion()))
 
 	err := cmd.Run()
 	// Fastly outputs help to stderr

@@ -21,6 +21,7 @@ import (
 	"github.com/fastly/mcp/internal/mcp"
 	"github.com/fastly/mcp/internal/types"
 	"github.com/fastly/mcp/internal/validation"
+	"github.com/fastly/mcp/internal/version"
 )
 
 // main is the application entry point that determines the execution mode based on command-line arguments.
@@ -115,7 +116,7 @@ func main() {
 			useSSE = true
 		case "help", "--help", "-h":
 			showHelp = true
-		case "list-commands", "execute", "describe":
+		case "list-commands", "execute", "describe", "version":
 			// For CLI mode commands, validate all remaining arguments
 			// Need to reconstruct the command args for validation
 			cmdArgs := []string{arg}
@@ -184,7 +185,7 @@ func validateCLIArgs(args []string) error {
 
 	command := args[0]
 	switch command {
-	case "help", "--help", "-h", "list-commands":
+	case "help", "--help", "-h", "list-commands", "version":
 		// These commands don't accept additional arguments
 		if len(args) > 1 {
 			return fmt.Errorf("command '%s' does not accept additional arguments", command)
@@ -279,9 +280,13 @@ func runCLIMode(sanitize bool, encryptTokens bool) {
 		}
 	}
 
-	// Handle help commands without requiring Fastly CLI
+	// Handle help and version commands without requiring Fastly CLI
 	if command == "help" || command == "--help" || command == "-h" {
 		printUsage()
+		return
+	}
+	if command == "version" {
+		printVersion()
 		return
 	}
 	// Validate Fastly CLI is installed and authenticated
@@ -394,6 +399,7 @@ Options:
 
 CLI Commands:
   help            Show this help message
+  version         Show the version of fastly-mcp
   list-commands   List all available Fastly operations in JSON format
   execute <json>  Execute a Fastly operation from JSON specification
   describe <cmd>  Get detailed help for a specific operation in JSON format
@@ -416,6 +422,11 @@ Example usage:
   fastly-mcp --allowed-commands cmds.txt execute '{"command":"version","args":[]}'
 `
 	fmt.Print(usage)
+}
+
+// printVersion displays the current version of fastly-mcp
+func printVersion() {
+	fmt.Printf("fastly-mcp version %s\n", version.GetVersion())
 }
 
 // printExecuteHelp outputs a structured help response for the execute command,
