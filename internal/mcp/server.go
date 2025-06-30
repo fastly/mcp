@@ -279,15 +279,7 @@ func (ft *FastlyTool) makeListCommandsHandler() server.ToolHandlerFunc {
 
 		result, err := executeWithSetupCheck(ctx, ft, "list_commands", func() (*mcp.CallToolResult, error) {
 			commands := fastly.GetCommandList()
-
-			return &mcp.CallToolResult{
-				Content: []mcp.Content{
-					&mcp.TextContent{
-						Type: "text",
-						Text: toJSON(commands),
-					},
-				},
-			}, nil
+			return newSuccessResult(commands), nil
 		})
 
 		// Log the command
@@ -321,14 +313,7 @@ func (ft *FastlyTool) makeDescribeHandler() server.ToolHandlerFunc {
 			parts := strings.Fields(command)
 			helpInfo := fastly.DescribeCommand(parts)
 
-			return &mcp.CallToolResult{
-				Content: []mcp.Content{
-					&mcp.TextContent{
-						Type: "text",
-						Text: toJSON(helpInfo),
-					},
-				},
-			}, nil
+			return newSuccessResult(helpInfo), nil
 		})
 
 		// Log the command
@@ -424,14 +409,11 @@ func (ft *FastlyTool) makeExecuteHandler() server.ToolHandlerFunc {
 				}
 			}
 
-			return &mcp.CallToolResult{
-				Content: []mcp.Content{
-					&mcp.TextContent{
-						Type: "text",
-						Text: toJSON(response),
-					},
-				},
-			}, nil
+			// Use appropriate result helper based on success status
+			if response.Success {
+				return newSuccessResult(response), nil
+			}
+			return newErrorResult(response), nil
 		})
 
 		// Log the command

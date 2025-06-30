@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -62,20 +61,7 @@ func getCurrentTime(ctx context.Context, request mcp.CallToolRequest) (*mcp.Call
 		TimeOffset: offsetStr,
 	}
 
-	data, err := json.MarshalIndent(timeInfo, "", "  ")
-	if err != nil {
-		LogCommand("current_time", params, nil, err, time.Since(start))
-		return nil, err
-	}
-
-	result := &mcp.CallToolResult{
-		Content: []mcp.Content{
-			&mcp.TextContent{
-				Type: "text",
-				Text: string(data),
-			},
-		},
-	}
+	result := newSuccessResult(timeInfo)
 
 	// Log the command
 	LogCommand("current_time", params, result, nil, time.Since(start))

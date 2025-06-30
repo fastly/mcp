@@ -14,7 +14,7 @@ import (
 
 // handleSetupError creates a consistent error response for setup failures across all handlers.
 // It analyzes the error message to provide appropriate error codes (cli_not_found, auth_required)
-// and returns a properly formatted MCP CallToolResult with the error details.
+// and returns a properly formatted MCP CallToolResult with the error details and IsError set to true.
 func handleSetupError(err error, command string) *mcp.CallToolResult {
 	errorResponse := fastly.SetupError(command, err)
 
@@ -32,6 +32,7 @@ func handleSetupError(err error, command string) *mcp.CallToolResult {
 				Text: toJSON(errorResponse),
 			},
 		},
+		IsError: true,
 	}
 }
 
@@ -85,4 +86,32 @@ func executeWithSetupCheck(ctx context.Context, ft *FastlyTool, command string, 
 	}
 
 	return handler()
+}
+
+// newErrorResult creates a properly formatted error result with IsError set to true.
+// This helper ensures consistent error handling across all tool handlers.
+func newErrorResult(response interface{}) *mcp.CallToolResult {
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{
+				Type: "text",
+				Text: toJSON(response),
+			},
+		},
+		IsError: true,
+	}
+}
+
+// newSuccessResult creates a properly formatted success result.
+// This helper ensures consistent response handling across all tool handlers.
+func newSuccessResult(response interface{}) *mcp.CallToolResult {
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{
+				Type: "text",
+				Text: toJSON(response),
+			},
+		},
+		IsError: false,
+	}
 }
