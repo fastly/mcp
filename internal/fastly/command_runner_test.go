@@ -19,6 +19,7 @@ func TestRunFastlyCommand_SetsCorrectEnvironment(t *testing.T) {
 	// Create a mock fastly command that prints environment variables
 	mockScript := `#!/bin/sh
 echo "FASTLY_CLI_ADDON=$FASTLY_CLI_ADDON"
+echo "FASTLY_USER_AGENT_EXTENSION=$FASTLY_USER_AGENT_EXTENSION"
 `
 
 	// Create a temporary directory for our mock
@@ -54,6 +55,11 @@ echo "FASTLY_CLI_ADDON=$FASTLY_CLI_ADDON"
 	if !strings.Contains(result.Stdout, "FASTLY_CLI_ADDON="+expectedValue) {
 		t.Errorf("Expected FASTLY_CLI_ADDON=%s, got: %s", expectedValue, result.Stdout)
 	}
+
+	// Verify FASTLY_USER_AGENT_EXTENSION contains the same value
+	if !strings.Contains(result.Stdout, "FASTLY_USER_AGENT_EXTENSION="+expectedValue) {
+		t.Errorf("Expected FASTLY_USER_AGENT_EXTENSION=%s, got: %s", expectedValue, result.Stdout)
+	}
 }
 
 func TestRunFastlyCommand_WithAdditionalEnv(t *testing.T) {
@@ -66,6 +72,7 @@ func TestRunFastlyCommand_WithAdditionalEnv(t *testing.T) {
 	// Create a mock fastly command that prints environment variables
 	mockScript := `#!/bin/sh
 echo "FASTLY_CLI_ADDON=$FASTLY_CLI_ADDON"
+echo "FASTLY_USER_AGENT_EXTENSION=$FASTLY_USER_AGENT_EXTENSION"
 echo "CUSTOM_VAR=$CUSTOM_VAR"
 `
 
@@ -102,6 +109,11 @@ echo "CUSTOM_VAR=$CUSTOM_VAR"
 	expectedValue := "mcp/" + version.GetVersion()
 	if !strings.Contains(result.Stdout, "FASTLY_CLI_ADDON="+expectedValue) {
 		t.Errorf("Expected FASTLY_CLI_ADDON=%s, got: %s", expectedValue, result.Stdout)
+	}
+
+	// Verify FASTLY_USER_AGENT_EXTENSION contains the same value
+	if !strings.Contains(result.Stdout, "FASTLY_USER_AGENT_EXTENSION="+expectedValue) {
+		t.Errorf("Expected FASTLY_USER_AGENT_EXTENSION=%s, got: %s", expectedValue, result.Stdout)
 	}
 
 	// Verify custom environment variable is also set

@@ -46,7 +46,10 @@ func RunFastlyCommand(config CommandRunConfig) CommandRunResult {
 	cmd.Stderr = &stderr
 
 	// Set environment with FASTLY_CLI_ADDON=mcp/version and any additional env vars
-	env := append(os.Environ(), fmt.Sprintf("FASTLY_CLI_ADDON=mcp/%s", version.GetVersion()))
+	versionedAddon := fmt.Sprintf("mcp/%s", version.GetVersion())
+	env := append(os.Environ(),
+		fmt.Sprintf("FASTLY_CLI_ADDON=%s", versionedAddon),
+		fmt.Sprintf("FASTLY_USER_AGENT_EXTENSION=%s", versionedAddon))
 	if config.Env != nil {
 		env = append(env, config.Env...)
 	}

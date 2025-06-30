@@ -26,8 +26,11 @@ var defaultCommandExecutor commandExecutor = func(ctx context.Context, name stri
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	// Set environment with FASTLY_CLI_ADDON=mcp/version
-	cmd.Env = append(os.Environ(), fmt.Sprintf("FASTLY_CLI_ADDON=mcp/%s", version.GetVersion()))
+	// Set environment with FASTLY_CLI_ADDON=mcp/version and FASTLY_USER_AGENT_EXTENSION
+	versionedAddon := fmt.Sprintf("mcp/%s", version.GetVersion())
+	cmd.Env = append(os.Environ(),
+		fmt.Sprintf("FASTLY_CLI_ADDON=%s", versionedAddon),
+		fmt.Sprintf("FASTLY_USER_AGENT_EXTENSION=%s", versionedAddon))
 
 	err := cmd.Run()
 	// Fastly outputs help to stderr
