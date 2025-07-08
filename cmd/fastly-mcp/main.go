@@ -37,6 +37,7 @@ func main() {
 		showHelp        bool
 		sanitize        bool
 		allowedCmdsFile string
+		allowedCmds     string
 		encryptTokens   bool
 		logCommandsFile string
 	)
@@ -62,16 +63,30 @@ func main() {
 			encryptTokens = true
 			continue
 		}
-		if arg == "--allowed-commands" {
+		if arg == "--allowed-commands-file" {
 			if allowedCmdsFile != "" {
-				fmt.Fprintf(os.Stderr, "Error: --allowed-commands specified multiple times\n")
+				fmt.Fprintf(os.Stderr, "Error: --allowed-commands-file specified multiple times\n")
 				os.Exit(1)
 			}
 			if i+1 < len(os.Args) && !strings.HasPrefix(os.Args[i+1], "-") {
 				allowedCmdsFile = os.Args[i+1]
 				i++
 			} else {
-				fmt.Fprintf(os.Stderr, "Error: --allowed-commands requires a file path\n")
+				fmt.Fprintf(os.Stderr, "Error: --allowed-commands-file requires a file path\n")
+				os.Exit(1)
+			}
+			continue
+		}
+		if arg == "--allowed-commands" {
+			if allowedCmds != "" {
+				fmt.Fprintf(os.Stderr, "Error: --allowed-commands specified multiple times\n")
+				os.Exit(1)
+			}
+			if i+1 < len(os.Args) && !strings.HasPrefix(os.Args[i+1], "-") {
+				allowedCmds = os.Args[i+1]
+				i++
+			} else {
+				fmt.Fprintf(os.Stderr, "Error: --allowed-commands requires a comma-separated list of commands\n")
 				os.Exit(1)
 			}
 			continue
@@ -151,16 +166,46 @@ func main() {
 	// Set global token encryption option for MCP server
 	fastly.SetTokenEncryptionEnabled(encryptTokens)
 
-	// Load custom allowed commands if specified
+	// Load custom allowed commands from file and/or inline list
+	var allowedCommands map[string]bool
+
+	// Load from file if specified
 	if allowedCmdsFile != "" {
-		allowedCommands, err := validation.LoadAllowedCommandsFromFile(allowedCmdsFile)
+		fileCommands, err := validation.LoadAllowedCommandsFromFile(allowedCmdsFile)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error loading allowed commands: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error loading allowed commands from file: %v\n", err)
 			os.Exit(1)
 		}
+		allowedCommands = fileCommands
+		fmt.Fprintf(os.Stderr, "Loaded %d allowed commands from %s\n", len(fileCommands), allowedCmdsFile)
+	}
+
+	// Parse inline commands if specified
+	if allowedCmds != "" {
+		inlineCommands, err := validation.ParseAllowedCommands(allowedCmds)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error parsing allowed commands: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Merge with existing commands (if any)
+		if allowedCommands == nil {
+			allowedCommands = inlineCommands
+			fmt.Fprintf(os.Stderr, "Loaded %d allowed commands from command line\n", len(inlineCommands))
+		} else {
+			// Merge inline commands with file commands
+			for cmd := range inlineCommands {
+				allowedCommands[cmd] = true
+			}
+			fmt.Fprintf(os.Stderr, "Added %d allowed commands from command line (total: %d)\n",
+				len(inlineCommands), len(allowedCommands))
+		}
+	}
+
+	// Set custom validator if any commands were loaded
+	if allowedCommands != nil {
 		customValidator := validation.NewValidatorWithCommands(allowedCommands)
 		fastly.SetCustomValidator(customValidator)
-		fmt.Fprintf(os.Stderr, "Loaded %d allowed commands from %s\n", len(allowedCommands), allowedCmdsFile)
 	}
 
 	// Show logging status if enabled
@@ -244,9 +289,15 @@ func runCLIMode(sanitize bool, encryptTokens bool) {
 		if os.Args[i] == "--encrypt-tokens" {
 			continue
 		}
-		if os.Args[i] == "--allowed-commands" {
+		if os.Args[i] == "--allowed-commands-file" {
 			if i+1 < len(os.Args) {
 				i++ // Skip the file argument too
+			}
+			continue
+		}
+		if os.Args[i] == "--allowed-commands" {
+			if i+1 < len(os.Args) {
+				i++ // Skip the commands argument too
 			}
 			continue
 		}
@@ -263,21 +314,55 @@ func runCLIMode(sanitize bool, encryptTokens bool) {
 		}
 	}
 
-	// Check if allowed commands file was specified in CLI mode
-	// This needs to happen before help command check to ensure file exists
+	// Check if allowed commands were specified in CLI mode
+	// This needs to happen before help command check to ensure proper loading
+	var cliAllowedCommands map[string]bool
+
+	// First check for file-based commands
 	for i := 1; i < len(os.Args); i++ {
-		if os.Args[i] == "--allowed-commands" && i+1 < len(os.Args) {
+		if os.Args[i] == "--allowed-commands-file" && i+1 < len(os.Args) {
 			allowedCmdsFile := os.Args[i+1]
-			allowedCommands, err := validation.LoadAllowedCommandsFromFile(allowedCmdsFile)
+			fileCommands, err := validation.LoadAllowedCommandsFromFile(allowedCmdsFile)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error loading allowed commands: %v\n", err)
+				fmt.Fprintf(os.Stderr, "Error loading allowed commands from file: %v\n", err)
 				os.Exit(1)
 			}
-			customValidator := validation.NewValidatorWithCommands(allowedCommands)
-			fastly.SetCustomValidator(customValidator)
-			fmt.Fprintf(os.Stderr, "Loaded %d allowed commands from %s\n", len(allowedCommands), allowedCmdsFile)
+			cliAllowedCommands = fileCommands
+			fmt.Fprintf(os.Stderr, "Loaded %d allowed commands from %s\n", len(fileCommands), allowedCmdsFile)
 			break
 		}
+	}
+
+	// Then check for inline commands
+	for i := 1; i < len(os.Args); i++ {
+		if os.Args[i] == "--allowed-commands" && i+1 < len(os.Args) {
+			allowedCmdsList := os.Args[i+1]
+			inlineCommands, err := validation.ParseAllowedCommands(allowedCmdsList)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error parsing allowed commands: %v\n", err)
+				os.Exit(1)
+			}
+
+			// Merge with existing commands (if any)
+			if cliAllowedCommands == nil {
+				cliAllowedCommands = inlineCommands
+				fmt.Fprintf(os.Stderr, "Loaded %d allowed commands from command line\n", len(inlineCommands))
+			} else {
+				// Merge inline commands with file commands
+				for cmd := range inlineCommands {
+					cliAllowedCommands[cmd] = true
+				}
+				fmt.Fprintf(os.Stderr, "Added %d allowed commands from command line (total: %d)\n",
+					len(inlineCommands), len(cliAllowedCommands))
+			}
+			break
+		}
+	}
+
+	// Set custom validator if any commands were loaded
+	if cliAllowedCommands != nil {
+		customValidator := validation.NewValidatorWithCommands(cliAllowedCommands)
+		fastly.SetCustomValidator(customValidator)
 	}
 
 	// Handle help and version commands without requiring Fastly CLI
@@ -393,7 +478,8 @@ Options:
   --http [addr:port]       Start HTTP server (default: 127.0.0.1:8080)
   --sse                    Use SSE transport instead of StreamableHTTP
   --sanitize               Enable sanitization of sensitive data (PII, tokens, secrets)
-  --allowed-commands file  Use custom allowed commands list from file
+  --allowed-commands-file file  Use custom allowed commands list from file
+  --allowed-commands cmds  Use custom allowed commands (comma-separated list)
   --encrypt-tokens         Encrypt secret tokens in tool responses (for LLM safety)
   --log-commands file      Log MCP commands to the specified file
 
@@ -419,7 +505,9 @@ Example usage:
   fastly-mcp execute '{"command":"version","args":[]}'
   fastly-mcp describe service
   fastly-mcp list-commands
-  fastly-mcp --allowed-commands cmds.txt execute '{"command":"version","args":[]}'
+  fastly-mcp --allowed-commands-file cmds.txt execute '{"command":"version","args":[]}'
+  fastly-mcp --allowed-commands service,stats,version execute '{"command":"service","args":["list"]}'
+  fastly-mcp --allowed-commands-file cmds.txt --allowed-commands whoami,help # Merge both sources
 `
 	fmt.Print(usage)
 }

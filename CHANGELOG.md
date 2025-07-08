@@ -29,7 +29,7 @@
 - Token encryption using FAST (Format-preserving AES-based Secure Tokenization) algorithm
 - Automatic PII sanitization in command outputs
 - Windows platform support
-- `--allowed-commands` option to customize allowed command list
+- `--allowed-commands-file` option to customize allowed command list
 - Security validation for the Fastly CLI binary
 
 ### Changed

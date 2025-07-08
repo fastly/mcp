@@ -74,3 +74,48 @@ func LoadAllowedCommandsFromFile(filename string) (map[string]bool, error) {
 
 	return allowedCommands, nil
 }
+
+// ParseAllowedCommands parses a comma-separated list of allowed commands.
+// The commands must follow the same validation rules as file-based commands:
+//   - Only alphanumeric characters, hyphens, and underscores allowed
+//   - Maximum length of 50 characters per command
+//   - Empty commands (e.g., from "cmd1,,cmd2") are ignored
+//
+// Example input: "service,backend,stats,version"
+// Returns a map of command names for quick lookup.
+func ParseAllowedCommands(cmdList string) (map[string]bool, error) {
+	if cmdList == "" {
+		return nil, fmt.Errorf("command list is empty")
+	}
+
+	allowedCommands := make(map[string]bool)
+	commands := strings.Split(cmdList, ",")
+
+	for i, cmd := range commands {
+		// Trim whitespace
+		cmd = strings.TrimSpace(cmd)
+
+		// Skip empty commands (from trailing commas or double commas)
+		if cmd == "" {
+			continue
+		}
+
+		// Validate command format
+		if len(cmd) > MaxCommandLength {
+			return nil, fmt.Errorf("command at position %d exceeds maximum length of %d characters", i+1, MaxCommandLength)
+		}
+
+		// Check format - commands should only contain alphanumeric, hyphens, and underscores
+		if !commandFormatRegex.MatchString(cmd) {
+			return nil, fmt.Errorf("invalid command format at position %d: %s", i+1, cmd)
+		}
+
+		allowedCommands[cmd] = true
+	}
+
+	if len(allowedCommands) == 0 {
+		return nil, fmt.Errorf("no valid commands found in list")
+	}
+
+	return allowedCommands, nil
+}

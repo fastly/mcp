@@ -433,16 +433,33 @@ Comprehensive defenses against [prompt injection attacks](https://simonwillison.
 
 ### Custom Command Allowlist
 
-Override the default allowed commands:
+Override the default allowed commands using a file or inline specification:
 
+#### From file:
 ```sh
-fastly-mcp --allowed-commands /path/to/allowed-commands.txt
+fastly-mcp --allowed-commands-file /path/to/allowed-commands.txt
 ```
 
 Format (see `example-allowed-commands.txt`):
 - One command per line
 - Lines starting with `#` are comments
 - Empty lines ignored
+
+#### Inline specification:
+```sh
+fastly-mcp --allowed-commands service,stats,version
+```
+
+- Comma-separated list of commands
+- No spaces between commands (unless quoted)
+
+#### Combining both sources:
+```sh
+# Merges commands from both file and inline list
+fastly-mcp --allowed-commands-file base.txt --allowed-commands whoami,help
+```
+
+When both options are specified, commands from both sources are merged (union)
 
 ### PII Sanitization (Optional)
 
@@ -479,14 +496,17 @@ How it works:
 ### Combining Options
 
 ```sh
-# All features
-fastly-mcp --http --sanitize --encrypt-tokens --allowed-commands custom.txt
+# All features with file-based allowlist
+fastly-mcp --http --sanitize --encrypt-tokens --allowed-commands-file custom.txt
 
-# HTTP with encryption
-fastly-mcp --http :9000 --encrypt-tokens
+# All features with inline allowlist
+fastly-mcp --http --sanitize --encrypt-tokens --allowed-commands service,stats,version
 
-# Testing with sanitization
-fastly-mcp --sanitize execute '{"command":"service","args":["list"]}'
+# HTTP with encryption and merged allowlists
+fastly-mcp --http :9000 --encrypt-tokens --allowed-commands-file base.txt --allowed-commands whoami
+
+# Testing with sanitization and inline commands
+fastly-mcp --sanitize --allowed-commands service execute '{"command":"service","args":["list"]}'
 ```
 
 ## 🤖 Model Recommendations

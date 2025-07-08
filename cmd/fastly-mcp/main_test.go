@@ -289,27 +289,27 @@ func TestMainIntegration(t *testing.T) {
 			},
 		},
 		{
-			name:        "--allowed-commands without file",
-			args:        []string{"--allowed-commands"},
+			name:        "--allowed-commands-file without file",
+			args:        []string{"--allowed-commands-file"},
 			expectError: true,
 			expectContains: []string{
-				"--allowed-commands requires a file path",
+				"--allowed-commands-file requires a file path",
 			},
 		},
 		{
-			name:        "--allowed-commands with flag as file",
-			args:        []string{"--allowed-commands", "--sanitize"},
+			name:        "--allowed-commands-file with flag as file",
+			args:        []string{"--allowed-commands-file", "--sanitize"},
 			expectError: true,
 			expectContains: []string{
-				"--allowed-commands requires a file path",
+				"--allowed-commands-file requires a file path",
 			},
 		},
 		{
-			name:        "Multiple --allowed-commands flags",
-			args:        []string{"--allowed-commands", "file1.txt", "--allowed-commands", "file2.txt"},
+			name:        "Multiple --allowed-commands-file flags",
+			args:        []string{"--allowed-commands-file", "file1.txt", "--allowed-commands-file", "file2.txt"},
 			expectError: true,
 			expectContains: []string{
-				"--allowed-commands specified multiple times",
+				"--allowed-commands-file specified multiple times",
 			},
 		},
 	}
@@ -552,7 +552,7 @@ func TestAllowedCommandsFileIntegration(t *testing.T) {
 	_ = tmpFile.Close()
 
 	t.Run("Load custom allowed commands", func(t *testing.T) {
-		cmd := exec.Command(binary, "--allowed-commands", tmpFile.Name(), "help")
+		cmd := exec.Command(binary, "--allowed-commands-file", tmpFile.Name(), "help")
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
@@ -578,7 +578,7 @@ func TestAllowedCommandsFileIntegration(t *testing.T) {
 	})
 
 	t.Run("Non-existent allowed commands file", func(t *testing.T) {
-		cmd := exec.Command(binary, "--allowed-commands", "/non/existent/file.txt", "help")
+		cmd := exec.Command(binary, "--allowed-commands-file", "/non/existent/file.txt", "help")
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
