@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.5] - 2025-07-10
+
+### Added
+- Version command to display the current build version
+- Command logging functionality for debugging and auditing
+- Enhanced error handling with intelligent suggestions for common mistakes
+- FASTLY_USER_AGENT_EXTENSION environment variable for better API tracking
+
+### Changed
+- Renamed `--allowed-commands` flag to `--allowed-command-file` for clarity
+- Improved error messages: "not allowed" replaced with "not available" for better user experience
+- Enhanced command parsing with shared logic for splitting commands into parts
+- Updated documentation to recommend jan-nano-128k as a local lightweight model
+
+### Fixed
+- Command splitting edge cases to handle complex command structures properly
+
 ## [0.1.4] - 2025-06-27
 
 ### Changed
