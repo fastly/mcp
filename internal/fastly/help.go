@@ -25,8 +25,8 @@ func DescribeCommand(cmdPath []string) types.HelpInfo {
 		if err := validator.ValidateCommand(cmdPath[0]); err != nil {
 			return types.HelpInfo{
 				Command:      strings.Join(cmdPath, " "),
-				Description:  "Command not allowed",
-				Instructions: fmt.Sprintf("The command '%s' is not allowed for security reasons.", cmdPath[0]),
+				Description:  "Command not available",
+				Instructions: fmt.Sprintf("The command '%s' is not available.", cmdPath[0]),
 				NextSteps: []string{
 					"Use the fastly_list_commands tool to see available commands",
 				},
