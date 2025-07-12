@@ -122,6 +122,10 @@ func CreateServer() (*server.MCPServer, error) {
 					Properties: map[string]interface{}{},
 				},
 			}, getCurrentTime)
+
+			s.AddPrompt(mcp.NewPrompt("system_prompt",
+				mcp.WithPromptDescription("Returns the Fastly MCP system prompt that describes available tools and workflow"),
+			), handleSystemPrompt)
 		},
 	)
 
@@ -421,4 +425,62 @@ func (ft *FastlyTool) makeExecuteHandler() server.ToolHandlerFunc {
 
 		return result, err
 	}
+}
+
+// handleSystemPrompt returns the system prompt content for Fastly MCP
+func handleSystemPrompt(ctx context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+	systemPromptContent := `You have access to Fastly's CDN/edge platform via MCP tools that wrap the Fastly CLI.
+
+#### Tools:
+- **` + "`fastly_list_commands`" + `** - List available commands
+- **` + "`fastly_describe [command]`" + `** - Get command details/parameters
+- **` + "`fastly_execute`" + `** - Run commands with parameters
+- **` + "`current_time`" + `** - Get timestamps
+
+#### Core Operations:
+- **Services**: Create/update/list CDN services, manage versions
+- **Edge Config**: VCL, ACLs, dictionaries, Compute
+- **Content**: Backends, domains, caching, purging
+- **Security**: TLS, secrets, access controls
+- **Monitoring**: Stats, logs, alerts
+
+#### Critical Rules:
+1. **ALWAYS use ` + "`fastly_describe`" + ` before executing any unfamiliar command**
+2. **Destructive operations require ` + "`--user-reviewed: true`" + `** flag after human approval:
+   - ` + "`delete`" + `, ` + "`remove`" + `, ` + "`purge`" + `, ` + "`create`" + `, ` + "`update`" + ` commands
+   - Always explain impact and get human confirmation first
+3. **Use ` + "`--json`" + ` format** for parsing
+4. **Most commands need ` + "`--service-id`" + `**
+5. **Clone versions before changes**
+6. Use ` + "`current_time`" + ` before operations that need timestamps
+
+#### Workflow:
+
+~~~
+# Discover
+fastly_describe command="service list"
+
+# Execute (safe)
+fastly_execute command="service list" parameters={"format": "json"}
+
+# Execute (destructive - needs human review)
+fastly_execute command="cache purge" parameters={
+  "service-id": "ABC123",
+  "key": "/api/*",
+  "user-reviewed": true
+}
+~~~`
+
+	return &mcp.GetPromptResult{
+		Description: "Fastly MCP system prompt describing available tools and workflow",
+		Messages: []mcp.PromptMessage{
+			{
+				Role: mcp.RoleUser,
+				Content: mcp.TextContent{
+					Type: "text",
+					Text: systemPromptContent,
+				},
+			},
+		},
+	}, nil
 }
