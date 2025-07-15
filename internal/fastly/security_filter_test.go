@@ -135,11 +135,11 @@ COMMANDS
 			result := DescribeCommand(tt.cmdPath)
 
 			if tt.expectError {
-				if result.Description != "Command not allowed" {
-					t.Errorf("Expected 'Command not allowed' description, got '%s'", result.Description)
+				if result.Description != "Command not available" {
+					t.Errorf("Expected 'Command not available' description, got '%s'", result.Description)
 				}
-				if !strings.Contains(result.Instructions, tt.errorMsg) {
-					t.Errorf("Expected instructions to contain '%s', got '%s'", tt.errorMsg, result.Instructions)
+				if !strings.Contains(result.Instructions, "The command '"+tt.cmdPath[0]+"' is not available.") {
+					t.Errorf("Expected instructions to contain 'The command ''%s'' is not available.', got '%s'", tt.cmdPath[0], result.Instructions)
 				}
 			} else {
 				if result.Description == "Command not allowed" {
