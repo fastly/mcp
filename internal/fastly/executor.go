@@ -104,6 +104,19 @@ func ExecuteCommand(req types.CommandRequest) types.CommandResponse {
 		}
 	}
 
+	// Check if the command-args combination is denied
+	if validator.IsDenied(req.Command, req.Args) {
+		fullCommand := req.Command
+		if len(req.Args) > 0 {
+			fullCommand += " " + req.Args[0]
+		}
+		return types.CommandResponse{
+			Success:   false,
+			Error:     fmt.Sprintf("The '%s' command is not available", fullCommand),
+			ErrorCode: "COMMAND_NOT_AVAILABLE",
+		}
+	}
+
 	cmdStr := req.Command
 	if len(req.Args) > 0 {
 		cmdStr += " " + strings.Join(req.Args, " ")

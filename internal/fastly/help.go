@@ -179,10 +179,20 @@ func parseHelpOutput(command string, helpText string) types.HelpInfo {
 					// This is a new command
 					parts := strings.Fields(trimmed)
 					if len(parts) >= 2 {
-						info.Subcommands = append(info.Subcommands, types.SubcommandInfo{
-							Name:        parts[0],
-							Description: strings.Join(parts[1:], " "),
-						})
+						// Check if this subcommand is denied
+						validator := globalValidator
+						if validator == nil {
+							validator = validation.NewValidator()
+						}
+
+						// Build args to check against denylist
+						checkArgs := []string{parts[0]}
+						if !validator.IsDenied(command, checkArgs) {
+							info.Subcommands = append(info.Subcommands, types.SubcommandInfo{
+								Name:        parts[0],
+								Description: strings.Join(parts[1:], " "),
+							})
+						}
 					}
 				}
 			}

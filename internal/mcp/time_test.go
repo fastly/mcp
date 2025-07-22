@@ -20,7 +20,7 @@ func TestGetCurrentTime(t *testing.T) {
 		t.Fatal("getCurrentTime returned nil result")
 	}
 
-	if len(result.Content) == 0 {
+	if result == nil || len(result.Content) == 0 {
 		t.Fatal("getCurrentTime returned empty content")
 	}
 

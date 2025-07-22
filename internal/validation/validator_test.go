@@ -11,10 +11,10 @@ func TestNewValidator(t *testing.T) {
 	if v == nil {
 		t.Fatal("NewValidator returned nil")
 	}
-	if v.allowedCommands == nil {
+	if v == nil || v.allowedCommands == nil {
 		t.Fatal("allowedCommands map not initialized")
 	}
-	if v.flagNameRegex == nil {
+	if v == nil || v.flagNameRegex == nil {
 		t.Fatal("flagNameRegex not initialized")
 	}
 }
@@ -716,5 +716,196 @@ func BenchmarkValidatePath(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = v.ValidatePath(paths[i%len(paths)])
+	}
+}
+
+// Test denylist functionality
+func TestIsDenied(t *testing.T) {
+	// Test default denied commands
+	v := NewValidator()
+
+	tests := []struct {
+		name       string
+		command    string
+		args       []string
+		wantDenied bool
+	}{
+		// Default denied command - stats realtime
+		{"stats realtime denied", "stats", []string{"realtime"}, true},
+		{"stats realtime with more args", "stats", []string{"realtime", "--json"}, true},
+		{"stats historical allowed", "stats", []string{"historical"}, false},
+		{"stats regions allowed", "stats", []string{"regions"}, false},
+		{"stats alone allowed", "stats", []string{}, false},
+
+		// Default denied command - log-tail
+		{"log-tail denied", "log-tail", []string{}, true},
+		{"log-tail with args denied", "log-tail", []string{"--service-id", "abc123"}, true},
+
+		// Other commands should not be denied
+		{"service list allowed", "service", []string{"list"}, false},
+		{"backend create allowed", "backend", []string{"create"}, false},
+		{"compute deploy allowed", "compute", []string{"deploy"}, false},
+		{"logging allowed", "logging", []string{"list"}, false}, // logging is different from log-tail
+
+		// Edge cases
+		{"empty args", "stats", []string{}, false},
+		{"nil args", "stats", nil, false},
+		{"unrelated command", "version", []string{"realtime"}, false}, // realtime as arg to different command
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isDenied := v.IsDenied(tt.command, tt.args)
+			if isDenied != tt.wantDenied {
+				t.Errorf("IsDenied(%q, %v) = %v, want %v", tt.command, tt.args, isDenied, tt.wantDenied)
+			}
+		})
+	}
+}
+
+// Test custom denied commands
+func TestNewValidatorWithCommandsAndDenied(t *testing.T) {
+	allowedCommands := map[string]bool{
+		"service": true,
+		"backend": true,
+		"stats":   true,
+		"compute": true,
+	}
+
+	deniedCommands := map[string]bool{
+		"compute":        true, // Deny entire command
+		"service delete": true, // Deny specific subcommand
+		"backend update": true,
+	}
+
+	v := NewValidatorWithCommandsAndDenied(allowedCommands, deniedCommands)
+
+	tests := []struct {
+		name        string
+		command     string
+		args        []string
+		wantDenied  bool
+		wantAllowed bool // For ValidateCommand check
+	}{
+		// Compute is in both allowed and denied - denied takes precedence
+		{"compute denied entirely", "compute", []string{"deploy"}, true, true},
+		{"compute with any subcommand", "compute", []string{"build"}, true, true},
+
+		// Service is allowed, but delete subcommand is denied
+		{"service delete denied", "service", []string{"delete"}, true, true},
+		{"service list allowed", "service", []string{"list"}, false, true},
+		{"service create allowed", "service", []string{"create"}, false, true},
+
+		// Backend update is denied
+		{"backend update denied", "backend", []string{"update"}, true, true},
+		{"backend create allowed", "backend", []string{"create"}, false, true},
+
+		// Stats has no custom denials
+		{"stats allowed", "stats", []string{"historical"}, false, true},
+
+		// Command not in allowed list
+		{"vcl not allowed", "vcl", []string{"upload"}, false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Check if command is allowed
+			err := v.ValidateCommand(tt.command)
+			if tt.wantAllowed && err != nil {
+				t.Errorf("ValidateCommand(%q) unexpected error: %v", tt.command, err)
+			} else if !tt.wantAllowed && err == nil {
+				t.Errorf("ValidateCommand(%q) expected error, got nil", tt.command)
+			}
+
+			// Check if command-args combination is denied
+			isDenied := v.IsDenied(tt.command, tt.args)
+			if isDenied != tt.wantDenied {
+				t.Errorf("IsDenied(%q, %v) = %v, want %v", tt.command, tt.args, isDenied, tt.wantDenied)
+			}
+		})
+	}
+}
+
+// Test edge cases for IsDenied
+func TestIsDeniedEdgeCases(t *testing.T) {
+	deniedCommands := map[string]bool{
+		"service":           true, // Deny entire command
+		"backend create":    true, // Deny specific subcommand
+		"stats realtime":    true, // Another specific denial
+		"vcl custom upload": true, // This shouldn't work (only first subcommand checked)
+	}
+
+	v := NewValidatorWithCommandsAndDenied(nil, deniedCommands)
+
+	tests := []struct {
+		name       string
+		command    string
+		args       []string
+		wantDenied bool
+	}{
+		// Command-only denials
+		{"service denied with no args", "service", []string{}, true},
+		{"service denied with any args", "service", []string{"list"}, true},
+		{"service denied with multiple args", "service", []string{"list", "--json"}, true},
+
+		// Subcommand denials
+		{"backend create denied", "backend", []string{"create"}, true},
+		{"backend create denied with flags", "backend", []string{"create", "--name", "test"}, true},
+		{"backend list allowed", "backend", []string{"list"}, false},
+		{"backend alone allowed", "backend", []string{}, false},
+
+		// Only first arg is checked for subcommand matching
+		{"vcl custom not checked", "vcl", []string{"custom", "upload"}, false},
+		{"vcl custom allowed", "vcl", []string{"custom"}, false},
+
+		// Case sensitivity
+		{"case sensitive command", "SERVICE", []string{}, false},
+		{"case sensitive subcommand", "stats", []string{"REALTIME"}, false},
+		{"case sensitive exact match", "stats", []string{"realtime"}, true},
+
+		// Special characters (should not match)
+		{"command with special chars", "service;", []string{}, false},
+		{"subcommand with special chars", "backend", []string{"create;"}, false},
+
+		// Empty/nil cases
+		{"empty command", "", []string{"create"}, false},
+		{"nil args with denied command", "service", nil, true},
+		{"empty args with denied subcommand", "backend", []string{}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isDenied := v.IsDenied(tt.command, tt.args)
+			if isDenied != tt.wantDenied {
+				t.Errorf("IsDenied(%q, %v) = %v, want %v", tt.command, tt.args, isDenied, tt.wantDenied)
+			}
+		})
+	}
+}
+
+// Test defaultDeniedCommands
+func TestDefaultDeniedCommands(t *testing.T) {
+	denied := defaultDeniedCommands()
+
+	// Should contain stats realtime
+	if !denied["stats realtime"] {
+		t.Error("defaultDeniedCommands() should contain 'stats realtime'")
+	}
+
+	// Should contain log-tail
+	if !denied["log-tail"] {
+		t.Error("defaultDeniedCommands() should contain 'log-tail'")
+	}
+
+	// Should have exactly 2 entries
+	if len(denied) != 2 {
+		t.Errorf("defaultDeniedCommands() should have 2 entries, got %d", len(denied))
+	}
+
+	// All entries should be non-empty strings
+	for cmd := range denied {
+		if cmd == "" {
+			t.Error("defaultDeniedCommands() contains empty command")
+		}
 	}
 }

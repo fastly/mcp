@@ -1,0 +1,17 @@
+# Example denied commands file for Fastly MCP
+# One command or command-subcommand combination per line
+# Lines starting with # are comments
+
+# Deny specific subcommands
+stats realtime
+service delete
+backend delete
+
+# Deny entire commands
+purge
+log-tail
+
+# You can specify command-subcommand combinations
+compute delete
+vcl delete
+dictionary delete

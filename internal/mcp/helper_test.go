@@ -63,7 +63,7 @@ func TestHandleSetupError(t *testing.T) {
 				t.Fatal("Expected non-nil result")
 			}
 
-			if len(result.Content) == 0 {
+			if result == nil || len(result.Content) == 0 {
 				t.Fatal("Expected content in result")
 			}
 
@@ -364,7 +364,7 @@ func TestExecuteWithSetupCheck(t *testing.T) {
 				if result == nil {
 					t.Fatal("Expected setup error result")
 				}
-				if len(result.Content) == 0 {
+				if result == nil || len(result.Content) == 0 {
 					t.Fatal("Expected content in setup error result")
 				}
 

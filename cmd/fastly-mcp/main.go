@@ -38,6 +38,8 @@ func main() {
 		sanitize        bool
 		allowedCmdsFile string
 		allowedCmds     string
+		deniedCmdsFile  string
+		deniedCmds      string
 		encryptTokens   bool
 		logCommandsFile string
 	)
@@ -87,6 +89,34 @@ func main() {
 				i++
 			} else {
 				fmt.Fprintf(os.Stderr, "Error: --allowed-commands requires a comma-separated list of commands\n")
+				os.Exit(1)
+			}
+			continue
+		}
+		if arg == "--denied-commands-file" {
+			if deniedCmdsFile != "" {
+				fmt.Fprintf(os.Stderr, "Error: --denied-commands-file specified multiple times\n")
+				os.Exit(1)
+			}
+			if i+1 < len(os.Args) && !strings.HasPrefix(os.Args[i+1], "-") {
+				deniedCmdsFile = os.Args[i+1]
+				i++
+			} else {
+				fmt.Fprintf(os.Stderr, "Error: --denied-commands-file requires a file path\n")
+				os.Exit(1)
+			}
+			continue
+		}
+		if arg == "--denied-commands" {
+			if deniedCmds != "" {
+				fmt.Fprintf(os.Stderr, "Error: --denied-commands specified multiple times\n")
+				os.Exit(1)
+			}
+			if i+1 < len(os.Args) && !strings.HasPrefix(os.Args[i+1], "-") {
+				deniedCmds = os.Args[i+1]
+				i++
+			} else {
+				fmt.Fprintf(os.Stderr, "Error: --denied-commands requires a comma-separated list of commands\n")
 				os.Exit(1)
 			}
 			continue
@@ -202,9 +232,45 @@ func main() {
 		}
 	}
 
+	// Load custom denied commands from file and/or inline list
+	var deniedCommands map[string]bool
+
+	// Load from file if specified
+	if deniedCmdsFile != "" {
+		fileCommands, err := validation.LoadDeniedCommandsFromFile(deniedCmdsFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading denied commands from file: %v\n", err)
+			os.Exit(1)
+		}
+		deniedCommands = fileCommands
+		fmt.Fprintf(os.Stderr, "Loaded %d denied commands from %s\n", len(fileCommands), deniedCmdsFile)
+	}
+
+	// Parse inline denied commands if specified
+	if deniedCmds != "" {
+		inlineCommands, err := validation.ParseDeniedCommands(deniedCmds)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error parsing denied commands: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Merge with existing denied commands (if any)
+		if deniedCommands == nil {
+			deniedCommands = inlineCommands
+			fmt.Fprintf(os.Stderr, "Loaded %d denied commands from command line\n", len(inlineCommands))
+		} else {
+			// Merge inline commands with file commands
+			for cmd := range inlineCommands {
+				deniedCommands[cmd] = true
+			}
+			fmt.Fprintf(os.Stderr, "Added %d denied commands from command line (total: %d)\n",
+				len(inlineCommands), len(deniedCommands))
+		}
+	}
+
 	// Set custom validator if any commands were loaded
-	if allowedCommands != nil {
-		customValidator := validation.NewValidatorWithCommands(allowedCommands)
+	if allowedCommands != nil || deniedCommands != nil {
+		customValidator := validation.NewValidatorWithCommandsAndDenied(allowedCommands, deniedCommands)
 		fastly.SetCustomValidator(customValidator)
 	}
 
@@ -307,6 +373,18 @@ func runCLIMode(sanitize bool, encryptTokens bool) {
 			}
 			continue
 		}
+		if os.Args[i] == "--denied-commands-file" {
+			if i+1 < len(os.Args) {
+				i++ // Skip the file argument too
+			}
+			continue
+		}
+		if os.Args[i] == "--denied-commands" {
+			if i+1 < len(os.Args) {
+				i++ // Skip the commands argument too
+			}
+			continue
+		}
 		if command == "" {
 			command = os.Args[i]
 		} else {
@@ -314,11 +392,12 @@ func runCLIMode(sanitize bool, encryptTokens bool) {
 		}
 	}
 
-	// Check if allowed commands were specified in CLI mode
+	// Check if allowed and denied commands were specified in CLI mode
 	// This needs to happen before help command check to ensure proper loading
 	var cliAllowedCommands map[string]bool
+	var cliDeniedCommands map[string]bool
 
-	// First check for file-based commands
+	// First check for file-based allowed commands
 	for i := 1; i < len(os.Args); i++ {
 		if os.Args[i] == "--allowed-commands-file" && i+1 < len(os.Args) {
 			allowedCmdsFile := os.Args[i+1]
@@ -333,7 +412,7 @@ func runCLIMode(sanitize bool, encryptTokens bool) {
 		}
 	}
 
-	// Then check for inline commands
+	// Then check for inline allowed commands
 	for i := 1; i < len(os.Args); i++ {
 		if os.Args[i] == "--allowed-commands" && i+1 < len(os.Args) {
 			allowedCmdsList := os.Args[i+1]
@@ -359,9 +438,50 @@ func runCLIMode(sanitize bool, encryptTokens bool) {
 		}
 	}
 
+	// Check for file-based denied commands
+	for i := 1; i < len(os.Args); i++ {
+		if os.Args[i] == "--denied-commands-file" && i+1 < len(os.Args) {
+			deniedCmdsFile := os.Args[i+1]
+			fileCommands, err := validation.LoadDeniedCommandsFromFile(deniedCmdsFile)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error loading denied commands from file: %v\n", err)
+				os.Exit(1)
+			}
+			cliDeniedCommands = fileCommands
+			fmt.Fprintf(os.Stderr, "Loaded %d denied commands from %s\n", len(fileCommands), deniedCmdsFile)
+			break
+		}
+	}
+
+	// Check for inline denied commands
+	for i := 1; i < len(os.Args); i++ {
+		if os.Args[i] == "--denied-commands" && i+1 < len(os.Args) {
+			deniedCmdsList := os.Args[i+1]
+			inlineCommands, err := validation.ParseDeniedCommands(deniedCmdsList)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error parsing denied commands: %v\n", err)
+				os.Exit(1)
+			}
+
+			// Merge with existing denied commands (if any)
+			if cliDeniedCommands == nil {
+				cliDeniedCommands = inlineCommands
+				fmt.Fprintf(os.Stderr, "Loaded %d denied commands from command line\n", len(inlineCommands))
+			} else {
+				// Merge inline commands with file commands
+				for cmd := range inlineCommands {
+					cliDeniedCommands[cmd] = true
+				}
+				fmt.Fprintf(os.Stderr, "Added %d denied commands from command line (total: %d)\n",
+					len(inlineCommands), len(cliDeniedCommands))
+			}
+			break
+		}
+	}
+
 	// Set custom validator if any commands were loaded
-	if cliAllowedCommands != nil {
-		customValidator := validation.NewValidatorWithCommands(cliAllowedCommands)
+	if cliAllowedCommands != nil || cliDeniedCommands != nil {
+		customValidator := validation.NewValidatorWithCommandsAndDenied(cliAllowedCommands, cliDeniedCommands)
 		fastly.SetCustomValidator(customValidator)
 	}
 
@@ -480,6 +600,8 @@ Options:
   --sanitize               Enable sanitization of sensitive data (PII, tokens, secrets)
   --allowed-commands-file file  Use custom allowed commands list from file
   --allowed-commands cmds  Use custom allowed commands (comma-separated list)
+  --denied-commands-file file   Use custom denied commands list from file
+  --denied-commands cmds   Use custom denied commands (comma-separated list)
   --encrypt-tokens         Encrypt secret tokens in tool responses (for LLM safety)
   --log-commands file      Log MCP commands to the specified file
 
@@ -508,6 +630,10 @@ Example usage:
   fastly-mcp --allowed-commands-file cmds.txt execute '{"command":"version","args":[]}'
   fastly-mcp --allowed-commands service,stats,version execute '{"command":"service","args":["list"]}'
   fastly-mcp --allowed-commands-file cmds.txt --allowed-commands whoami,help # Merge both sources
+  fastly-mcp --denied-commands "stats realtime,log-tail"  # Override default denied commands
+  fastly-mcp --denied-commands-file denied.txt            # Load denied commands from file
+
+Default denied commands: stats realtime, log-tail
 `
 	fmt.Print(usage)
 }

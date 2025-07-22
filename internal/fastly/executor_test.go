@@ -242,3 +242,113 @@ func TestCommandSplitting(t *testing.T) {
 		})
 	}
 }
+
+func TestDeniedCommands(t *testing.T) {
+	// Save current global validator
+	originalValidator := globalValidator
+	defer func() {
+		globalValidator = originalValidator
+	}()
+
+	tests := []struct {
+		name        string
+		req         types.CommandRequest
+		expectError string
+		expectCode  string
+	}{
+		{
+			name: "denied stats realtime command",
+			req: types.CommandRequest{
+				Command: "stats",
+				Args:    []string{"realtime"},
+				Flags:   []types.Flag{},
+			},
+			expectError: "The 'stats realtime' command is not available",
+			expectCode:  "COMMAND_NOT_AVAILABLE",
+		},
+		{
+			name: "denied stats realtime with flags",
+			req: types.CommandRequest{
+				Command: "stats",
+				Args:    []string{"realtime", "--service-id", "abc123"},
+				Flags:   []types.Flag{{Name: "json"}},
+			},
+			expectError: "The 'stats realtime' command is not available",
+			expectCode:  "COMMAND_NOT_AVAILABLE",
+		},
+		{
+			name: "allowed stats historical",
+			req: types.CommandRequest{
+				Command: "stats",
+				Args:    []string{"historical"},
+				Flags:   []types.Flag{},
+			},
+			expectError: "", // Should not be denied
+			expectCode:  "",
+		},
+		{
+			name: "allowed stats regions",
+			req: types.CommandRequest{
+				Command: "stats",
+				Args:    []string{"regions"},
+				Flags:   []types.Flag{},
+			},
+			expectError: "", // Should not be denied
+			expectCode:  "",
+		},
+		{
+			name: "allowed stats alone",
+			req: types.CommandRequest{
+				Command: "stats",
+				Args:    []string{},
+				Flags:   []types.Flag{},
+			},
+			expectError: "", // Should not be denied
+			expectCode:  "",
+		},
+		{
+			name: "denied log-tail command",
+			req: types.CommandRequest{
+				Command: "log-tail",
+				Args:    []string{},
+				Flags:   []types.Flag{},
+			},
+			expectError: "The 'log-tail' command is not available",
+			expectCode:  "COMMAND_NOT_AVAILABLE",
+		},
+		{
+			name: "denied log-tail with flags",
+			req: types.CommandRequest{
+				Command: "log-tail",
+				Args:    []string{},
+				Flags:   []types.Flag{{Name: "service-id", Value: "abc123"}},
+			},
+			expectError: "The 'log-tail' command is not available",
+			expectCode:  "COMMAND_NOT_AVAILABLE",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ExecuteCommand(tt.req)
+
+			if tt.expectError != "" {
+				// Should be denied
+				if result.Success {
+					t.Error("Expected command to be denied but it succeeded")
+				}
+				if result.Error != tt.expectError {
+					t.Errorf("Expected error '%s', got '%s'", tt.expectError, result.Error)
+				}
+				if result.ErrorCode != tt.expectCode {
+					t.Errorf("Expected code '%s', got '%s'", tt.expectCode, result.ErrorCode)
+				}
+			} else {
+				// Should not be denied by denylist (may fail for other reasons)
+				if !result.Success && result.ErrorCode == "COMMAND_NOT_AVAILABLE" {
+					t.Errorf("Command should not be denied, but got: %s", result.Error)
+				}
+			}
+		})
+	}
+}

@@ -39,6 +39,8 @@ const (
 type Validator struct {
 	// allowedCommands is the allowlist of permitted Fastly commands
 	allowedCommands map[string]bool
+	// deniedCommands is the denylist of forbidden command-subcommand combinations
+	deniedCommands map[string]bool
 	// shellMetaChars contains dangerous shell metacharacters to block
 	shellMetaChars []string
 	// flagNameRegex validates flag name format
@@ -54,7 +56,7 @@ type Validator struct {
 //
 // Only commands explicitly listed in allowedCommands can be executed.
 func NewValidator() *Validator {
-	return NewValidatorWithCommands(defaultAllowedCommands())
+	return NewValidatorWithCommandsAndDenied(defaultAllowedCommands(), defaultDeniedCommands())
 }
 
 // NewValidatorWithCommands creates a validator with a custom set of allowed commands.
@@ -63,6 +65,13 @@ func NewValidator() *Validator {
 //   - Loading commands from an external configuration file
 //   - Creating validators with environment-specific command restrictions
 func NewValidatorWithCommands(allowedCommands map[string]bool) *Validator {
+	return NewValidatorWithCommandsAndDenied(allowedCommands, map[string]bool{})
+}
+
+// NewValidatorWithCommandsAndDenied creates a validator with custom allowed and denied commands.
+// The denied commands take precedence over allowed commands and represent command-subcommand
+// combinations that should be blocked (e.g., "stats realtime").
+func NewValidatorWithCommandsAndDenied(allowedCommands, deniedCommands map[string]bool) *Validator {
 	shellMetaChars := []string{
 		";", "|", "&", "&&", "||", "`", "$", "(", ")", "<", ">", ">>", "<<",
 		"*", "?", "[", "]", "{", "}", "\\", "\n", "\r", "\t",
@@ -81,6 +90,7 @@ func NewValidatorWithCommands(allowedCommands map[string]bool) *Validator {
 
 	return &Validator{
 		allowedCommands:  allowedCommands,
+		deniedCommands:   deniedCommands,
 		shellMetaChars:   shellMetaChars,
 		flagNameRegex:    regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9-]*$`),
 		controlCharRegex: regexp.MustCompile(`[\x01-\x08\x0B-\x0C\x0E-\x1F\x7F]`),
@@ -179,6 +189,16 @@ func defaultAllowedCommands() map[string]bool {
 		"tools":   true,
 		"install": true,
 		"update":  true,
+	}
+}
+
+// defaultDeniedCommands returns the default denylist of command-subcommand combinations
+// that should be blocked. This list includes commands that may be unsafe or should
+// not be available through the MCP interface.
+func defaultDeniedCommands() map[string]bool {
+	return map[string]bool{
+		"stats realtime": true,
+		"log-tail":       true,
 	}
 }
 
@@ -389,4 +409,24 @@ func (v *Validator) ValidateAll(command string, args []string, flags map[string]
 	}
 
 	return nil
+}
+
+// IsDenied checks if a command-args combination is in the denylist.
+// It constructs the full command path (e.g., "stats realtime") and checks
+// if it's explicitly denied. Returns true if the command should be blocked.
+func (v *Validator) IsDenied(command string, args []string) bool {
+	// Check the command alone first
+	if v.deniedCommands[command] {
+		return true
+	}
+
+	// Check command with first argument (subcommand)
+	if len(args) > 0 {
+		fullCommand := command + " " + args[0]
+		if v.deniedCommands[fullCommand] {
+			return true
+		}
+	}
+
+	return false
 }
