@@ -59,6 +59,9 @@ With this MCP server, your AI assistant can:
     - [🛡️ Prompt Injection Protection](#️-prompt-injection-protection)
   - [⚙️ Configuration Options](#️-configuration-options)
     - [Custom Command Allowlist](#custom-command-allowlist)
+      - [From file:](#from-file)
+      - [Inline specification:](#inline-specification)
+      - [Combining both sources:](#combining-both-sources)
     - [PII Sanitization (Optional)](#pii-sanitization-optional)
     - [Token Encryption (Optional)](#token-encryption-optional)
     - [Combining Options](#combining-options)
@@ -88,7 +91,7 @@ Before getting started, ensure you have:
 
 - ✅ **Go 1.23+** (for building from source)
 - ✅ **[Fastly CLI](https://developer.fastly.com/reference/cli/)** installed and in your PATH
-- ✅ **Fastly account** with CLI authenticated (via `fastly auth login`)
+- ✅ **Fastly account** with CLI authenticated (via `fastly whoami`)
 
 ## 📦 Installation
 
@@ -100,12 +103,12 @@ Download the latest release for your platform:
 
 <div align="center">
 
-| Platform              | Download                                                                                        |
-| --------------------- | ----------------------------------------------------------------------------------------------- |
-| macOS (Intel)         | [Download](https://github.com/fastly/mcp/releases/latest)                                       |
-| macOS (Apple Silicon) | [Download](https://github.com/fastly/mcp/releases/latest)                                       |
-| Linux (64-bit)        | [Download](https://github.com/fastly/mcp/releases/latest)                                       |
-| Windows (64-bit)      | [Download](https://github.com/fastly/mcp/releases/latest)                                       |
+| Platform              | Download                                                  |
+| --------------------- | --------------------------------------------------------- |
+| macOS (Intel)         | [Download](https://github.com/fastly/mcp/releases/latest) |
+| macOS (Apple Silicon) | [Download](https://github.com/fastly/mcp/releases/latest) |
+| Linux (64-bit)        | [Download](https://github.com/fastly/mcp/releases/latest) |
+| Windows (64-bit)      | [Download](https://github.com/fastly/mcp/releases/latest) |
 
 </div>
 
@@ -143,7 +146,7 @@ Get up and running in just 3 steps!
 First, ensure the Fastly CLI is authenticated with your account:
 
 ```bash
-fastly auth login
+fastly whoami
 ```
 
 > 💡 **Note**: The MCP server uses your existing Fastly CLI authentication. No additional setup needed!
