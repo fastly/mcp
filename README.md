@@ -113,12 +113,28 @@ Download the latest release for your platform:
 </div>
 
 After downloading:
+
+**macOS/Linux:**
 ```bash
-# macOS/Linux: Make it executable
+# Make it executable
 chmod +x fastly-mcp
 
 # Move to a directory in your PATH (optional)
 sudo mv fastly-mcp /usr/local/bin/
+```
+
+**Windows:**
+```powershell
+# Rename the downloaded file to add .exe extension if needed
+Rename-Item fastly-mcp fastly-mcp.exe
+
+# Move to a directory in your PATH (optional)
+# Example: Move to your user's local bin directory
+mkdir $env:USERPROFILE\bin -Force
+Move-Item fastly-mcp.exe $env:USERPROFILE\bin\
+
+# Add to PATH if not already there
+[Environment]::SetEnvironmentVariable("Path", $env:Path + ";$env:USERPROFILE\bin", [EnvironmentVariableTarget]::User)
 ```
 
 ### Option 2: Install with Go
@@ -149,6 +165,8 @@ First, ensure the Fastly CLI is authenticated with your account:
 fastly whoami
 ```
 
+**Windows Users:** Run this command in PowerShell, Command Prompt, or Windows Terminal.
+
 > 💡 **Note**: The MCP server uses your existing Fastly CLI authentication. No additional setup needed!
 
 <details>
@@ -174,7 +192,7 @@ Choose your AI assistant and follow the configuration steps:
 {
   "mcpServers": {
     "fastly": {
-      "command": "/path/to/fastly-mcp",
+      "command": "/path/to/fastly-mcp",  // Windows: "C:\\path\\to\\fastly-mcp.exe"
       "args": []
     }
   }
@@ -191,7 +209,7 @@ Navigate to **Settings → MCP Servers → Add Server**, or edit the configurati
 {
   "mcpServers": {
     "fastly": {
-      "command": "/path/to/fastly-mcp",
+      "command": "/path/to/fastly-mcp",  // Windows: "C:\\path\\to\\fastly-mcp.exe"
       "args": []
     }
   }
@@ -204,15 +222,15 @@ Navigate to **Settings → MCP Servers → Add Server**, or edit the configurati
 
 Add to your Claude configuration file:
 
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-**Linux**: `~/.config/Claude/claude_desktop_config.json`
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+- **Linux**: `~/.config/Claude/claude_desktop_config.json`
 
 ```json
 {
   "mcpServers": {
     "fastly": {
-      "command": "/path/to/fastly-mcp",
+      "command": "/path/to/fastly-mcp",  // Windows: "C:\\path\\to\\fastly-mcp.exe"
       "args": []
     }
   }
@@ -225,8 +243,14 @@ Add to your Claude configuration file:
 
 Simply run this command:
 
+**macOS/Linux:**
 ```bash
 claude mcp add fastly /path/to/fastly-mcp
+```
+
+**Windows:**
+```powershell
+claude mcp add fastly C:\path\to\fastly-mcp.exe
 ```
 </details>
 
@@ -256,12 +280,15 @@ claude mcp add fastly /path/to/fastly-mcp
 - Check that the binary has execute permissions
 
 **"Command not found" errors?**
-- Ensure Fastly CLI is installed: `which fastly`
+- **macOS/Linux**: Ensure Fastly CLI is installed: `which fastly`
+- **Windows**: Ensure Fastly CLI is installed: `where fastly`
 - Verify CLI is authenticated: `fastly whoami`
 - Check PATH includes Fastly CLI location
+  - **Windows**: Use `echo %PATH%` (cmd) or `$env:Path` (PowerShell)
 
 **Permission denied errors?**
-- Make binary executable: `chmod +x /path/to/fastly-mcp`
+- **macOS/Linux**: Make binary executable: `chmod +x /path/to/fastly-mcp`
+- **Windows**: Check if Windows Defender or antivirus is blocking the executable
 - Ensure your user has access to Fastly CLI config
 </details>
 
@@ -334,11 +361,20 @@ The server provides four powerful tools for AI agents:
 ## 🎮 Running Modes
 
 ### Stdio Mode (Default)
+
+**macOS/Linux:**
 ```sh
 fastly-mcp
 ```
 
+**Windows:**
+```powershell
+fastly-mcp.exe
+```
+
 ### HTTP Mode
+
+**macOS/Linux:**
 ```sh
 # Default port 8080
 fastly-mcp --http
@@ -350,7 +386,21 @@ fastly-mcp --http :9000
 fastly-mcp --http --sse
 ```
 
+**Windows:**
+```powershell
+# Default port 8080
+fastly-mcp.exe --http
+
+# Custom port
+fastly-mcp.exe --http :9000
+
+# With Server-Sent Events
+fastly-mcp.exe --http --sse
+```
+
 ### CLI Mode (Testing)
+
+**macOS/Linux:**
 ```sh
 # List commands
 fastly-mcp list-commands
@@ -360,6 +410,18 @@ fastly-mcp describe service list
 
 # Execute command
 fastly-mcp execute '{"command":"version","args":[]}'
+```
+
+**Windows:**
+```powershell
+# List commands
+fastly-mcp.exe list-commands
+
+# Get help
+fastly-mcp.exe describe service list
+
+# Execute command (note the escaped quotes)
+fastly-mcp.exe execute '{\"command\":\"version\",\"args\":[]}'
 ```
 
 ## 🔒 Security
@@ -439,8 +501,15 @@ Comprehensive defenses against [prompt injection attacks](https://simonwillison.
 Override the default allowed commands using a file or inline specification:
 
 #### From file:
+
+**macOS/Linux:**
 ```sh
 fastly-mcp --allowed-commands-file /path/to/allowed-commands.txt
+```
+
+**Windows:**
+```powershell
+fastly-mcp.exe --allowed-commands-file C:\path\to\allowed-commands.txt
 ```
 
 Format (see `example-allowed-commands.txt`):
@@ -449,17 +518,32 @@ Format (see `example-allowed-commands.txt`):
 - Empty lines ignored
 
 #### Inline specification:
+
+**macOS/Linux:**
 ```sh
 fastly-mcp --allowed-commands service,stats,version
+```
+
+**Windows:**
+```powershell
+fastly-mcp.exe --allowed-commands service,stats,version
 ```
 
 - Comma-separated list of commands
 - No spaces between commands (unless quoted)
 
 #### Combining both sources:
+
+**macOS/Linux:**
 ```sh
 # Merges commands from both file and inline list
 fastly-mcp --allowed-commands-file base.txt --allowed-commands whoami,help
+```
+
+**Windows:**
+```powershell
+# Merges commands from both file and inline list
+fastly-mcp.exe --allowed-commands-file base.txt --allowed-commands whoami,help
 ```
 
 When both options are specified, commands from both sources are merged (union)
@@ -468,8 +552,14 @@ When both options are specified, commands from both sources are merged (union)
 
 Remove sensitive data from outputs:
 
+**macOS/Linux:**
 ```sh
 fastly-mcp --sanitize
+```
+
+**Windows:**
+```powershell
+fastly-mcp.exe --sanitize
 ```
 
 What gets sanitized:
@@ -486,8 +576,14 @@ What gets sanitized:
 
 Protect secrets from LLM exposure while maintaining functionality:
 
+**macOS/Linux:**
 ```sh
 fastly-mcp --encrypt-tokens
+```
+
+**Windows:**
+```powershell
+fastly-mcp.exe --encrypt-tokens
 ```
 
 How it works:
@@ -498,6 +594,7 @@ How it works:
 
 ### Combining Options
 
+**macOS/Linux:**
 ```sh
 # All features with file-based allowlist
 fastly-mcp --http --sanitize --encrypt-tokens --allowed-commands-file custom.txt
@@ -510,6 +607,21 @@ fastly-mcp --http :9000 --encrypt-tokens --allowed-commands-file base.txt --allo
 
 # Testing with sanitization and inline commands
 fastly-mcp --sanitize --allowed-commands service execute '{"command":"service","args":["list"]}'
+```
+
+**Windows:**
+```powershell
+# All features with file-based allowlist
+fastly-mcp.exe --http --sanitize --encrypt-tokens --allowed-commands-file custom.txt
+
+# All features with inline allowlist
+fastly-mcp.exe --http --sanitize --encrypt-tokens --allowed-commands service,stats,version
+
+# HTTP with encryption and merged allowlists
+fastly-mcp.exe --http :9000 --encrypt-tokens --allowed-commands-file base.txt --allowed-commands whoami
+
+# Testing with sanitization and inline commands (note escaped quotes)
+fastly-mcp.exe --sanitize --allowed-commands service execute '{\"command\":\"service\",\"args\":[\"list\"]}'
 ```
 
 ## 🤖 Model Recommendations
