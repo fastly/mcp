@@ -4,16 +4,18 @@
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![GitHub Release](https://img.shields.io/github/v/release/fastly/mcp?color=brightgreen)](https://github.com/fastly/mcp/releases)
 
-> 🤖 **AI-powered Fastly management** - Securely control your CDN and edge compute infrastructure through natural language interactions with AI assistants.
+> 🤖 **AI-powered Fastly management** - Securely control your Fastly infrastructure through natural language interactions with AI assistants.
 
-A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that provides AI agents with secure access to Fastly services. Ask your AI assistant to manage CDN configurations, deploy edge compute applications, analyze performance metrics, and more - all through simple conversational commands.
+A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that provides AI agents with secure access to Fastly services. Ask your AI assistant to manage CDN configurations, deploy Compute services, analyze performance metrics, and more - all through simple conversational commands.
+
+The Fastly MCP server is an open-source, actively developed tool with Tier 1 support. Our open-source support policy is detailed in our [documentation](https://www.fastly.com/documentation/developers/community/open-source/#understanding-topics-and-support-levels). We also welcome your feedback on our [community forum](https://community.fastly.com/c/developer-tools/25).
 
 ## ✨ What Can You Do?
 
 With this MCP server, your AI assistant can:
 
+- 🌍 **Manage Fastly Services** - "List my services and their domains"
 - 📊 **Monitor Performance** - "Show me real-time traffic and cache hit ratios"
-- 🌍 **Manage CDN** - "List my services and their domains"
 - 🚀 **Deploy Changes** - "Update my backend configuration"
 - 🔍 **Analyze Issues** - "Help me troubleshoot 5xx errors"
 - 🛡️ **Control Security** - "Show my ACL rules and TLS certificates"
@@ -141,6 +143,18 @@ Move-Item fastly-mcp.exe $env:USERPROFILE\bin\
 
 ```bash
 go install github.com/fastly/mcp/cmd/fastly-mcp@latest
+```
+
+**Finding Your Installation Directory**
+
+When you use `go install`, the location of the installed binary depends on your Go environment configuration.
+
+The binary is installed to `$GOPATH/bin` or `$GOBIN` if set. You can check these locations:
+
+```bash
+go env GOBIN
+go env GOPATH
+# If GOBIN is empty, it uses GOPATH/bin
 ```
 
 ### Option 3: Build from Source
