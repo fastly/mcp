@@ -1,6 +1,20 @@
 # Changelog
 
-## [Unreleasted]
+## [Unreleased]
+
+### Added
+- Support for denied commands via `--denied-command-file` flag
+- System prompt serving capability for better AI agent integration
+- Improved Windows installation instructions in documentation
+
+### Changed
+- Updated mcp-go dependency from v0.34.0 to v0.36.0
+- Error messages now use "not available" instead of "not allowed" for better clarity
+- Replaced `fastly auth login` references with `fastly whoami` in documentation
+- Enhanced README with better documentation structure and examples
+
+### Security
+- Updated SECURITY.md with improved security reporting guidelines
 
 ## [0.1.5] - 2025-07-10
 
