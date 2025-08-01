@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.6] - 2025-08-01
 
 ### Added
 - Support for denied commands via `--denied-command-file` flag
