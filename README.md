@@ -648,8 +648,13 @@ This server works best with Language Models optimized for:
 For best results, use models specifically optimized for agentic workflows and tool usage.
 
 **Recommended Models**: 
-- **Microsoft's MAI-DS-R1**: An excellent choice for use with the Fastly MCP server. It's open, free, and performs very well with MCP interactions and tool usage.
-- **jan-nano-128k**: A small model that can run locally and works well with the MCP server. Ideal for users who want to run everything on their own hardware without relying on cloud services.
+
+The Fastly MCP server has been successfully tested with the following models:
+
+- Qwen3-Coder
+- Claude Sonnet and Claude Opus
+- Microsoft MAI-DS-R1
+- jan-nano-128k
 
 **Note**: At the time of writing, we do not recommend Gemini models as they are not optimized for tool usage and MCP interactions.
 
