@@ -34,7 +34,7 @@ func TestHandleSetupError(t *testing.T) {
 		},
 		{
 			name:             "Auth required error - uppercase",
-			err:              errors.New("Not authenticated. Please run 'fastly auth'"),
+			err:              errors.New("Not authenticated. Please run 'fastly profile create'"),
 			command:          "domain list",
 			expectedCode:     "auth_required",
 			expectedContains: []string{"Not authenticated"},

@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- Updated all references from deprecated `fastly auth` commands to current `fastly profile` commands
+- Changed authentication error messages to suggest `fastly profile create` instead of `fastly auth login`
+
 ## [0.1.6] - 2025-08-01
 
 ### Added

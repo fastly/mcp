@@ -8,7 +8,7 @@
 //     overhead. Useful for debugging and manual testing.
 //
 // The server requires the Fastly CLI to be installed and accessible in the PATH, and proper
-// authentication via FASTLY_API_TOKEN environment variable or 'fastly auth' command.
+// authentication via FASTLY_API_TOKEN environment variable or 'fastly profile' command.
 package main
 
 import (
@@ -518,7 +518,7 @@ func runCLIMode(sanitize bool, encryptTokens bool) {
 			// Output human-friendly message for authentication errors
 			fmt.Fprintf(os.Stderr, "Authentication required for Fastly CLI.\n\n")
 			fmt.Fprintf(os.Stderr, "Please authenticate using one of these methods:\n")
-			fmt.Fprintf(os.Stderr, "  1. Run 'fastly auth login' to authenticate interactively\n")
+			fmt.Fprintf(os.Stderr, "  1. Run 'fastly profile create' to set up authentication\n")
 			fmt.Fprintf(os.Stderr, "  2. Set the FASTLY_API_TOKEN environment variable\n\n")
 			fmt.Fprintf(os.Stderr, "For more information, visit: https://developer.fastly.com/reference/cli/\n")
 			os.Exit(1)
@@ -536,7 +536,7 @@ func runCLIMode(sanitize bool, encryptTokens bool) {
 				"Ensure the Fastly CLI is installed on the system",
 				"Verify the FASTLY_API_TOKEN environment variable is set",
 				"Check that authentication is properly configured",
-				"Run 'fastly auth login' to authenticate if needed",
+				"Run 'fastly profile create' to authenticate if needed",
 			},
 		}
 

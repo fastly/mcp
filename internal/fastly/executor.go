@@ -263,7 +263,7 @@ func ExecuteCommand(req types.CommandRequest) types.CommandResponse {
 				response.NextSteps = []string{
 					"Verify that FASTLY_API_TOKEN environment variable is set correctly",
 					"Check that the token has the necessary permissions for this operation",
-					"Run 'fastly auth' to re-authenticate if needed",
+					"Run 'fastly profile create' to re-authenticate if needed",
 				}
 			} else if response.ErrorCode == "not_found" {
 				response.Instructions = "The requested resource was not found."

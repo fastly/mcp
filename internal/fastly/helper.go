@@ -53,7 +53,7 @@ func CheckSetup() error {
 		if IsAuthenticationError(result.Stdout, result.Stderr) {
 			errorMsg := strings.TrimSpace(result.Stderr)
 			if errorMsg == "" {
-				errorMsg = "Please run 'fastly auth login' or set FASTLY_API_TOKEN"
+				errorMsg = "Please run 'fastly profile create' or set FASTLY_API_TOKEN"
 			}
 			return fmt.Errorf("not authenticated with Fastly. %s", errorMsg)
 		}
@@ -72,7 +72,7 @@ func CheckSetup() error {
 		var jsonResult map[string]interface{}
 		if err := json.Unmarshal([]byte(output), &jsonResult); err == nil {
 			if authorized, ok := jsonResult["authorized"].(bool); ok && !authorized {
-				return fmt.Errorf("not authenticated with Fastly. Please run 'fastly auth login' or set FASTLY_API_TOKEN")
+				return fmt.Errorf("not authenticated with Fastly. Please run 'fastly profile create' or set FASTLY_API_TOKEN")
 			}
 		}
 	}
