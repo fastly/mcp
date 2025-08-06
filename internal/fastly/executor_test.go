@@ -352,3 +352,127 @@ func TestDeniedCommands(t *testing.T) {
 		})
 	}
 }
+
+func TestImprovedErrorHandling(t *testing.T) {
+	tests := []struct {
+		name                   string
+		req                    types.CommandRequest
+		checkErrorContents     bool
+		expectedErrorFragments []string
+		expectedErrorCode      string
+	}{
+		{
+			name: "invalid flag error includes full output",
+			req: types.CommandRequest{
+				Command: "service",
+				Args:    []string{"list"},
+				Flags: []types.Flag{
+					{Name: "invalid-flag", Value: "value"},
+				},
+			},
+			checkErrorContents:     true,
+			expectedErrorFragments: []string{"unknown long flag", "invalid-flag"},
+			expectedErrorCode:      "invalid_argument",
+		},
+		{
+			name: "missing required argument includes helpful error",
+			req: types.CommandRequest{
+				Command: "service",
+				Args:    []string{"describe"},
+				Flags:   []types.Flag{},
+			},
+			checkErrorContents:     true,
+			expectedErrorFragments: []string{"no service id found"},
+			expectedErrorCode:      "validation_error",
+		},
+		{
+			name: "authentication error gets proper code",
+			req: types.CommandRequest{
+				Command: "service",
+				Args:    []string{"list"},
+				Flags:   []types.Flag{
+					// This test assumes FASTLY_API_TOKEN is not set or invalid
+					// In a real test environment, we'd mock this
+				},
+			},
+			checkErrorContents: false,
+			expectedErrorCode:  "", // May or may not fail depending on environment
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Skip tests that require actual CLI execution if not available
+			if err := CheckSetup(); err != nil {
+				t.Skip("Skipping test that requires Fastly CLI")
+			}
+
+			result := ExecuteCommand(tt.req)
+
+			// If we're checking error contents, verify the command failed
+			if tt.checkErrorContents {
+				if result.Success {
+					t.Errorf("Expected command to fail, but it succeeded")
+				}
+
+				// Check that error message contains all expected fragments
+				for _, fragment := range tt.expectedErrorFragments {
+					if !strings.Contains(strings.ToLower(result.Error), strings.ToLower(fragment)) {
+						t.Errorf("Expected error to contain '%s', but got: %s", fragment, result.Error)
+					}
+				}
+			}
+
+			// Check error code if specified and command failed
+			if tt.expectedErrorCode != "" && !result.Success {
+				if result.ErrorCode != tt.expectedErrorCode {
+					t.Errorf("Expected error code '%s', but got '%s'", tt.expectedErrorCode, result.ErrorCode)
+				}
+			}
+
+			// Verify that failed commands always have instructions and next steps
+			if !result.Success {
+				if result.Instructions == "" {
+					t.Errorf("Failed command should have instructions, but got empty string")
+				}
+				if len(result.NextSteps) == 0 {
+					t.Errorf("Failed command should have next steps, but got none")
+				}
+			}
+		})
+	}
+}
+
+func TestTimeoutErrorHandling(t *testing.T) {
+	// Test the TimeoutError function directly since we can't easily trigger real timeouts
+	req := types.CommandRequest{
+		Command: "stats",
+		Args:    []string{"realtime"},
+		Flags: []types.Flag{
+			{Name: "service-id", Value: "test-service"},
+		},
+	}
+
+	// Test basic timeout error
+	timeoutResp := TimeoutError(req.Command, req.Args, req.Flags)
+
+	if timeoutResp.Success {
+		t.Errorf("Timeout response should indicate failure")
+	}
+
+	if timeoutResp.ErrorCode != "timeout" {
+		t.Errorf("Expected error code 'timeout', got '%s'", timeoutResp.ErrorCode)
+	}
+
+	if !strings.Contains(timeoutResp.Error, "timeout") && !strings.Contains(timeoutResp.Error, "timed out") {
+		t.Errorf("Expected error message to mention timeout, got: %s", timeoutResp.Error)
+	}
+
+	if timeoutResp.Instructions == "" {
+		t.Errorf("Expected instructions in timeout response")
+	}
+
+	if len(timeoutResp.NextSteps) == 0 {
+		t.Errorf("Expected next steps in timeout response")
+	}
+}

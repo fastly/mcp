@@ -28,10 +28,6 @@ var errorCodePatterns = []errorCodePattern{
 		code:     "permission_denied",
 	},
 	{
-		patterns: []string{"invalid", "validation"},
-		code:     "validation_error",
-	},
-	{
 		patterns: []string{"already exists", "duplicate"},
 		code:     "already_exists",
 	},
@@ -40,8 +36,18 @@ var errorCodePatterns = []errorCodePattern{
 		code:     "rate_limit",
 	},
 	{
-		patterns: []string{"unknown flag", "unknown command"},
+		// Check for unknown flags/commands before general "invalid" patterns
+		patterns: []string{"unknown flag", "unknown long flag", "unknown short flag", "unknown command"},
 		code:     "invalid_argument",
+	},
+	{
+		patterns: []string{"no service id found", "required flag", "required argument"},
+		code:     "validation_error",
+	},
+	{
+		// Check for general "invalid" patterns last
+		patterns: []string{"invalid", "validation"},
+		code:     "validation_error",
 	},
 }
 

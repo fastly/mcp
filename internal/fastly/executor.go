@@ -5,6 +5,7 @@ package fastly
 import (
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"strings"
 
 	"github.com/fastly/mcp/internal/types"
@@ -192,24 +193,93 @@ func ExecuteCommand(req types.CommandRequest) types.CommandResponse {
 		response.Success = false
 
 		if result.TimedOut {
-			return TimeoutError(req.Command, req.Args, filteredFlags)
-		} else {
-			response.Error = CleanANSI(result.Stderr)
-			// Apply sanitization to error messages if enabled
-			if globalSanitizeOpts.Enabled {
-				response.Error = SanitizeOutput(response.Error, globalSanitizeOpts)
+			// For timeout errors, include any partial output that was captured
+			timeoutResp := TimeoutError(req.Command, req.Args, filteredFlags)
+			if result.Stdout != "" || result.Stderr != "" {
+				partialOutput := ""
+				if result.Stdout != "" {
+					partialOutput = "Partial stdout:\n" + CleanANSI(result.Stdout)
+				}
+				if result.Stderr != "" {
+					if partialOutput != "" {
+						partialOutput += "\n\n"
+					}
+					partialOutput += "Partial stderr:\n" + CleanANSI(result.Stderr)
+				}
+				// Apply sanitization if enabled
+				if globalSanitizeOpts.Enabled {
+					partialOutput = SanitizeOutput(partialOutput, globalSanitizeOpts)
+				}
+				timeoutResp.Output = partialOutput
+				timeoutResp.Instructions = "The command timed out after 30 seconds. Partial output is included above."
 			}
-			if response.Error == "" {
-				response.Error = result.Error.Error()
+			return timeoutResp
+		} else {
+			// Build comprehensive error message including all available information
+			errorParts := []string{}
+
+			// Include stderr if available
+			if result.Stderr != "" {
+				cleanedStderr := CleanANSI(result.Stderr)
+				if globalSanitizeOpts.Enabled {
+					cleanedStderr = SanitizeOutput(cleanedStderr, globalSanitizeOpts)
+				}
+				errorParts = append(errorParts, cleanedStderr)
+			}
+
+			// Include stdout if it contains error information
+			if result.Stdout != "" {
+				cleanedStdout := CleanANSI(result.Stdout)
+				if globalSanitizeOpts.Enabled {
+					cleanedStdout = SanitizeOutput(cleanedStdout, globalSanitizeOpts)
+				}
+				// Only include stdout if it's different from stderr and potentially contains error info
+				if cleanedStdout != "" && (len(errorParts) == 0 || cleanedStdout != errorParts[0]) {
+					errorParts = append(errorParts, "Command output: "+cleanedStdout)
+				}
+			}
+
+			// Include the underlying error if no other information is available
+			if len(errorParts) == 0 && result.Error != nil {
+				if exitErr, ok := result.Error.(*exec.ExitError); ok {
+					errorParts = append(errorParts, fmt.Sprintf("Command failed with exit code %d", exitErr.ExitCode()))
+				} else {
+					errorParts = append(errorParts, result.Error.Error())
+				}
+			}
+
+			// Combine all error parts
+			if len(errorParts) > 0 {
+				response.Error = strings.Join(errorParts, "\n")
+			} else {
+				response.Error = "Command failed with no error output"
 			}
 
 			response.ErrorCode = DetectErrorCode(response.Error)
 
-			response.Instructions = "The command failed. Check the error message for details."
-			response.NextSteps = []string{
-				"Verify all required flags are provided with valid values",
-				"Check that flag values are properly formatted",
-				"Use the fastly_describe tool to see the correct command syntax",
+			// Provide more specific instructions based on error type
+			if response.ErrorCode == "auth_required" {
+				response.Instructions = "Authentication failed. Please check your API token."
+				response.NextSteps = []string{
+					"Verify that FASTLY_API_TOKEN environment variable is set correctly",
+					"Check that the token has the necessary permissions for this operation",
+					"Run 'fastly auth' to re-authenticate if needed",
+				}
+			} else if response.ErrorCode == "not_found" {
+				response.Instructions = "The requested resource was not found."
+				response.NextSteps = []string{
+					"Verify the resource ID or name is correct",
+					"Use fastly_execute with 'list' commands to see available resources",
+					"Check that you have access to the resource",
+				}
+			} else {
+				response.Instructions = "The command failed. Check the error message above for details."
+				response.NextSteps = []string{
+					"Review the full error message for specific issues",
+					"Verify all required flags are provided with valid values",
+					"Check that flag values are properly formatted",
+					"Use the fastly_describe tool to see the correct command syntax",
+				}
 			}
 		}
 	} else {
