@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/fastly/mcp/internal/types"
@@ -218,15 +219,21 @@ func TestSetupError(t *testing.T) {
 	}
 
 	// Verify setup-specific next steps
-	hasSetupStep := false
+	hasInstallationStep := false
+	hasAuthStep := false
 	for _, step := range response.NextSteps {
-		if step == "Run 'fastly_describe setup' for setup instructions" {
-			hasSetupStep = true
-			break
+		if strings.Contains(step, "Ensure the Fastly CLI is installed") {
+			hasInstallationStep = true
+		}
+		if strings.Contains(step, "fastly profile create") {
+			hasAuthStep = true
 		}
 	}
-	if !hasSetupStep {
-		t.Errorf("Expected setup instructions in next steps")
+	if !hasInstallationStep {
+		t.Errorf("Expected installation instructions in next steps")
+	}
+	if !hasAuthStep {
+		t.Errorf("Expected authentication instructions in next steps")
 	}
 }
 

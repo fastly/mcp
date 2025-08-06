@@ -258,21 +258,22 @@ func ExecuteCommand(req types.CommandRequest) types.CommandResponse {
 			response.ErrorCode = DetectErrorCode(response.Error)
 
 			// Provide more specific instructions based on error type
-			if response.ErrorCode == "auth_required" {
+			switch response.ErrorCode {
+			case "auth_required":
 				response.Instructions = "Authentication failed. Please check your API token."
 				response.NextSteps = []string{
 					"Verify that FASTLY_API_TOKEN environment variable is set correctly",
 					"Check that the token has the necessary permissions for this operation",
 					"Run 'fastly profile create' to re-authenticate if needed",
 				}
-			} else if response.ErrorCode == "not_found" {
+			case "not_found":
 				response.Instructions = "The requested resource was not found."
 				response.NextSteps = []string{
 					"Verify the resource ID or name is correct",
 					"Use fastly_execute with 'list' commands to see available resources",
 					"Check that you have access to the resource",
 				}
-			} else {
+			default:
 				response.Instructions = "The command failed. Check the error message above for details."
 				response.NextSteps = []string{
 					"Review the full error message for specific issues",

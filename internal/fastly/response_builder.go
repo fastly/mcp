@@ -82,9 +82,9 @@ func SetupError(command string, err error) types.CommandResponse {
 		WithCommand(command, nil, nil).
 		WithError(err, "setup_error").
 		WithInstructions("The Fastly CLI is not properly set up.", []string{
-			"Run 'fastly_describe setup' for setup instructions",
 			"Ensure the Fastly CLI is installed and in your PATH",
 			"Check that FASTLY_API_TOKEN is set or run 'fastly profile create' to authenticate",
+			"Visit https://www.fastly.com/documentation/reference/cli/ for installation instructions",
 		}).
 		Build()
 }
