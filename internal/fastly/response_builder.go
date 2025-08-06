@@ -69,7 +69,7 @@ func ValidationError(command string, err error) types.CommandResponse {
 	return NewResponseBuilder().
 		WithCommand(command, nil, nil).
 		WithError(err, "validation_error").
-		WithInstructions("The command failed validation for security reasons.", []string{
+		WithInstructions("The command is not available.", []string{
 			"Check that the command is available",
 			"Use fastly_list_commands to see available commands",
 		}).

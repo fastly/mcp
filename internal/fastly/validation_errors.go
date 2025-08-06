@@ -11,7 +11,7 @@ func ArgValidationError(command string, args []string, err error) types.CommandR
 	return NewResponseBuilder().
 		WithCommand(command, args, nil).
 		WithError(err, "validation_error").
-		WithInstructions("The arguments failed validation for security reasons.", []string{
+		WithInstructions("The arguments are not available.", []string{
 			"Check arguments for forbidden characters or patterns",
 			"Ensure arguments don't contain shell metacharacters",
 			"Remove any special characters like ;, |, &, $, etc.",
@@ -24,7 +24,7 @@ func FlagNameValidationError(command string, args []string, flags []types.Flag, 
 	return NewResponseBuilder().
 		WithCommand(command, args, flags).
 		WithError(fmt.Errorf("flag '%s': %s", flagName, err.Error()), "validation_error").
-		WithInstructions("The flag name failed validation for security reasons.", []string{
+		WithInstructions("The flag name is not available.", []string{
 			"Flag names must contain only alphanumeric characters and hyphens",
 			"Flag names must start with a letter or number",
 			"Check the flag name format",
@@ -37,7 +37,7 @@ func FlagValueValidationError(command string, args []string, flags []types.Flag,
 	return NewResponseBuilder().
 		WithCommand(command, args, flags).
 		WithError(fmt.Errorf("flag '%s' value: %s", flagName, err.Error()), "validation_error").
-		WithInstructions("The flag value failed validation for security reasons.", []string{
+		WithInstructions("The flag value is not available.", []string{
 			"Check flag values for forbidden characters or patterns",
 			"Ensure values don't contain shell metacharacters",
 			"Remove any special characters like ;, |, &, $, etc.",
@@ -50,7 +50,7 @@ func PathValidationError(command string, args []string, flags []types.Flag, flag
 	return NewResponseBuilder().
 		WithCommand(command, args, flags).
 		WithError(fmt.Errorf("flag '%s' path: %s", flagName, err.Error()), "validation_error").
-		WithInstructions("The file path failed validation for security reasons.", []string{
+		WithInstructions("The file path is not available.", []string{
 			"Ensure the path doesn't contain '..' sequences",
 			"Use absolute or relative paths without traversal",
 			"Remove any special characters from the path",

@@ -87,19 +87,19 @@ COMMANDS
 			name:        "disallowed auth-token command",
 			cmdPath:     []string{"auth-token"},
 			expectError: true,
-			errorMsg:    "not allowed for security reasons",
+			errorMsg:    "not available",
 		},
 		{
 			name:        "disallowed sso command",
 			cmdPath:     []string{"sso"},
 			expectError: true,
-			errorMsg:    "not allowed for security reasons",
+			errorMsg:    "not available",
 		},
 		{
 			name:        "disallowed profile command",
 			cmdPath:     []string{"profile"},
 			expectError: true,
-			errorMsg:    "not allowed for security reasons",
+			errorMsg:    "not available",
 		},
 		{
 			name:        "allowed service-version command",
