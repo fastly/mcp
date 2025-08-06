@@ -259,6 +259,38 @@ func ExecuteCommand(req types.CommandRequest) types.CommandResponse {
 
 			// Provide more specific instructions based on error type
 			switch response.ErrorCode {
+			case "binary_not_found":
+				response.Instructions = "CRITICAL: The Fastly CLI binary could not be found. This is a system configuration issue that must be resolved before any fastly commands can be executed."
+				response.NextSteps = []string{
+					"Install the Fastly CLI from https://www.fastly.com/documentation/reference/cli/",
+					"Ensure the fastly binary is in your PATH",
+					"Or set FASTLY_CLI_PATH to the location of the fastly binary",
+					"Verify installation with: which fastly",
+				}
+			case "binary_not_executable":
+				response.Instructions = "CRITICAL: The Fastly CLI binary exists but cannot be executed due to permission issues."
+				response.NextSteps = []string{
+					"Check the file permissions with: ls -la $(which fastly)",
+					"Make the binary executable with: chmod +x /path/to/fastly",
+					"Verify you have read and execute permissions on the binary",
+					"Contact system administrator if unable to fix permissions",
+				}
+			case "system_execution_error":
+				response.Instructions = "CRITICAL: System-level error occurred while trying to execute the Fastly CLI."
+				response.NextSteps = []string{
+					"Check the specific error message for details",
+					"Verify the fastly binary is not corrupted",
+					"Check system resources (disk space, memory)",
+					"Try reinstalling the Fastly CLI",
+				}
+			case "binary_security_error":
+				response.Instructions = "CRITICAL: Binary security validation failed. The fastly CLI cannot be executed due to security issues."
+				response.NextSteps = []string{
+					"Check the error message for specific security issue",
+					"Follow the provided fix command (e.g., chmod o-w /path/to/binary)",
+					"Verify the binary is in a secure location",
+					"Contact system administrator if unable to fix permissions",
+				}
 			case "auth_required":
 				response.Instructions = "Authentication failed. Please check your API token."
 				response.NextSteps = []string{

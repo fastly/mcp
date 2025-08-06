@@ -15,7 +15,7 @@ func TestBinarySecurityError(t *testing.T) {
 		Details: "permissions are -rwxrwxrwx - this allows any user to modify the binary",
 	}
 
-	expected := "binary security check failed for /tmp/fastly: world-writable permissions - permissions are -rwxrwxrwx - this allows any user to modify the binary"
+	expected := "binary security check failed for /tmp/fastly: world-writable permissions - permissions are -rwxrwxrwx - this allows any user to modify the binary. This is a security issue that must be resolved before the fastly command can be executed."
 	if err.Error() != expected {
 		t.Errorf("BinarySecurityError.Error() = %v, want %v", err.Error(), expected)
 	}
@@ -25,8 +25,13 @@ func TestValidateBinarySecurity_InvalidPath(t *testing.T) {
 	// Test with a non-existent binary
 	// Temporarily modify PATH to ensure fastly is not found
 	oldPath := os.Getenv("PATH")
+	oldCliPath := os.Getenv("FASTLY_CLI_PATH")
 	_ = os.Setenv("PATH", "/nonexistent")
-	defer func() { _ = os.Setenv("PATH", oldPath) }()
+	_ = os.Setenv("FASTLY_CLI_PATH", "")
+	defer func() {
+		_ = os.Setenv("PATH", oldPath)
+		_ = os.Setenv("FASTLY_CLI_PATH", oldCliPath)
+	}()
 
 	err := ValidateBinarySecurity()
 	if err == nil {

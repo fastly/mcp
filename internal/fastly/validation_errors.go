@@ -60,14 +60,26 @@ func PathValidationError(command string, args []string, flags []types.Flag, flag
 
 // BinarySecurityValidationError creates a validation error response for binary security failures
 func BinarySecurityValidationError(command string, args []string, flags []types.Flag, err error) types.CommandResponse {
+	// Extract specific remediation steps from the error message
+	nextSteps := []string{
+		"Check the fastly binary permissions (should not be world-writable)",
+		"Verify the binary is in a trusted location (not /tmp or similar)",
+		"Ensure the binary's parent directory is not world-writable",
+	}
+
+	// If the error is a BinarySecurityError, extract more specific information
+	if binaryErr, ok := err.(*BinarySecurityError); ok {
+		// The Details field already contains the fix command
+		nextSteps = []string{
+			fmt.Sprintf("Issue: %s", binaryErr.Issue),
+			fmt.Sprintf("Location: %s", binaryErr.Path),
+			binaryErr.Details,
+		}
+	}
+
 	return NewResponseBuilder().
 		WithCommand(command, args, flags).
 		WithError(err, "binary_security_error").
-		WithInstructions("The fastly binary failed security validation. This could indicate the binary has been tampered with or is in an insecure location.", []string{
-			"Check the fastly binary permissions (should not be world-writable)",
-			"Verify the binary is in a trusted location (not /tmp or similar)",
-			"Ensure the binary's parent directory is not world-writable",
-			"Reinstall fastly CLI from official sources if needed",
-		}).
+		WithInstructions("The fastly binary failed security validation. This is a critical security issue that prevents execution.", nextSteps).
 		Build()
 }

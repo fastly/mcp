@@ -3,6 +3,7 @@ package fastly
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -24,8 +25,20 @@ var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 //   - Authentication errors indicate missing or invalid API tokens
 //   - Timeout errors suggest connectivity or CLI responsiveness issues
 func CheckSetup() error {
-	if _, err := exec.LookPath("fastly"); err != nil {
-		return fmt.Errorf("fastly CLI not found in PATH. Please install it from https://developer.fastly.com/reference/cli/")
+	// Check if FASTLY_CLI_PATH is set
+	customPath := os.Getenv("FASTLY_CLI_PATH")
+	if customPath != "" {
+		// Validate the custom path exists and is executable
+		if _, err := os.Stat(customPath); err != nil {
+			return fmt.Errorf("FASTLY_CLI_PATH is set to '%s' but file does not exist: %w", customPath, err)
+		}
+	} else {
+		// Try to find fastly in PATH
+		if _, err := exec.LookPath("fastly"); err != nil {
+			currentPath := os.Getenv("PATH")
+			pathDirs := strings.Split(currentPath, string(os.PathListSeparator))
+			return fmt.Errorf("fastly CLI not found in PATH. Searched directories: %v. Please install it from https://developer.fastly.com/reference/cli/ or set FASTLY_CLI_PATH environment variable to the binary location", pathDirs)
+		}
 	}
 
 	// Validate binary security

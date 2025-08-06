@@ -16,6 +16,22 @@ type errorCodePattern struct {
 // These codes help AI agents understand and handle different types of errors appropriately.
 var errorCodePatterns = []errorCodePattern{
 	{
+		patterns: []string{"binary security check failed", "world-writable"},
+		code:     "binary_security_error",
+	},
+	{
+		patterns: []string{"SYSTEM ERROR: Fastly CLI binary not found", "fastly binary not found"},
+		code:     "binary_not_found",
+	},
+	{
+		patterns: []string{"SYSTEM ERROR: Permission denied executing", "Permission denied"},
+		code:     "binary_not_executable",
+	},
+	{
+		patterns: []string{"SYSTEM ERROR: Failed to execute", "SYSTEM ERROR: Command"},
+		code:     "system_execution_error",
+	},
+	{
 		patterns: []string{"unauthorized", "authentication", "no api token"},
 		code:     "auth_required",
 	},
@@ -56,6 +72,7 @@ var errorCodePatterns = []errorCodePattern{
 // If no pattern matches, it returns "operation_failed" as the default error code.
 //
 // Common error codes returned:
+//   - "binary_security_error": Binary security validation failures (world-writable, etc.)
 //   - "auth_required": Authentication or API token issues
 //   - "not_found": Resource not found (404 errors)
 //   - "permission_denied": Permission or forbidden errors (403)

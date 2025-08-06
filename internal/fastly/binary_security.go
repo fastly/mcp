@@ -19,7 +19,7 @@ type BinarySecurityError struct {
 }
 
 func (e *BinarySecurityError) Error() string {
-	return fmt.Sprintf("binary security check failed for %s: %s - %s", e.Path, e.Issue, e.Details)
+	return fmt.Sprintf("SYSTEM ERROR: Binary security check failed for %s: %s - %s. This is a critical security issue that prevents execution of the fastly command.", e.Path, e.Issue, e.Details)
 }
 
 // ValidateBinarySecurity performs comprehensive security checks on the fastly binary
@@ -29,10 +29,23 @@ func (e *BinarySecurityError) Error() string {
 //   - Ensuring the binary's directory is not world-writable
 //   - Validating the binary is not a symlink to an untrusted location
 func ValidateBinarySecurity() error {
-	// Find the fastly binary in PATH
-	binaryPath, err := exec.LookPath("fastly")
-	if err != nil {
-		return fmt.Errorf("fastly binary not found in PATH: %w", err)
+	var binaryPath string
+	var err error
+
+	// Check if FASTLY_CLI_PATH is set
+	if customPath := os.Getenv("FASTLY_CLI_PATH"); customPath != "" {
+		binaryPath = customPath
+		// Verify the custom path exists
+		if _, err := os.Stat(binaryPath); err != nil {
+			return fmt.Errorf("SYSTEM ERROR: FASTLY_CLI_PATH binary not found at %s: %w", binaryPath, err)
+		}
+	} else {
+		// Find the fastly binary in PATH
+		binaryPath, err = exec.LookPath("fastly")
+		if err != nil {
+			currentPath := os.Getenv("PATH")
+			return fmt.Errorf("SYSTEM ERROR: Fastly CLI binary not found in PATH (%s): %w", currentPath, err)
+		}
 	}
 
 	// Resolve any symlinks to get the real path
@@ -83,7 +96,7 @@ func validateUnixBinarySecurity(path string, fileInfo os.FileInfo) error {
 		return &BinarySecurityError{
 			Path:    path,
 			Issue:   "world-writable permissions",
-			Details: fmt.Sprintf("permissions are %s - this allows any user to modify the binary", mode.Perm()),
+			Details: fmt.Sprintf("permissions are %s - this allows any user to modify the binary. Fix with: chmod o-w %s", mode.Perm(), path),
 		}
 	}
 
@@ -107,7 +120,7 @@ func validateUnixBinarySecurity(path string, fileInfo os.FileInfo) error {
 		return &BinarySecurityError{
 			Path:    dirPath,
 			Issue:   "parent directory is world-writable without sticky bit",
-			Details: fmt.Sprintf("directory permissions are %s - this allows any user to replace the binary", dirMode),
+			Details: fmt.Sprintf("directory permissions are %s - this allows any user to replace the binary. Fix with: chmod o-w %s or chmod +t %s", dirMode, dirPath, dirPath),
 		}
 	}
 
