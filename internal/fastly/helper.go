@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/fastly/mcp/internal/types"
 )
@@ -46,12 +45,12 @@ func CheckSetup() error {
 		return fmt.Errorf("fastly CLI binary security check failed: %w", err)
 	}
 
-	// Try to run 'fastly service list' with limit 1 to check both CLI availability and authentication
-	// This command requires authentication to work
+	// Try to run 'fastly whoami' to check both CLI availability and authentication
+	// This command requires authentication to work and is faster than listing services
 	result := RunFastlyCommand(CommandRunConfig{
 		Command: "fastly",
-		Args:    []string{"service", "list", "--per-page", "1"},
-		Timeout: 10 * time.Second,
+		Args:    []string{"whoami"},
+		Timeout: CommandTimeout,
 	})
 
 	if result.Error != nil {
@@ -75,21 +74,7 @@ func CheckSetup() error {
 		return fmt.Errorf("fastly CLI error: %s", errorMsg)
 	}
 
-	// Check for authorization in JSON output
-	output := result.Stdout
-	if output == "" {
-		output = result.Stderr
-	}
-
-	if strings.TrimSpace(output) != "" {
-		var jsonResult map[string]interface{}
-		if err := json.Unmarshal([]byte(output), &jsonResult); err == nil {
-			if authorized, ok := jsonResult["authorized"].(bool); ok && !authorized {
-				return fmt.Errorf("not authenticated with Fastly. Please run 'fastly profile create' or set FASTLY_API_TOKEN")
-			}
-		}
-	}
-
+	// If we got here, the command succeeded and user is authenticated
 	return nil
 }
 
