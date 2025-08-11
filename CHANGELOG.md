@@ -2,9 +2,28 @@
 
 ## [Unreleased]
 
+### Added
+- Enhanced error reporting for command execution failures with more descriptive messages
+- Improved binary validation error messages for better troubleshooting
+
+### Changed
+- Updated mcp-go dependency from v0.36.0 to v0.37.0
+- Updated other dependencies: easyjson (0.7.7 → 0.9.0), spf13/cast (1.7.1 → 1.9.2)
+- Validation test now uses `fastly whoami` instead of `fastly service list` for authentication checks
+- Made error messages more generic and user-friendly
+- Improved system failure detection and reporting in binary validation
+
 ### Fixed
 - Updated all references from deprecated `fastly auth` commands to current `fastly profile` commands
 - Changed authentication error messages to suggest `fastly profile create` instead of `fastly auth login`
+- Removed invalid `fastly setup` command references
+
+### Security
+- Disabled VCL upload/download commands by default for security (vcl custom create/update/describe, vcl snippet create/update/describe)
+- VCL list and delete commands remain available
+
+### Documentation
+- Added Qwen3-Coder to the list of recommended models in README
 
 ## [0.1.6] - 2025-08-01
 
