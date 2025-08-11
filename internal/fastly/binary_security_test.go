@@ -15,7 +15,7 @@ func TestBinarySecurityError(t *testing.T) {
 		Details: "permissions are -rwxrwxrwx - this allows any user to modify the binary",
 	}
 
-	expected := "binary security check failed for /tmp/fastly: world-writable permissions - permissions are -rwxrwxrwx - this allows any user to modify the binary. This is a security issue that must be resolved before the fastly command can be executed."
+	expected := "SYSTEM ERROR: Binary security check failed for /tmp/fastly: world-writable permissions - permissions are -rwxrwxrwx - this allows any user to modify the binary. This is a critical security issue that prevents execution of the fastly command."
 	if err.Error() != expected {
 		t.Errorf("BinarySecurityError.Error() = %v, want %v", err.Error(), expected)
 	}
