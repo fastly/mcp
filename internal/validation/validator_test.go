@@ -829,10 +829,12 @@ func TestNewValidatorWithCommandsAndDenied(t *testing.T) {
 // Test edge cases for IsDenied
 func TestIsDeniedEdgeCases(t *testing.T) {
 	deniedCommands := map[string]bool{
-		"service":           true, // Deny entire command
-		"backend create":    true, // Deny specific subcommand
-		"stats realtime":    true, // Another specific denial
-		"vcl custom upload": true, // This shouldn't work (only first subcommand checked)
+		"service":            true, // Deny entire command
+		"backend create":     true, // Deny specific subcommand
+		"stats realtime":     true, // Another specific denial
+		"vcl custom upload":  true, // Multi-level subcommand denial
+		"vcl custom create":  true, // Another multi-level denial
+		"vcl snippet update": true, // VCL snippet denial
 	}
 
 	v := NewValidatorWithCommandsAndDenied(nil, deniedCommands)
@@ -854,9 +856,12 @@ func TestIsDeniedEdgeCases(t *testing.T) {
 		{"backend list allowed", "backend", []string{"list"}, false},
 		{"backend alone allowed", "backend", []string{}, false},
 
-		// Only first arg is checked for subcommand matching
-		{"vcl custom not checked", "vcl", []string{"custom", "upload"}, false},
-		{"vcl custom allowed", "vcl", []string{"custom"}, false},
+		// Multi-level subcommand checking
+		{"vcl custom upload denied", "vcl", []string{"custom", "upload"}, true},
+		{"vcl custom create denied", "vcl", []string{"custom", "create"}, true},
+		{"vcl custom list allowed", "vcl", []string{"custom", "list"}, false},
+		{"vcl snippet update denied", "vcl", []string{"snippet", "update"}, true},
+		{"vcl snippet list allowed", "vcl", []string{"snippet", "list"}, false},
 
 		// Case sensitivity
 		{"case sensitive command", "SERVICE", []string{}, false},
@@ -897,9 +902,9 @@ func TestDefaultDeniedCommands(t *testing.T) {
 		t.Error("defaultDeniedCommands() should contain 'log-tail'")
 	}
 
-	// Should have exactly 2 entries
-	if len(denied) != 2 {
-		t.Errorf("defaultDeniedCommands() should have 2 entries, got %d", len(denied))
+	// Should have exactly 8 entries (2 original + 6 VCL commands)
+	if len(denied) != 8 {
+		t.Errorf("defaultDeniedCommands() should have 8 entries, got %d", len(denied))
 	}
 
 	// All entries should be non-empty strings
@@ -907,5 +912,64 @@ func TestDefaultDeniedCommands(t *testing.T) {
 		if cmd == "" {
 			t.Error("defaultDeniedCommands() contains empty command")
 		}
+	}
+}
+
+// TestArbitraryDepthDeniedCommands tests that we can block commands at arbitrary depths
+func TestArbitraryDepthDeniedCommands(t *testing.T) {
+	deniedCommands := map[string]bool{
+		"a":         true, // Block entire command
+		"b c":       true, // Block 2-level
+		"d e f":     true, // Block 3-level
+		"g h i j":   true, // Block 4-level
+		"x y z w v": true, // Block 5-level (but we only check up to 4)
+	}
+
+	v := NewValidatorWithCommandsAndDenied(nil, deniedCommands)
+
+	tests := []struct {
+		name          string
+		command       string
+		args          []string
+		wantDenied    bool
+		wantDeniedCmd string
+	}{
+		// Test blocking at various depths
+		{"block entire command a", "a", []string{}, true, "a"},
+		{"block entire command a with args", "a", []string{"anything", "else"}, true, "a"},
+
+		{"allow b alone", "b", []string{}, false, ""},
+		{"block b c", "b", []string{"c"}, true, "b c"},
+		{"block b c with more args", "b", []string{"c", "extra"}, true, "b c"},
+		{"allow b d", "b", []string{"d"}, false, ""},
+
+		{"allow d alone", "d", []string{}, false, ""},
+		{"allow d e alone", "d", []string{"e"}, false, ""},
+		{"block d e f", "d", []string{"e", "f"}, true, "d e f"},
+		{"block d e f with more", "d", []string{"e", "f", "g"}, true, "d e f"},
+
+		{"allow g alone", "g", []string{}, false, ""},
+		{"allow g h", "g", []string{"h"}, false, ""},
+		{"allow g h i", "g", []string{"h", "i"}, false, ""},
+		{"block g h i j", "g", []string{"h", "i", "j"}, true, "g h i j"},
+		{"block g h i j with more", "g", []string{"h", "i", "j", "k"}, true, "g h i j"},
+
+		// Test 5-level (should NOT be blocked as we limit to 4 levels)
+		{"5-level not checked", "x", []string{"y", "z", "w", "v"}, false, ""},
+		{"but 4-level of 5-level works", "x", []string{"y", "z", "w"}, false, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isDenied := v.IsDenied(tt.command, tt.args)
+			if isDenied != tt.wantDenied {
+				t.Errorf("IsDenied(%q, %v) = %v, want %v", tt.command, tt.args, isDenied, tt.wantDenied)
+			}
+
+			deniedCmd := v.GetDeniedCommand(tt.command, tt.args)
+			if deniedCmd != tt.wantDeniedCmd {
+				t.Errorf("GetDeniedCommand(%q, %v) = %q, want %q", tt.command, tt.args, deniedCmd, tt.wantDeniedCmd)
+			}
+		})
 	}
 }

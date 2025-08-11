@@ -199,6 +199,16 @@ func defaultDeniedCommands() map[string]bool {
 	return map[string]bool{
 		"stats realtime": true,
 		"log-tail":       true,
+
+		// VCL upload/download commands - disabled by default for security
+		"vcl custom create":   true,
+		"vcl custom update":   true,
+		"vcl custom describe": true,
+
+		// VCL snippet commands - disabled by default for security
+		"vcl snippet create":   true,
+		"vcl snippet update":   true,
+		"vcl snippet describe": true,
 	}
 }
 
@@ -412,21 +422,45 @@ func (v *Validator) ValidateAll(command string, args []string, flags map[string]
 }
 
 // IsDenied checks if a command-args combination is in the denylist.
-// It constructs the full command path (e.g., "stats realtime") and checks
-// if it's explicitly denied. Returns true if the command should be blocked.
+// It progressively builds command paths (e.g., "a", "a b", "a b c", "a b c d") and checks
+// if any are explicitly denied. Returns true if the command should be blocked.
+// For performance, we limit checking to a maximum depth of 4 levels (command + 3 args).
 func (v *Validator) IsDenied(command string, args []string) bool {
-	// Check the command alone first
+	// Check the command alone first (level 1)
 	if v.deniedCommands[command] {
 		return true
 	}
 
-	// Check command with first argument (subcommand)
-	if len(args) > 0 {
-		fullCommand := command + " " + args[0]
+	// Progressively check deeper command paths (levels 2-4)
+	fullCommand := command
+	maxDepth := 3 // Check up to 3 arguments (total 4 levels)
+	for i := 0; i < len(args) && i < maxDepth; i++ {
+		fullCommand += " " + args[i]
 		if v.deniedCommands[fullCommand] {
 			return true
 		}
 	}
 
 	return false
+}
+
+// GetDeniedCommand returns the specific command path that was denied, or empty string if not denied.
+// This is useful for generating accurate error messages.
+func (v *Validator) GetDeniedCommand(command string, args []string) string {
+	// Check the command alone first (level 1)
+	if v.deniedCommands[command] {
+		return command
+	}
+
+	// Progressively check deeper command paths (levels 2-4)
+	fullCommand := command
+	maxDepth := 3 // Check up to 3 arguments (total 4 levels)
+	for i := 0; i < len(args) && i < maxDepth; i++ {
+		fullCommand += " " + args[i]
+		if v.deniedCommands[fullCommand] {
+			return fullCommand
+		}
+	}
+
+	return ""
 }
