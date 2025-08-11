@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.7] - 2025-08-12
 
 ### Added
 - Enhanced error reporting for command execution failures with more descriptive messages
