@@ -633,7 +633,10 @@ Example usage:
   fastly-mcp --denied-commands "stats realtime,log-tail"  # Override default denied commands
   fastly-mcp --denied-commands-file denied.txt            # Load denied commands from file
 
-Default denied commands: stats realtime, log-tail
+Default denied commands:
+  stats realtime, log-tail (real-time monitoring)
+  vcl custom create/update/describe (VCL upload/download)
+  vcl snippet create/update/describe (snippet upload/download)
 `
 	fmt.Print(usage)
 }
