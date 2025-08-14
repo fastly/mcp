@@ -44,6 +44,14 @@ type CommandResponse struct {
 	Pagination *PaginationInfo `json:"pagination,omitempty"`
 	// Metadata contains additional context about the executed operation
 	Metadata *OperationMetadata `json:"metadata,omitempty"`
+	// ResultID is the ID of cached result when output is large
+	ResultID string `json:"result_id,omitempty"`
+	// Cached indicates if the result was cached due to size
+	Cached bool `json:"cached,omitempty"`
+	// CacheMetadata contains information about the cached result
+	CacheMetadata *CacheMetadata `json:"cache_metadata,omitempty"`
+	// Preview contains a small sample of cached data
+	Preview interface{} `json:"preview,omitempty"`
 }
 
 // OperationMetadata describes the type and safety characteristics of an operation.
@@ -68,6 +76,20 @@ type PaginationInfo struct {
 	Truncated bool `json:"truncated"`
 	// TruncationNote provides guidance for retrieving the complete output
 	TruncationNote string `json:"truncation_note,omitempty"`
+}
+
+// CacheMetadata contains information about a cached result.
+type CacheMetadata struct {
+	// ResultID is the unique identifier for the cached result
+	ResultID string `json:"result_id"`
+	// TotalSize is the size of the cached data in bytes
+	TotalSize int `json:"total_size"`
+	// DataType describes the type of data (json_array, json_object, text)
+	DataType string `json:"data_type"`
+	// TotalItems is the number of items (for arrays)
+	TotalItems int `json:"total_items,omitempty"`
+	// TotalLines is the number of lines (for text)
+	TotalLines int `json:"total_lines,omitempty"`
 }
 
 // HelpInfo provides structured help documentation for a Fastly CLI command.

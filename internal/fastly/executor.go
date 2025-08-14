@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/fastly/mcp/internal/cache"
 	"github.com/fastly/mcp/internal/types"
 	"github.com/fastly/mcp/internal/validation"
 )
@@ -49,6 +50,15 @@ func SetTokenEncryptionEnabled(enabled bool) {
 // Returns true if token encryption is enabled, false otherwise.
 func GetTokenEncryptionEnabled() bool {
 	return globalTokenEncryptionEnabled
+}
+
+// convertFlagsToInterface converts []types.Flag to []interface{} for cache compatibility.
+func convertFlagsToInterface(flags []types.Flag) []interface{} {
+	result := make([]interface{}, len(flags))
+	for i, flag := range flags {
+		result[i] = flag
+	}
+	return result
 }
 
 // ExecuteCommand executes a Fastly command with comprehensive validation and safety checks.
@@ -315,22 +325,58 @@ func ExecuteCommand(req types.CommandRequest) types.CommandResponse {
 	} else {
 		response.Success = true
 
-		trimmedOutput := strings.TrimSpace(cleanedOutput)
-		if trimmedOutput != "" && json.Valid([]byte(trimmedOutput)) {
-			var jsonData interface{}
-			if err := json.Unmarshal([]byte(trimmedOutput), &jsonData); err == nil {
-				// Apply sanitization to JSON data if enabled
-				if globalSanitizeOpts.Enabled {
-					jsonData = SanitizeJSON(jsonData, globalSanitizeOpts)
-				}
-				truncatedJSON, paginationInfo := TruncateJSONArray(jsonData)
-				response.OutputJSON = truncatedJSON
-				response.Pagination = paginationInfo
+		// Check if output should be cached (>10KB)
+		if cache.ShouldCache(cleanedOutput) {
+			// Store the output in cache
+			store := cache.GetStore()
+			resultID := store.Store(cleanedOutput, req.Command, req.Args, req.Flags)
 
-				if paginationInfo != nil {
-					response.Instructions = "Command executed successfully. The JSON output has been truncated due to size."
+			// Create a cached response with preview
+			cachedResp := cache.CreateCachedResponse(resultID, cleanedOutput, req.Command, req.Args, convertFlagsToInterface(req.Flags))
+
+			// Convert to CommandResponse format
+			response.Success = cachedResp.Success
+			response.ResultID = cachedResp.ResultID
+			response.Cached = cachedResp.Cached
+			response.CacheMetadata = &types.CacheMetadata{
+				ResultID:   cachedResp.ResultID,
+				TotalSize:  cachedResp.Metadata.TotalSize,
+				DataType:   cachedResp.Metadata.DataType,
+				TotalItems: cachedResp.Metadata.TotalItems,
+				TotalLines: cachedResp.Metadata.TotalLines,
+			}
+			response.Preview = cachedResp.Preview
+			response.Instructions = cachedResp.Instructions
+			response.NextSteps = cachedResp.NextSteps
+		} else {
+			// Normal processing for small outputs
+			trimmedOutput := strings.TrimSpace(cleanedOutput)
+			if trimmedOutput != "" && json.Valid([]byte(trimmedOutput)) {
+				var jsonData interface{}
+				if err := json.Unmarshal([]byte(trimmedOutput), &jsonData); err == nil {
+					// Apply sanitization to JSON data if enabled
+					if globalSanitizeOpts.Enabled {
+						jsonData = SanitizeJSON(jsonData, globalSanitizeOpts)
+					}
+					truncatedJSON, paginationInfo := TruncateJSONArray(jsonData)
+					response.OutputJSON = truncatedJSON
+					response.Pagination = paginationInfo
+
+					if paginationInfo != nil {
+						response.Instructions = "Command executed successfully. The JSON output has been truncated due to size."
+					} else {
+						response.Instructions = "Command executed successfully. The output has been parsed as JSON."
+					}
 				} else {
-					response.Instructions = "Command executed successfully. The output has been parsed as JSON."
+					truncatedOutput, paginationInfo := TruncateOutput(cleanedOutput, MaxOutputSize)
+					response.Output = truncatedOutput
+					response.Pagination = paginationInfo
+
+					if paginationInfo != nil {
+						response.Instructions = "Command executed successfully. The output has been truncated due to size."
+					} else {
+						response.Instructions = "Command executed successfully. The output contains the result."
+					}
 				}
 			} else {
 				truncatedOutput, paginationInfo := TruncateOutput(cleanedOutput, MaxOutputSize)
@@ -342,16 +388,6 @@ func ExecuteCommand(req types.CommandRequest) types.CommandResponse {
 				} else {
 					response.Instructions = "Command executed successfully. The output contains the result."
 				}
-			}
-		} else {
-			truncatedOutput, paginationInfo := TruncateOutput(cleanedOutput, MaxOutputSize)
-			response.Output = truncatedOutput
-			response.Pagination = paginationInfo
-
-			if paginationInfo != nil {
-				response.Instructions = "Command executed successfully. The output has been truncated due to size."
-			} else {
-				response.Instructions = "Command executed successfully. The output contains the result."
 			}
 		}
 

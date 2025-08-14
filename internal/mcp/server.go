@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fastly/mcp/internal/cache"
 	"github.com/fastly/mcp/internal/fastly"
 	"github.com/fastly/mcp/internal/types"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -122,6 +123,75 @@ func CreateServer() (*server.MCPServer, error) {
 					Properties: map[string]interface{}{},
 				},
 			}, getCurrentTime)
+
+			// Cache retrieval tools
+			s.AddTool(mcp.Tool{
+				Name:        "fastly_result_read",
+				Description: "Read paginated data from a cached result. Use this to retrieve portions of large command outputs.",
+				InputSchema: mcp.ToolInputSchema{
+					Type: "object",
+					Properties: map[string]interface{}{
+						"result_id": map[string]interface{}{
+							"type":        "string",
+							"description": "The ID of the cached result to read from",
+						},
+						"offset": map[string]interface{}{
+							"type":        "number",
+							"description": "Starting position (0-based index for arrays/lines)",
+							"default":     0,
+						},
+						"limit": map[string]interface{}{
+							"type":        "number",
+							"description": "Number of items/lines to return (default: 20)",
+							"default":     20,
+						},
+					},
+					Required: []string{"result_id"},
+				},
+			}, makeResultReadHandler())
+
+			s.AddTool(mcp.Tool{
+				Name:        "fastly_result_query",
+				Description: "Query/filter cached result data. For arrays: use 'field=value' filters. For text: searches for matching lines.",
+				InputSchema: mcp.ToolInputSchema{
+					Type: "object",
+					Properties: map[string]interface{}{
+						"result_id": map[string]interface{}{
+							"type":        "string",
+							"description": "The ID of the cached result to query",
+						},
+						"filter": map[string]interface{}{
+							"type":        "string",
+							"description": "Filter expression (e.g., 'name=production', 'error', 'status.code=200')",
+						},
+					},
+					Required: []string{"result_id", "filter"},
+				},
+			}, makeResultQueryHandler())
+
+			s.AddTool(mcp.Tool{
+				Name:        "fastly_result_summary",
+				Description: "Get a summary of cached result including metadata, structure, and statistics.",
+				InputSchema: mcp.ToolInputSchema{
+					Type: "object",
+					Properties: map[string]interface{}{
+						"result_id": map[string]interface{}{
+							"type":        "string",
+							"description": "The ID of the cached result to summarize",
+						},
+					},
+					Required: []string{"result_id"},
+				},
+			}, makeResultSummaryHandler())
+
+			s.AddTool(mcp.Tool{
+				Name:        "fastly_result_list",
+				Description: "List all currently cached results with their IDs and metadata.",
+				InputSchema: mcp.ToolInputSchema{
+					Type:       "object",
+					Properties: map[string]interface{}{},
+				},
+			}, makeResultListHandler())
 
 			s.AddPrompt(mcp.NewPrompt("system_prompt",
 				mcp.WithPromptDescription("Returns the Fastly MCP system prompt that describes available tools and workflow"),
@@ -427,6 +497,107 @@ func (ft *FastlyTool) makeExecuteHandler() server.ToolHandlerFunc {
 	}
 }
 
+// makeResultReadHandler creates a handler for reading cached results.
+func makeResultReadHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		params := request.GetArguments()
+		resultID, ok := params["result_id"].(string)
+		if !ok {
+			return nil, fmt.Errorf("result_id is required")
+		}
+
+		offset := 0
+		if o, ok := params["offset"].(float64); ok {
+			offset = int(o)
+		}
+
+		limit := 20
+		if l, ok := params["limit"].(float64); ok {
+			limit = int(l)
+		}
+
+		store := cache.GetStore()
+		data, err := store.Read(resultID, offset, limit)
+		if err != nil {
+			return newErrorResult(map[string]interface{}{
+				"error": err.Error(),
+			}), nil
+		}
+
+		return newSuccessResult(map[string]interface{}{
+			"success": true,
+			"data":    data,
+			"offset":  offset,
+			"limit":   limit,
+		}), nil
+	}
+}
+
+// makeResultQueryHandler creates a handler for querying cached results.
+func makeResultQueryHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		params := request.GetArguments()
+		resultID, ok := params["result_id"].(string)
+		if !ok {
+			return nil, fmt.Errorf("result_id is required")
+		}
+
+		filter, ok := params["filter"].(string)
+		if !ok {
+			return nil, fmt.Errorf("filter is required")
+		}
+
+		store := cache.GetStore()
+		data, err := store.Query(resultID, filter)
+		if err != nil {
+			return newErrorResult(map[string]interface{}{
+				"error": err.Error(),
+			}), nil
+		}
+
+		return newSuccessResult(map[string]interface{}{
+			"success": true,
+			"filter":  filter,
+			"results": data,
+		}), nil
+	}
+}
+
+// makeResultSummaryHandler creates a handler for getting result summaries.
+func makeResultSummaryHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		params := request.GetArguments()
+		resultID, ok := params["result_id"].(string)
+		if !ok {
+			return nil, fmt.Errorf("result_id is required")
+		}
+
+		store := cache.GetStore()
+		summary, err := store.GetSummary(resultID)
+		if err != nil {
+			return newErrorResult(map[string]interface{}{
+				"error": err.Error(),
+			}), nil
+		}
+
+		return newSuccessResult(summary), nil
+	}
+}
+
+// makeResultListHandler creates a handler for listing cached results.
+func makeResultListHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		store := cache.GetStore()
+		results := store.List()
+
+		return newSuccessResult(map[string]interface{}{
+			"success": true,
+			"results": results,
+			"count":   len(results),
+		}), nil
+	}
+}
+
 // handleSystemPrompt returns the system prompt content for Fastly MCP
 func handleSystemPrompt(ctx context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 	systemPromptContent := `You have access to Fastly's CDN/edge platform via MCP tools that wrap the Fastly CLI.
@@ -436,6 +607,12 @@ func handleSystemPrompt(ctx context.Context, request mcp.GetPromptRequest) (*mcp
 - **` + "`fastly_describe [command]`" + `** - Get command details/parameters
 - **` + "`fastly_execute`" + `** - Run commands with parameters
 - **` + "`current_time`" + `** - Get timestamps
+
+#### Cache Tools (for large outputs):
+- **` + "`fastly_result_read`" + `** - Read paginated data from cached results
+- **` + "`fastly_result_query`" + `** - Query/filter cached results
+- **` + "`fastly_result_summary`" + `** - Get summary of cached data
+- **` + "`fastly_result_list`" + `** - List all cached results
 
 #### Core Operations:
 - **Services**: Create/update/list CDN services, manage versions

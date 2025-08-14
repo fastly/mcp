@@ -308,7 +308,7 @@ claude mcp add fastly C:\path\to\fastly-mcp.exe
 
 ## 🔧 Available Tools
 
-The server provides four powerful tools for AI agents:
+The server provides eight powerful tools for AI agents:
 
 ### 📋 `fastly_list_commands`
 **Lists all available Fastly CLI commands**
@@ -368,6 +368,95 @@ The server provides four powerful tools for AI agents:
   "local": "2025-01-10 10:30:00 PST",
   "timezone": "PST",
   "time_offset": "-08:00"
+}
+```
+</details>
+
+### 📦 Cache Management Tools
+
+When command outputs exceed 10KB, they are automatically cached with a preview. Use these tools to access the full data:
+
+#### 📖 `fastly_result_read`
+**Read paginated data from cached results**
+
+```json
+{
+  "tool": "fastly_result_read",
+  "arguments": {
+    "result_id": "result_abc123",
+    "offset": 0,
+    "limit": 20
+  }
+}
+```
+
+#### 🔍 `fastly_result_query`
+**Query/filter cached data**
+
+```json
+{
+  "tool": "fastly_result_query",
+  "arguments": {
+    "result_id": "result_abc123",
+    "filter": "name=production"
+  }
+}
+```
+
+#### 📊 `fastly_result_summary`
+**Get statistical summary of cached data**
+
+```json
+{
+  "tool": "fastly_result_summary",
+  "arguments": {
+    "result_id": "result_abc123"
+  }
+}
+```
+
+#### 📋 `fastly_result_list`
+**List all currently cached results**
+
+```json
+{
+  "tool": "fastly_result_list"
+}
+```
+
+<details>
+<summary>How Caching Works</summary>
+
+When a command returns more than 10KB of data:
+
+1. **Automatic Caching**: The full output is stored in memory with a unique ID
+2. **Preview Response**: You receive a small preview (first 5 items/20 lines) plus the result ID
+3. **Smart Retrieval**: Use the cache tools to access specific portions of the data
+4. **TTL**: Cached results expire after 10 minutes of inactivity
+
+Example cached response:
+```json
+{
+  "success": true,
+  "result_id": "result_abc123",
+  "cached": true,
+  "cache_metadata": {
+    "total_size": 150000,
+    "data_type": "json_array",
+    "total_items": 156
+  },
+  "preview": {
+    "type": "json_array",
+    "first_items": [/* first 5 items */],
+    "total_items": 156,
+    "truncated": true
+  },
+  "instructions": "Output cached due to size. Use result_id with retrieval tools.",
+  "next_steps": [
+    "Use fastly_result_read to get paginated data",
+    "Use fastly_result_query to filter results",
+    "Use fastly_result_summary for overview"
+  ]
 }
 ```
 </details>
