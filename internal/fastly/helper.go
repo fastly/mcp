@@ -65,7 +65,7 @@ func CheckSetup() error {
 		if IsAuthenticationError(result.Stdout, result.Stderr) {
 			errorMsg := strings.TrimSpace(result.Stderr)
 			if errorMsg == "" {
-				errorMsg = "Please run 'fastly profile create' or set FASTLY_API_TOKEN"
+				errorMsg = "Please run 'fastly profile create' to set up authentication (FASTLY_API_TOKEN is not recommended for MCP)"
 			}
 			return fmt.Errorf("not authenticated with Fastly. %s", errorMsg)
 		}

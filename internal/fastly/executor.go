@@ -299,11 +299,12 @@ func ExecuteCommand(req types.CommandRequest) types.CommandResponse {
 					"Contact system administrator if unable to fix permissions",
 				}
 			case "auth_required":
-				response.Instructions = "Authentication failed. Please check your API token."
+				response.Instructions = "Authentication failed. Please set up authentication using 'fastly profile create'."
 				response.NextSteps = []string{
-					"Verify that FASTLY_API_TOKEN environment variable is set correctly",
+					"Run 'fastly profile create' to set up authentication",
+					"Get your API token from https://manage.fastly.com/account/personal/tokens",
 					"Check that the token has the necessary permissions for this operation",
-					"Run 'fastly profile create' to re-authenticate if needed",
+					"Note: FASTLY_API_TOKEN environment variable is not recommended for MCP clients",
 				}
 			case "not_found":
 				response.Instructions = "The requested resource was not found."

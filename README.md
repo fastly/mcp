@@ -176,12 +176,28 @@ Get up and running in just 3 steps!
 First, ensure the Fastly CLI is authenticated with your account:
 
 ```bash
+# Check if you're already authenticated
 fastly whoami
 ```
 
-**Windows Users:** Run this command in PowerShell, Command Prompt, or Windows Terminal.
+**If not authenticated**, follow these steps:
 
-> 💡 **Note**: The MCP server uses your existing Fastly CLI authentication. No additional setup needed!
+1. **Get your API token** from the [Fastly web interface](https://manage.fastly.com/account/personal/tokens)
+   - Log in to your Fastly account
+   - Navigate to Account → API tokens
+   - Create a new token or use an existing one
+
+2. **Create a Fastly profile** using the CLI:
+   ```bash
+   fastly profile create
+   ```
+   - Enter a profile name (e.g., "default")
+   - Paste your API token when prompted
+   - The CLI will save your credentials
+
+**Windows Users:** Run these commands in PowerShell, Command Prompt, or Windows Terminal.
+
+> ⚠️ **Important**: The `FASTLY_API_TOKEN` environment variable is not recommended for MCP clients as it may not be properly inherited by the MCP server process. Always use `fastly profile create` for reliable authentication.
 
 <details>
 <summary>📁 Where are credentials stored?</summary>
@@ -287,6 +303,19 @@ claude mcp add fastly C:\path\to\fastly-mcp.exe
 
 <details>
 <summary>⚠️ <b>Troubleshooting Quick Start Issues</b></summary>
+
+**Authentication Issues?**
+- **"Not authenticated" error**:
+  - Run `fastly profile create` to set up authentication
+  - Do NOT rely on `FASTLY_API_TOKEN` environment variable with MCP
+  - Verify authentication with `fastly whoami`
+- **"Invalid token" error**:
+  - Get a new API token from [Fastly web interface](https://manage.fastly.com/account/personal/tokens)
+  - Re-run `fastly profile create` with the new token
+- **MCP server can't find credentials**:
+  - Ensure you used `fastly profile create` instead of environment variables
+  - Check credentials file exists at the correct location (see above)
+  - Try running `fastly profile list` to see available profiles
 
 **AI assistant doesn't see the Fastly tools?**
 - Restart your AI application after configuration
@@ -736,7 +765,7 @@ This server works best with Language Models optimized for:
 
 For best results, use models specifically optimized for agentic workflows and tool usage.
 
-**Recommended Models**: 
+**Recommended Models**:
 
 The Fastly MCP server has been successfully tested with the following models:
 

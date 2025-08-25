@@ -8,7 +8,7 @@
 //     overhead. Useful for debugging and manual testing.
 //
 // The server requires the Fastly CLI to be installed and accessible in the PATH, and proper
-// authentication via FASTLY_API_TOKEN environment variable or 'fastly profile' command.
+// authentication via 'fastly profile create' command (recommended for MCP clients).
 package main
 
 import (
@@ -517,9 +517,11 @@ func runCLIMode(sanitize bool, encryptTokens bool) {
 			strings.Contains(err.Error(), `"authorized":false`) {
 			// Output human-friendly message for authentication errors
 			fmt.Fprintf(os.Stderr, "Authentication required for Fastly CLI.\n\n")
-			fmt.Fprintf(os.Stderr, "Please authenticate using one of these methods:\n")
-			fmt.Fprintf(os.Stderr, "  1. Run 'fastly profile create' to set up authentication\n")
-			fmt.Fprintf(os.Stderr, "  2. Set the FASTLY_API_TOKEN environment variable\n\n")
+			fmt.Fprintf(os.Stderr, "Please authenticate using the following steps:\n")
+			fmt.Fprintf(os.Stderr, "  1. Get your API token from https://manage.fastly.com/account/personal/tokens\n")
+			fmt.Fprintf(os.Stderr, "  2. Run 'fastly profile create' to set up authentication\n")
+			fmt.Fprintf(os.Stderr, "  3. Enter a profile name (e.g., 'default') and paste your API token\n\n")
+			fmt.Fprintf(os.Stderr, "Note: FASTLY_API_TOKEN environment variable is not recommended for MCP clients.\n")
 			fmt.Fprintf(os.Stderr, "For more information, visit: https://developer.fastly.com/reference/cli/\n")
 			os.Exit(1)
 		}
@@ -534,9 +536,9 @@ func runCLIMode(sanitize bool, encryptTokens bool) {
 			Instructions: "The Fastly service is not properly configured. Please ensure proper setup before using these tools.",
 			NextSteps: []string{
 				"Ensure the Fastly CLI is installed on the system",
-				"Verify the FASTLY_API_TOKEN environment variable is set",
-				"Check that authentication is properly configured",
-				"Run 'fastly profile create' to authenticate if needed",
+				"Run 'fastly profile create' to set up authentication (recommended)",
+				"Get your API token from https://manage.fastly.com/account/personal/tokens",
+				"Check authentication status with 'fastly whoami'",
 			},
 		}
 

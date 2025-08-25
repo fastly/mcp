@@ -70,7 +70,8 @@ func SetupError(command string, err error) types.CommandResponse {
 		WithError(err, "setup_error").
 		WithInstructions("The Fastly CLI is not properly set up.", []string{
 			"Ensure the Fastly CLI is installed and in your PATH",
-			"Check that FASTLY_API_TOKEN is set or run 'fastly profile create' to authenticate",
+			"Run 'fastly profile create' to authenticate (recommended for MCP)",
+			"Get your API token from https://manage.fastly.com/account/personal/tokens",
 			"Visit https://www.fastly.com/documentation/reference/cli/ for installation instructions",
 		}).
 		Build()
