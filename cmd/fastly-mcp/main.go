@@ -137,20 +137,29 @@ func main() {
 			}
 			continue
 		}
-		if arg == "--output-cache-threshold" {
+		// Handle --output-cache-threshold with both space and equals sign syntax
+		if arg == "--output-cache-threshold" || strings.HasPrefix(arg, "--output-cache-threshold=") {
 			if outputCacheThreshold != 0 {
 				fmt.Fprintf(os.Stderr, "Error: --output-cache-threshold specified multiple times\n")
 				os.Exit(1)
 			}
-			if i+1 < len(os.Args) && !strings.HasPrefix(os.Args[i+1], "-") {
-				var err error
-				fmt.Sscanf(os.Args[i+1], "%d", &outputCacheThreshold)
-				if err != nil || outputCacheThreshold <= 0 {
-					fmt.Fprintf(os.Stderr, "Error: --output-cache-threshold requires a positive integer (bytes)\n")
-					os.Exit(1)
-				}
+
+			var value string
+			if strings.HasPrefix(arg, "--output-cache-threshold=") {
+				// Handle equals sign syntax: --output-cache-threshold=10000
+				value = strings.TrimPrefix(arg, "--output-cache-threshold=")
+			} else if i+1 < len(os.Args) && !strings.HasPrefix(os.Args[i+1], "-") {
+				// Handle space-separated syntax: --output-cache-threshold 10000
+				value = os.Args[i+1]
 				i++
 			} else {
+				fmt.Fprintf(os.Stderr, "Error: --output-cache-threshold requires a positive integer (bytes)\n")
+				os.Exit(1)
+			}
+
+			var err error
+			_, err = fmt.Sscanf(value, "%d", &outputCacheThreshold)
+			if err != nil || outputCacheThreshold <= 0 {
 				fmt.Fprintf(os.Stderr, "Error: --output-cache-threshold requires a positive integer (bytes)\n")
 				os.Exit(1)
 			}
@@ -410,6 +419,16 @@ func runCLIMode(sanitize bool, encryptTokens bool) {
 				i++ // Skip the commands argument too
 			}
 			continue
+		}
+		// Handle --output-cache-threshold with both syntaxes
+		if os.Args[i] == "--output-cache-threshold" {
+			if i+1 < len(os.Args) {
+				i++ // Skip the value argument too
+			}
+			continue
+		}
+		if strings.HasPrefix(os.Args[i], "--output-cache-threshold=") {
+			continue // Skip the combined flag=value argument
 		}
 		if command == "" {
 			command = os.Args[i]
