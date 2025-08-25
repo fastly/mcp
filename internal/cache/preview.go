@@ -167,7 +167,7 @@ func CreateCachedResponse(resultID string, output string, command string, args [
 		Cached:       true,
 		Metadata:     metadata,
 		Preview:      preview,
-		Instructions: "Output cached due to size. Use the result_id with retrieval tools to access the full data.",
+		Instructions: "⚠️ OUTPUT TRUNCATED: The full output was too large to display and has been cached. Only a preview is shown above. Use the result_id with retrieval tools to access the complete data.",
 		NextSteps:    nextSteps,
 	}
 }
