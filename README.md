@@ -403,7 +403,7 @@ The server provides eight powerful tools for AI agents:
 
 ### 📦 Cache Management Tools
 
-When command outputs exceed 10KB, they are automatically cached with a preview. Use these tools to access the full data:
+When command outputs exceed 25KB (configurable via `--output-cache-threshold`), they are automatically cached with a preview. Use these tools to access the full data:
 
 #### 📖 `fastly_result_read`
 **Read paginated data from cached results**
@@ -456,7 +456,7 @@ When command outputs exceed 10KB, they are automatically cached with a preview. 
 <details>
 <summary>How Caching Works</summary>
 
-When a command returns more than 10KB of data:
+When a command returns more than 25KB of data (default, configurable):
 
 1. **Automatic Caching**: The full output is stored in memory with a unique ID
 2. **Preview Response**: You receive a small preview (first 5 items/20 lines) plus the result ID

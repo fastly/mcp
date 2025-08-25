@@ -78,8 +78,8 @@ const (
 	// DefaultCleanupInterval is how often expired entries are cleaned up.
 	DefaultCleanupInterval = 1 * time.Minute
 
-	// OutputCacheThreshold is the minimum size (in bytes) for caching.
-	OutputCacheThreshold = 10000 // 10KB
+	// DefaultOutputCacheThreshold is the default minimum size (in bytes) for caching.
+	DefaultOutputCacheThreshold = 25000 // 25KB
 
 	// MaxPreviewItems is the maximum number of items to include in preview.
 	MaxPreviewItems = 5
@@ -90,3 +90,17 @@ const (
 	// DefaultReadLimit is the default number of items/lines to return.
 	DefaultReadLimit = 20
 )
+
+// Variables for configurable settings.
+var (
+	// OutputCacheThreshold is the minimum size (in bytes) for caching.
+	// This can be configured at runtime based on the LLM's context window size.
+	OutputCacheThreshold = DefaultOutputCacheThreshold
+)
+
+// SetOutputCacheThreshold updates the output cache threshold.
+func SetOutputCacheThreshold(threshold int) {
+	if threshold > 0 {
+		OutputCacheThreshold = threshold
+	}
+}

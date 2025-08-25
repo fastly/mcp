@@ -161,12 +161,12 @@ func TestShouldCache(t *testing.T) {
 		},
 		{
 			name:     "Large output",
-			output:   strings.Repeat("x", 11000),
+			output:   strings.Repeat("x", 30000),
 			expected: true,
 		},
 		{
 			name:     "Exactly at threshold",
-			output:   strings.Repeat("x", OutputCacheThreshold),
+			output:   strings.Repeat("x", DefaultOutputCacheThreshold),
 			expected: false,
 		},
 	}

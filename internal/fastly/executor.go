@@ -326,7 +326,7 @@ func ExecuteCommand(req types.CommandRequest) types.CommandResponse {
 	} else {
 		response.Success = true
 
-		// Check if output should be cached (>10KB)
+		// Check if output should be cached (>25KB by default, configurable)
 		if cache.ShouldCache(cleanedOutput) {
 			// Store the output in cache
 			store := cache.GetStore()

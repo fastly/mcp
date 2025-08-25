@@ -17,6 +17,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/fastly/mcp/internal/cache"
 	"github.com/fastly/mcp/internal/fastly"
 	"github.com/fastly/mcp/internal/mcp"
 	"github.com/fastly/mcp/internal/types"
@@ -32,16 +33,17 @@ import (
 //   - CLI commands: list-commands, execute, describe for direct testing
 func main() {
 	var (
-		httpAddr        string
-		useSSE          bool
-		showHelp        bool
-		sanitize        bool
-		allowedCmdsFile string
-		allowedCmds     string
-		deniedCmdsFile  string
-		deniedCmds      string
-		encryptTokens   bool
-		logCommandsFile string
+		httpAddr             string
+		useSSE               bool
+		showHelp             bool
+		sanitize             bool
+		allowedCmdsFile      string
+		allowedCmds          string
+		deniedCmdsFile       string
+		deniedCmds           string
+		encryptTokens        bool
+		logCommandsFile      string
+		outputCacheThreshold int
 	)
 
 	// Parse and validate all arguments
@@ -135,6 +137,25 @@ func main() {
 			}
 			continue
 		}
+		if arg == "--output-cache-threshold" {
+			if outputCacheThreshold != 0 {
+				fmt.Fprintf(os.Stderr, "Error: --output-cache-threshold specified multiple times\n")
+				os.Exit(1)
+			}
+			if i+1 < len(os.Args) && !strings.HasPrefix(os.Args[i+1], "-") {
+				var err error
+				fmt.Sscanf(os.Args[i+1], "%d", &outputCacheThreshold)
+				if err != nil || outputCacheThreshold <= 0 {
+					fmt.Fprintf(os.Stderr, "Error: --output-cache-threshold requires a positive integer (bytes)\n")
+					os.Exit(1)
+				}
+				i++
+			} else {
+				fmt.Fprintf(os.Stderr, "Error: --output-cache-threshold requires a positive integer (bytes)\n")
+				os.Exit(1)
+			}
+			continue
+		}
 		args = append(args, arg)
 	}
 
@@ -195,6 +216,11 @@ func main() {
 
 	// Set global token encryption option for MCP server
 	fastly.SetTokenEncryptionEnabled(encryptTokens)
+
+	// Set output cache threshold if specified
+	if outputCacheThreshold > 0 {
+		cache.SetOutputCacheThreshold(outputCacheThreshold)
+	}
 
 	// Load custom allowed commands from file and/or inline list
 	var allowedCommands map[string]bool
@@ -606,6 +632,7 @@ Options:
   --denied-commands cmds   Use custom denied commands (comma-separated list)
   --encrypt-tokens         Encrypt secret tokens in tool responses (for LLM safety)
   --log-commands file      Log MCP commands to the specified file
+  --output-cache-threshold bytes  Set output size threshold for caching (default: 25000)
 
 CLI Commands:
   help            Show this help message
