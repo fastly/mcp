@@ -29,13 +29,6 @@ func (b *ResponseBuilder) WithCommand(command string, args []string, flags []typ
 	return b
 }
 
-// WithSuccess sets the success status and output
-func (b *ResponseBuilder) WithSuccess(output string) *ResponseBuilder {
-	b.response.Success = true
-	b.response.Output = output
-	return b
-}
-
 // WithError sets error details
 func (b *ResponseBuilder) WithError(err error, errorCode string) *ResponseBuilder {
 	b.response.Success = false
@@ -48,12 +41,6 @@ func (b *ResponseBuilder) WithError(err error, errorCode string) *ResponseBuilde
 func (b *ResponseBuilder) WithInstructions(instructions string, nextSteps []string) *ResponseBuilder {
 	b.response.Instructions = instructions
 	b.response.NextSteps = nextSteps
-	return b
-}
-
-// WithMetadata adds metadata
-func (b *ResponseBuilder) WithMetadata(metadata *types.OperationMetadata) *ResponseBuilder {
-	b.response.Metadata = metadata
 	return b
 }
 

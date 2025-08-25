@@ -339,71 +339,6 @@ func TestIsWindowsDriveLetter(t *testing.T) {
 	}
 }
 
-func TestValidateAll(t *testing.T) {
-	v := NewValidator()
-
-	tests := []struct {
-		name    string
-		command string
-		args    []string
-		flags   map[string]string
-		wantErr bool
-		errMsg  string
-	}{
-		{
-			name:    "all valid inputs",
-			command: "service",
-			args:    []string{"list"},
-			flags:   map[string]string{"json": "", "page": "1"},
-			wantErr: false,
-		},
-		{
-			name:    "invalid command",
-			command: "evil",
-			args:    []string{"list"},
-			flags:   map[string]string{},
-			wantErr: true,
-			errMsg:  "invalid command",
-		},
-		{
-			name:    "invalid args",
-			command: "service",
-			args:    []string{"list;rm"},
-			flags:   map[string]string{},
-			wantErr: true,
-			errMsg:  "invalid arguments",
-		},
-		{
-			name:    "invalid flag name",
-			command: "service",
-			args:    []string{"list"},
-			flags:   map[string]string{"bad$flag": "value"},
-			wantErr: true,
-			errMsg:  "invalid flag",
-		},
-		{
-			name:    "invalid flag value",
-			command: "service",
-			args:    []string{"list"},
-			flags:   map[string]string{"service-id": "test;evil"},
-			wantErr: true,
-			errMsg:  "invalid value for flag",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := v.ValidateAll(tt.command, tt.args, tt.flags)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateAll() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if err != nil && tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
-				t.Errorf("ValidateAll() error = %v, want error containing %q", err, tt.errMsg)
-			}
-		})
-	}
-}
-
 // Regression tests for command validation edge cases
 func TestValidateCommandEdgeCases(t *testing.T) {
 	v := NewValidator()
@@ -639,40 +574,6 @@ func TestValidateFlagCombinations(t *testing.T) {
 				if valueErr != nil {
 					t.Errorf("Unexpected flag value validation error: %v", valueErr)
 				}
-			}
-		})
-	}
-}
-
-// Test custom validator with different allowed commands
-func TestNewValidatorWithCommands(t *testing.T) {
-	// Test with custom allowed commands
-	customCommands := map[string]bool{
-		"custom-command": true,
-		"another-cmd":    true,
-		"test-only":      true,
-	}
-
-	v := NewValidatorWithCommands(customCommands)
-
-	tests := []struct {
-		name    string
-		command string
-		wantErr bool
-	}{
-		{"allowed custom command", "custom-command", false},
-		{"another allowed command", "another-cmd", false},
-		{"test only command", "test-only", false},
-		{"default command not in custom", "service", true},
-		{"default command not in custom 2", "backend", true},
-		{"invalid command", "evil-command", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := v.ValidateCommand(tt.command)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateCommand() with custom commands error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}

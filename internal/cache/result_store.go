@@ -78,11 +78,6 @@ func (rs *ResultStore) cleanup() {
 	}
 }
 
-// Stop stops the cleanup goroutine.
-func (rs *ResultStore) Stop() {
-	close(rs.stopCleanup)
-}
-
 // Store caches a command output and returns its ID.
 func (rs *ResultStore) Store(output string, command string, args []string, flags []types.Flag) string {
 	id := generateID()
@@ -411,4 +406,3 @@ func min(a, b int) int {
 	}
 	return b
 }
-

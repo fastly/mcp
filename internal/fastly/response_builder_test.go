@@ -42,20 +42,6 @@ func TestResponseBuilder(t *testing.T) {
 		}
 	})
 
-	t.Run("WithSuccess sets success status and output", func(t *testing.T) {
-		output := "Command executed successfully"
-		response := NewResponseBuilder().
-			WithSuccess(output).
-			Build()
-
-		if !response.Success {
-			t.Errorf("Expected success to be true")
-		}
-		if response.Output != output {
-			t.Errorf("Expected output %q, got %q", output, response.Output)
-		}
-	})
-
 	t.Run("WithError sets error details correctly", func(t *testing.T) {
 		err := errors.New("command failed")
 		errorCode := "execution_error"
@@ -95,77 +81,27 @@ func TestResponseBuilder(t *testing.T) {
 		}
 	})
 
-	t.Run("WithMetadata sets metadata correctly", func(t *testing.T) {
-		metadata := &types.OperationMetadata{
-			ResourceType:  "service",
-			OperationType: "update",
-			IsSafe:        false,
-			RequiresAuth:  true,
-		}
-
-		response := NewResponseBuilder().
-			WithMetadata(metadata).
-			Build()
-
-		if response.Metadata == nil {
-			t.Fatal("Expected metadata to be set")
-		}
-		if response.Metadata.ResourceType != metadata.ResourceType {
-			t.Errorf("Expected resource type %q, got %q", metadata.ResourceType, response.Metadata.ResourceType)
-		}
-		if response.Metadata.OperationType != metadata.OperationType {
-			t.Errorf("Expected operation type %q, got %q", metadata.OperationType, response.Metadata.OperationType)
-		}
-		if response.Metadata.IsSafe != metadata.IsSafe {
-			t.Errorf("Expected IsSafe %v, got %v", metadata.IsSafe, response.Metadata.IsSafe)
-		}
-		if response.Metadata.RequiresAuth != metadata.RequiresAuth {
-			t.Errorf("Expected RequiresAuth %v, got %v", metadata.RequiresAuth, response.Metadata.RequiresAuth)
-		}
-	})
-
 	t.Run("Builder methods can be chained", func(t *testing.T) {
 		command := "service create"
 		args := []string{"my-service"}
 		flags := []types.Flag{{Name: "type", Value: "vcl"}}
-		output := "Service created successfully"
 		instructions := "Service has been created"
 		nextSteps := []string{"Add backends", "Configure domains"}
-		metadata := &types.OperationMetadata{
-			ResourceType:  "service",
-			OperationType: "create",
-			IsSafe:        false,
-			RequiresAuth:  true,
-		}
 
 		response := NewResponseBuilder().
 			WithCommand(command, args, flags).
-			WithSuccess(output).
 			WithInstructions(instructions, nextSteps).
-			WithMetadata(metadata).
 			Build()
 
 		// Verify all fields are set correctly
 		if response.Command != command {
 			t.Errorf("Expected command %q, got %q", command, response.Command)
 		}
-		if !response.Success {
-			t.Errorf("Expected success to be true")
-		}
-		if response.Output != output {
-			t.Errorf("Expected output %q, got %q", output, response.Output)
-		}
 		if response.Instructions != instructions {
 			t.Errorf("Expected instructions %q, got %q", instructions, response.Instructions)
 		}
 		if !reflect.DeepEqual(response.NextSteps, nextSteps) {
 			t.Errorf("Expected next steps %v, got %v", nextSteps, response.NextSteps)
-		}
-		if response.Metadata.ResourceType != metadata.ResourceType {
-			t.Errorf("Expected metadata resource type %q, got %q", metadata.ResourceType, response.Metadata.ResourceType)
-		}
-		if response.Metadata.OperationType != metadata.OperationType {
-			t.Errorf("Expected metadata operation type %q, got %q", metadata.OperationType, response.Metadata.OperationType)
 		}
 	})
 }
@@ -323,42 +259,16 @@ func TestResponseBuilderEdgeCases(t *testing.T) {
 		}
 	})
 
-	t.Run("WithError overwrites success status", func(t *testing.T) {
+	t.Run("WithError sets error status", func(t *testing.T) {
 		response := NewResponseBuilder().
-			WithSuccess("This should be overwritten").
 			WithError(errors.New("error occurred"), "test_error").
 			Build()
 
 		if response.Success {
 			t.Errorf("Expected success to be false after WithError")
 		}
-		if response.Output != "This should be overwritten" {
-			t.Errorf("Expected output to be preserved, got %q", response.Output)
-		}
-	})
-
-	t.Run("WithSuccess after WithError resets success status", func(t *testing.T) {
-		response := NewResponseBuilder().
-			WithError(errors.New("error"), "error_code").
-			WithSuccess("Success after error").
-			Build()
-
-		if !response.Success {
-			t.Errorf("Expected success to be true after WithSuccess")
-		}
-		// Error fields should still be set
-		if response.Error == "" {
-			t.Errorf("Expected error to be preserved")
-		}
-	})
-
-	t.Run("Nil metadata handling", func(t *testing.T) {
-		response := NewResponseBuilder().
-			WithMetadata(nil).
-			Build()
-
-		if response.Metadata != nil {
-			t.Errorf("Expected nil metadata to remain nil")
+		if response.Error != "error occurred" {
+			t.Errorf("Expected error to be set, got %q", response.Error)
 		}
 	})
 
@@ -392,9 +302,10 @@ func TestResponseBuilderEdgeCases(t *testing.T) {
 			longOutput += fmt.Sprintf("Line %d: This is a very long output string that tests the builder's handling of large data. ", i)
 		}
 
-		response := NewResponseBuilder().
-			WithSuccess(longOutput).
-			Build()
+		response := types.CommandResponse{
+			Success: true,
+			Output:  longOutput,
+		}
 
 		if response.Output != longOutput {
 			t.Errorf("Expected long output to be preserved completely")

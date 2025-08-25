@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"encoding/json"
 	"strings"
 )
 
@@ -177,19 +176,3 @@ func CreateCachedResponse(resultID string, output string, command string, args [
 func ShouldCache(output string) bool {
 	return len(output) > OutputCacheThreshold
 }
-
-// TruncateForPreview truncates data for safe preview generation.
-func TruncateForPreview(data interface{}) interface{} {
-	// Ensure preview data doesn't exceed reasonable size
-	jsonBytes, err := json.Marshal(data)
-	if err != nil || len(jsonBytes) <= 5000 { // 5KB max for preview
-		return data
-	}
-
-	// If preview itself is too large, return minimal info
-	return map[string]interface{}{
-		"_truncated": true,
-		"_message":   "Preview data too large. Use retrieval tools to access.",
-	}
-}
-

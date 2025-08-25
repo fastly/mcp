@@ -11,7 +11,6 @@ import (
 
 func TestResultStore_Store(t *testing.T) {
 	store := NewResultStore(10*time.Minute, 1*time.Hour)
-	defer store.Stop()
 
 	// Test storing JSON array
 	jsonArray := `[{"id": 1, "name": "service1"}, {"id": 2, "name": "service2"}]`
@@ -37,7 +36,6 @@ func TestResultStore_Store(t *testing.T) {
 
 func TestResultStore_Read(t *testing.T) {
 	store := NewResultStore(10*time.Minute, 1*time.Hour)
-	defer store.Stop()
 
 	// Store a large JSON array
 	var items []interface{}
@@ -84,7 +82,6 @@ func TestResultStore_Read(t *testing.T) {
 
 func TestResultStore_Query(t *testing.T) {
 	store := NewResultStore(10*time.Minute, 1*time.Hour)
-	defer store.Stop()
 
 	// Store JSON array with searchable data
 	jsonArray := `[
@@ -113,7 +110,6 @@ func TestResultStore_Query(t *testing.T) {
 
 func TestResultStore_TextStorage(t *testing.T) {
 	store := NewResultStore(10*time.Minute, 1*time.Hour)
-	defer store.Stop()
 
 	// Store text output (without trailing newline)
 	lines := make([]string, 100)
@@ -220,7 +216,6 @@ func TestGeneratePreview(t *testing.T) {
 func TestResultStore_Expiration(t *testing.T) {
 	// Short TTL for testing
 	store := NewResultStore(100*time.Millisecond, 50*time.Millisecond)
-	defer store.Stop()
 
 	id := store.Store("test data", "test", nil, nil)
 
@@ -239,4 +234,3 @@ func TestResultStore_Expiration(t *testing.T) {
 		t.Fatal("Result should have expired")
 	}
 }
-

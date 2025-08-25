@@ -59,15 +59,6 @@ func NewValidator() *Validator {
 	return NewValidatorWithCommandsAndDenied(defaultAllowedCommands(), defaultDeniedCommands())
 }
 
-// NewValidatorWithCommands creates a validator with a custom set of allowed commands.
-// This allows callers to override the default command allowlist, useful for:
-//   - Testing with a restricted command set
-//   - Loading commands from an external configuration file
-//   - Creating validators with environment-specific command restrictions
-func NewValidatorWithCommands(allowedCommands map[string]bool) *Validator {
-	return NewValidatorWithCommandsAndDenied(allowedCommands, map[string]bool{})
-}
-
 // NewValidatorWithCommandsAndDenied creates a validator with custom allowed and denied commands.
 // The denied commands take precedence over allowed commands and represent command-subcommand
 // combinations that should be blocked (e.g., "stats realtime").
@@ -387,38 +378,6 @@ func (v *Validator) validateWindowsPath(path string) error {
 // isWindowsDriveLetter checks if a rune is a valid Windows drive letter
 func isWindowsDriveLetter(r rune) bool {
 	return (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z')
-}
-
-// ValidateAll performs comprehensive validation on a complete command request.
-// It validates:
-//  1. The command name against the allowlist
-//  2. All arguments for injection attempts
-//  3. All flag names and values for safety
-//
-// This should be called before executing any Fastly CLI command.
-// Returns an error with details about the first validation failure.
-func (v *Validator) ValidateAll(command string, args []string, flags map[string]string) error {
-	// Validate command
-	if err := v.ValidateCommand(command); err != nil {
-		return fmt.Errorf("invalid command: %w", err)
-	}
-
-	// Validate arguments
-	if err := v.ValidateArgs(args); err != nil {
-		return fmt.Errorf("invalid arguments: %w", err)
-	}
-
-	// Validate flags
-	for name, value := range flags {
-		if err := v.ValidateFlagName(name); err != nil {
-			return fmt.Errorf("invalid flag '%s': %w", name, err)
-		}
-		if err := v.ValidateFlagValue(value); err != nil {
-			return fmt.Errorf("invalid value for flag '%s': %w", name, err)
-		}
-	}
-
-	return nil
 }
 
 // IsDenied checks if a command-args combination is in the denylist.
