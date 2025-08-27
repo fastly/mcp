@@ -49,6 +49,11 @@ With this MCP server, your AI assistant can:
     - [🔍 `fastly_describe`](#-fastly_describe)
     - [▶️ `fastly_execute`](#️-fastly_execute)
     - [🕰️ `current_time`](#️-current_time)
+    - [📦 Cache Management Tools](#-cache-management-tools)
+      - [📖 `fastly_result_read`](#-fastly_result_read)
+      - [🔍 `fastly_result_query`](#-fastly_result_query)
+      - [📊 `fastly_result_summary`](#-fastly_result_summary)
+      - [📋 `fastly_result_list`](#-fastly_result_list)
   - [🎮 Running Modes](#-running-modes)
     - [Stdio Mode (Default)](#stdio-mode-default)
     - [HTTP Mode](#http-mode)
@@ -765,14 +770,20 @@ This server works best with Language Models optimized for:
 
 For best results, use models specifically optimized for agentic workflows and tool usage.
 
+**Recommended Client**:
+
+The Fastly MCP server is developed and tested primarily using [Roo Code](https://roocode.com), but it can be used with other MCP-compatible clients as well.
+
 **Recommended Models**:
 
 The Fastly MCP server has been successfully tested with the following models:
 
-- Qwen3-Coder
 - Claude Sonnet and Claude Opus
+- GLM-4.5 Air
+- Groq Code Fast
+- Jan-nano-128k
 - Microsoft MAI-DS-R1
-- jan-nano-128k
+- Qwen3-Coder
 
 **Note**: At the time of writing, we do not recommend Gemini models as they are not optimized for tool usage and MCP interactions.
 
