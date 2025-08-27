@@ -626,7 +626,7 @@ func handleSystemPrompt(ctx context.Context, request mcp.GetPromptRequest) (*mcp
 2. **Destructive operations require ` + "`--user-reviewed: true`" + `** flag after human approval:
    - ` + "`delete`" + `, ` + "`remove`" + `, ` + "`purge`" + `, ` + "`create`" + `, ` + "`update`" + ` commands
    - Always explain impact and get human confirmation first
-3. **Use ` + "`--json`" + ` format** for parsing
+3. **Some commands support JSON output via an extra command parameter**
 4. **Most commands need ` + "`--service-id`" + `**
 5. **Clone versions before changes**
 6. Use ` + "`current_time`" + ` before operations that need timestamps

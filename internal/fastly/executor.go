@@ -405,7 +405,7 @@ func ExecuteCommand(req types.CommandRequest) types.CommandResponse {
 			} else {
 				response.NextSteps = []string{
 					"Parse the text output to extract specific information",
-					"Consider using --json flag for structured output",
+					"Check if the command supports a flag to enable JSON output",
 					"Use the fastly_describe tool on specific items for more details",
 				}
 			}

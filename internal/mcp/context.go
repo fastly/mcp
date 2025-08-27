@@ -314,7 +314,6 @@ func GetSuggestions(error string, command string, args []string) []string {
 
 	// JSON parsing errors (might indicate wrong output format)
 	if strings.Contains(error, "invalid character") || strings.Contains(error, "JSON") {
-		suggestions = append(suggestions, "Try adding --json flag to get structured output")
 		suggestions = append(suggestions, "Remove --json flag if the command doesn't support JSON output")
 	}
 

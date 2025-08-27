@@ -26,7 +26,7 @@ type CommandResponse struct {
 	Success bool `json:"success"`
 	// Output contains the command's text output with ANSI escape sequences removed
 	Output string `json:"output,omitempty"`
-	// OutputJSON contains parsed JSON when the command was run with --json flag
+	// OutputJSON contains parsed JSON
 	OutputJSON interface{} `json:"output_json,omitempty"`
 	// Error contains the error message if the command failed
 	Error string `json:"error,omitempty"`
