@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.8] - 2025-08-27
+
+### Added
+- Result caching system for large command outputs (>25KB by default)
+  - New MCP tools: `fastly_result_read`, `fastly_result_query`, `fastly_result_summary`, `fastly_result_list`
+  - Automatic caching with unique result IDs for large responses
+  - Smart preview generation (first 5 items/20 lines) for cached data
+  - 10-minute TTL with automatic cleanup
+
+### Changed
+- Updated mcp-go dependency from v0.37.0 to v0.38.0
+- Improved truncation instructions for AI agents when outputs are cached
+- Documentation no longer suggests using `--json` flag
+- Authentication documentation updated to discourage environment variable usage in favor of `fastly profile create`
+
 ## [0.1.7] - 2025-08-12
 
 ### Added
