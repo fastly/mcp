@@ -65,7 +65,13 @@ func IntelligentPreprocess(cmd string, args []string, flags []Flag) (string, []s
 	// 3. Inject context from previous commands
 	flags = injectContextualValues(cmd, args, flags)
 
-	// 4. Handle compound commands
+	// 4. Validate mutually exclusive parameters
+	if err := validateMutuallyExclusive(flags); err != nil {
+		// Don't fail, just remove conflicting auto-added flags
+		flags = removeConflictingFlags(flags)
+	}
+
+	// 5. Handle compound commands
 	if isCompoundCommand(cmd, args) {
 		return expandCompoundCommand(cmd, args, flags)
 	}
@@ -134,17 +140,24 @@ func applySmartDefaults(cmd string, args []string, flags []Flag) []Flag {
 		}
 	}
 
-	// Add service-id if missing but we have context
-	if requiresServiceID(cmd, args) && !hasFlag(flags, "service-id") && globalContext.LastServiceID != "" {
+	// Add service-id if missing but we have context AND no other service identification is present
+	if requiresServiceID(cmd, args) && !hasServiceIdentification(flags) && globalContext.LastServiceID != "" {
 		flags = append(flags, Flag{Name: "service-id", Value: globalContext.LastServiceID})
 	}
 
 	// Add version if missing but we have context
 	if requiresVersion(cmd, args) && !hasFlag(flags, "version") {
-		if activeVersion, exists := globalContext.ActiveVersions[globalContext.LastServiceID]; exists {
-			flags = append(flags, Flag{Name: "version", Value: activeVersion})
-		} else {
-			flags = append(flags, Flag{Name: "version", Value: "latest"})
+		// Only add version if we have service identification
+		if hasServiceIdentification(flags) {
+			serviceID := getServiceIDFromFlags(flags)
+			if serviceID == "" {
+				serviceID = globalContext.LastServiceID
+			}
+			if activeVersion, exists := globalContext.ActiveVersions[serviceID]; exists {
+				flags = append(flags, Flag{Name: "version", Value: activeVersion})
+			} else {
+				flags = append(flags, Flag{Name: "version", Value: "latest"})
+			}
 		}
 	}
 
@@ -254,13 +267,110 @@ func requiresServiceID(cmd string, args []string) bool {
 
 func requiresVersion(cmd string, args []string) bool {
 	// Commands that typically need version
-	versionCommands := []string{"backend", "domain", "healthcheck", "vcl"}
+	versionCommands := []string{"backend", "domain", "healthcheck", "vcl", "logging", "dictionary", "acl"}
 	for _, vc := range versionCommands {
-		if cmd == vc && len(args) > 0 && args[0] != "create" {
+		if cmd == vc && len(args) > 0 {
+			// These operations require version
+			switch args[0] {
+			case "create", "delete", "update", "describe":
+				return true
+			case "list":
+				return false
+			}
+		}
+	}
+
+	// Service version commands always need version
+	if cmd == "service-version" && len(args) > 0 {
+		switch args[0] {
+		case "activate", "deactivate", "clone", "update", "lock":
+			return true
+		}
+	}
+
+	return false
+}
+
+// hasServiceIdentification checks if any service identification parameter is present
+func hasServiceIdentification(flags []Flag) bool {
+	for _, flag := range flags {
+		if flag.Name == "service-id" || flag.Name == "service-name" || flag.Name == "service" {
 			return true
 		}
 	}
 	return false
+}
+
+// getServiceIDFromFlags extracts service ID from flags if present
+func getServiceIDFromFlags(flags []Flag) string {
+	for _, flag := range flags {
+		if flag.Name == "service-id" {
+			return flag.Value
+		}
+	}
+	return ""
+}
+
+// validateMutuallyExclusive checks for conflicting parameters
+func validateMutuallyExclusive(flags []Flag) error {
+	serviceID := hasFlag(flags, "service-id")
+	serviceName := hasFlag(flags, "service-name")
+
+	if serviceID && serviceName {
+		return fmt.Errorf("cannot specify both service-id and service-name")
+	}
+
+	// Future: Add other mutual exclusion checks here
+	// e.g., for purge command: --all vs --key vs --url vs --file
+
+	return nil
+}
+
+// removeConflictingFlags removes auto-added flags that conflict with user-provided ones
+func removeConflictingFlags(flags []Flag) []Flag {
+	var hasServiceName, hasServiceID bool
+	var serviceNameIdx, serviceIDIdx = -1, -1
+
+	// Find which service identification flags are present
+	for i, flag := range flags {
+		switch flag.Name {
+		case "service-name":
+			hasServiceName = true
+			serviceNameIdx = i
+		case "service-id":
+			hasServiceID = true
+			serviceIDIdx = i
+		}
+	}
+
+	// If both are present, remove the auto-added service-id
+	// (we assume service-name was user-provided and service-id was auto-added)
+	if hasServiceName && hasServiceID {
+		// Check if service-id matches our last cached one (likely auto-added)
+		if serviceIDIdx >= 0 && flags[serviceIDIdx].Value == globalContext.LastServiceID {
+			// Remove the auto-added service-id
+			result := make([]Flag, 0, len(flags)-1)
+			for i, flag := range flags {
+				if i != serviceIDIdx {
+					result = append(result, flag)
+				}
+			}
+			return result
+		}
+		// If service-id doesn't match cached, remove service-name instead
+		// (user might have provided service-id explicitly)
+		if serviceNameIdx >= 0 {
+			result := make([]Flag, 0, len(flags)-1)
+			for i, flag := range flags {
+				if i != serviceNameIdx {
+					result = append(result, flag)
+				}
+			}
+			return result
+		}
+	}
+
+	return flags
 }
 
 // GetSuggestions provides intelligent suggestions based on context
