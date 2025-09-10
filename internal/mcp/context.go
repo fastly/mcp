@@ -185,7 +185,7 @@ func isCompoundCommand(cmd string, args []string) bool {
 	if cmd == "backend" && len(args) > 0 && args[0] == "list" {
 		// If service name is provided instead of ID, it's compound
 		for _, record := range globalContext.RecentCommands {
-			if record.Command == "service" && strings.Contains(record.Command, "list") {
+			if record.Command == "service" && len(record.Args) > 0 && record.Args[0] == "list" {
 				return false // We already have service list
 			}
 		}

@@ -137,7 +137,7 @@ func GetErrorMessage(result CommandRunResult) string {
 	// If still empty but there was an error, provide a generic message
 	if errorMsg == "" && result.Error != nil {
 		if exitErr, ok := result.Error.(*exec.ExitError); ok {
-			errorMsg = "Command failed with exit code " + string(rune(exitErr.ExitCode()))
+			errorMsg = fmt.Sprintf("Command failed with exit code %d", exitErr.ExitCode())
 		} else {
 			errorMsg = result.Error.Error()
 		}

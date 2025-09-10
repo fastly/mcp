@@ -329,7 +329,17 @@ func NormalizeAddress(addr string) string {
 		if strings.HasPrefix(addr, ":") {
 			host = "127.0.0.1"
 			port = strings.TrimPrefix(addr, ":")
+			if port == "" {
+				port = "8080"
+			}
 			return net.JoinHostPort(host, port)
+		} else if strings.HasSuffix(addr, ":") {
+			// Handle host with trailing colon (e.g., "localhost:")
+			host = strings.TrimSuffix(addr, ":")
+			if host == "" {
+				host = "127.0.0.1"
+			}
+			return net.JoinHostPort(host, "8080")
 		} else if !strings.Contains(addr, ":") {
 			return net.JoinHostPort(addr, "8080")
 		}
