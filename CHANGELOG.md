@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.9] - 2025-09-16
+
+### Fixed
+- Address normalization when host ends with colon or missing port
+- CLI parameter conflicts: Prevent automatic addition of conflicting `--service-id` and `--service-name` parameters
+
+### Changed
+- Updated mcp-go dependency to latest version
+
+### Added
+- Extensive test coverage for intelligent parameter preprocessing
+- Better detection of compound commands for service list operations
+
 ## [0.1.8] - 2025-08-27
 
 ### Added
