@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestGetCurrentTime(t *testing.T) {
 	// Test getCurrentTime function
-	result, err := getCurrentTime(context.Background(), mcp.CallToolRequest{})
+	result, err := getCurrentTime(context.Background(), &mcp.CallToolRequest{})
 	if err != nil {
 		t.Fatalf("getCurrentTime failed: %v", err)
 	}

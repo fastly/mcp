@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/fastly/mcp/internal/crypto"
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestHandleSetupError(t *testing.T) {
@@ -317,7 +317,7 @@ func TestExecuteWithSetupCheck(t *testing.T) {
 			setupError: errors.New("CLI not found"),
 			handlerResult: &mcp.CallToolResult{
 				Content: []mcp.Content{
-					&mcp.TextContent{Type: "text", Text: "Should not be called"},
+					&mcp.TextContent{Text: "Should not be called"},
 				},
 			},
 			expectSetup: true,
@@ -327,7 +327,7 @@ func TestExecuteWithSetupCheck(t *testing.T) {
 			setupError: nil,
 			handlerResult: &mcp.CallToolResult{
 				Content: []mcp.Content{
-					&mcp.TextContent{Type: "text", Text: "Handler success"},
+					&mcp.TextContent{Text: "Handler success"},
 				},
 			},
 			expectSetup: false,

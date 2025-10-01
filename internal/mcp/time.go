@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // TimeInfo represents the current time in multiple formats for AI consumption.
@@ -34,9 +34,9 @@ type TimeInfo struct {
 //   - Time zone conversions
 //   - Date/time calculations
 //   - Scheduling operations
-func getCurrentTime(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func getCurrentTime(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	start := time.Now()
-	params := request.GetArguments()
+	params := getArguments(request)
 
 	now := time.Now()
 

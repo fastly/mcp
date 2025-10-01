@@ -9,7 +9,7 @@ import (
 
 	"github.com/fastly/mcp/internal/crypto"
 	"github.com/fastly/mcp/internal/fastly"
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // handleSetupError creates a consistent error response for setup failures across all handlers.
@@ -28,7 +28,6 @@ func handleSetupError(err error, command string) *mcp.CallToolResult {
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			&mcp.TextContent{
-				Type: "text",
 				Text: toJSON(errorResponse),
 			},
 		},
@@ -94,7 +93,6 @@ func newErrorResult(response interface{}) *mcp.CallToolResult {
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			&mcp.TextContent{
-				Type: "text",
 				Text: toJSON(response),
 			},
 		},
@@ -108,10 +106,19 @@ func newSuccessResult(response interface{}) *mcp.CallToolResult {
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			&mcp.TextContent{
-				Type: "text",
 				Text: toJSON(response),
 			},
 		},
 		IsError: false,
 	}
+}
+
+// getArguments extracts and unmarshals the arguments from a CallToolRequest.
+// It returns an empty map if there are no arguments or if unmarshaling fails.
+func getArguments(request *mcp.CallToolRequest) map[string]interface{} {
+	args := make(map[string]interface{})
+	if request.Params != nil && len(request.Params.Arguments) > 0 {
+		_ = json.Unmarshal(request.Params.Arguments, &args)
+	}
+	return args
 }

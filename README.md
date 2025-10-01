@@ -845,7 +845,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 ## 🙏 Acknowledgments
 
 - Built on the [Model Context Protocol](https://modelcontextprotocol.io/) specification
-- Uses [mcp-go](https://github.com/mark3labs/mcp-go) library for MCP implementation
+- Uses [go-sdk](https://github.com/modelcontextprotocol/go-sdk) library for MCP implementation
 - Wraps the official [Fastly CLI](https://developer.fastly.com/reference/cli/)
 
 ## Appendix: Recommended AI Assistant Prompt

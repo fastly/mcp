@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/fastly/mcp/internal/types"
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestErrorHandling(t *testing.T) {
