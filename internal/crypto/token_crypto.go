@@ -13,6 +13,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"regexp"
+
+	"github.com/jedisct1/go-fast"
 )
 
 const (
@@ -54,7 +56,7 @@ var (
 // ensuring they are encrypted. When Enabled is false, all operations are no-ops.
 type TokenCrypto struct {
 	cipher     cipher.Block
-	fastCipher *FASTCipher
+	fastCipher *fast.Cipher
 	Enabled    bool
 }
 
@@ -71,7 +73,7 @@ func NewTokenCrypto(enabled bool) (*TokenCrypto, error) {
 		return nil, fmt.Errorf("failed to create AES cipher: %w", err)
 	}
 
-	fastCipher, err := NewFASTCipher(globalEncryptionKey)
+	fastCipher, err := fast.NewCipher(globalEncryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create FAST cipher: %w", err)
 	}

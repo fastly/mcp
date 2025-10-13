@@ -3,9 +3,10 @@ package crypto
 import (
 	"bytes"
 	"crypto/rand"
-	"fmt"
 	"testing"
 	"time"
+
+	"github.com/jedisct1/go-fast"
 )
 
 // TestFASTCorrectness verifies that the FAST cipher correctly encrypts and decrypts data
@@ -13,7 +14,7 @@ import (
 func TestFASTCorrectness(t *testing.T) {
 	key := []byte("0123456789abcdef") // 16 bytes for AES-128
 
-	fast, err := NewFASTCipher(key)
+	cipher, err := fast.NewCipher(key)
 	if err != nil {
 		t.Fatalf("Failed to create FAST cipher: %v", err)
 	}
@@ -33,7 +34,7 @@ func TestFASTCorrectness(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Test encryption/decryption
-			encrypted := fast.Encrypt(tc.data, tc.tweak)
+			encrypted := cipher.Encrypt(tc.data, tc.tweak)
 
 			// Verify format preservation
 			if len(encrypted) != len(tc.data) {
@@ -46,7 +47,7 @@ func TestFASTCorrectness(t *testing.T) {
 			}
 
 			// Test decryption
-			decrypted := fast.Decrypt(encrypted, tc.tweak)
+			decrypted := cipher.Decrypt(encrypted, tc.tweak)
 
 			// Verify correct decryption
 			if !bytes.Equal(decrypted, tc.data) {
@@ -62,15 +63,15 @@ func TestFASTCorrectness(t *testing.T) {
 		tweak1 := []byte("context1")
 		tweak2 := []byte("context2")
 
-		encrypted1 := fast.Encrypt(data, tweak1)
-		encrypted2 := fast.Encrypt(data, tweak2)
+		encrypted1 := cipher.Encrypt(data, tweak1)
+		encrypted2 := cipher.Encrypt(data, tweak2)
 
 		if bytes.Equal(encrypted1, encrypted2) {
 			t.Error("Different tweaks produced same ciphertext")
 		}
 
 		// Verify that decryption with wrong tweak produces incorrect plaintext
-		wrongDecrypt := fast.Decrypt(encrypted1, tweak2)
+		wrongDecrypt := cipher.Decrypt(encrypted1, tweak2)
 		if bytes.Equal(wrongDecrypt, data) {
 			t.Error("Decryption succeeded with wrong tweak")
 		}
@@ -83,7 +84,7 @@ func TestFASTCorrectness(t *testing.T) {
 func TestFASTDeterministic(t *testing.T) {
 	key := []byte("0123456789abcdef")
 
-	fast, err := NewFASTCipher(key)
+	cipher, err := fast.NewCipher(key)
 	if err != nil {
 		t.Fatalf("Failed to create FAST cipher: %v", err)
 	}
@@ -92,9 +93,9 @@ func TestFASTDeterministic(t *testing.T) {
 	tweak := []byte("tweak")
 
 	// Encrypt the same data multiple times
-	encrypted1 := fast.Encrypt(data, tweak)
-	encrypted2 := fast.Encrypt(data, tweak)
-	encrypted3 := fast.Encrypt(data, tweak)
+	encrypted1 := cipher.Encrypt(data, tweak)
+	encrypted2 := cipher.Encrypt(data, tweak)
+	encrypted3 := cipher.Encrypt(data, tweak)
 
 	// All ciphertexts should be identical since FAST is deterministic
 	if !bytes.Equal(encrypted1, encrypted2) || !bytes.Equal(encrypted2, encrypted3) {
@@ -109,7 +110,7 @@ func TestFASTVariousSizes(t *testing.T) {
 		t.Fatalf("Failed to generate random key: %v", err)
 	}
 
-	fast, err := NewFASTCipher(key)
+	cipher, err := fast.NewCipher(key)
 	if err != nil {
 		t.Fatalf("Failed to create FAST cipher: %v", err)
 	}
@@ -184,7 +185,7 @@ func TestFASTVariousSizes(t *testing.T) {
 
 			// Test without tweak
 			t.Run("no_tweak", func(t *testing.T) {
-				encrypted := fast.Encrypt(plaintext, nil)
+				encrypted := cipher.Encrypt(plaintext, nil)
 
 				// Verify format preservation
 				if len(encrypted) != tc.size {
@@ -197,7 +198,7 @@ func TestFASTVariousSizes(t *testing.T) {
 				}
 
 				// Verify decryption
-				decrypted := fast.Decrypt(encrypted, nil)
+				decrypted := cipher.Decrypt(encrypted, nil)
 				if !bytes.Equal(decrypted, plaintext) {
 					t.Errorf("Decryption failed for size %d", tc.size)
 				}
@@ -206,7 +207,7 @@ func TestFASTVariousSizes(t *testing.T) {
 			// Test with tweak
 			t.Run("with_tweak", func(t *testing.T) {
 				tweak := []byte("test_tweak_12345")
-				encrypted := fast.Encrypt(plaintext, tweak)
+				encrypted := cipher.Encrypt(plaintext, tweak)
 
 				// Verify format preservation
 				if len(encrypted) != tc.size {
@@ -219,14 +220,14 @@ func TestFASTVariousSizes(t *testing.T) {
 				}
 
 				// Verify decryption with correct tweak
-				decrypted := fast.Decrypt(encrypted, tweak)
+				decrypted := cipher.Decrypt(encrypted, tweak)
 				if !bytes.Equal(decrypted, plaintext) {
 					t.Errorf("Decryption failed for size %d with tweak", tc.size)
 				}
 
 				// Verify decryption with wrong tweak fails
 				wrongTweak := []byte("wrong_tweak_54321")
-				wrongDecrypted := fast.Decrypt(encrypted, wrongTweak)
+				wrongDecrypted := cipher.Decrypt(encrypted, wrongTweak)
 				if bytes.Equal(wrongDecrypted, plaintext) {
 					t.Errorf("Decryption succeeded with wrong tweak for size %d", tc.size)
 				}
@@ -238,7 +239,7 @@ func TestFASTVariousSizes(t *testing.T) {
 // TestFASTSpecialCases tests FAST with special input patterns
 func TestFASTSpecialCases(t *testing.T) {
 	key := []byte("0123456789abcdef")
-	fast, err := NewFASTCipher(key)
+	cipher, err := fast.NewCipher(key)
 	if err != nil {
 		t.Fatalf("Failed to create FAST cipher: %v", err)
 	}
@@ -283,7 +284,7 @@ func TestFASTSpecialCases(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			encrypted := fast.Encrypt(tc.plaintext, nil)
+			encrypted := cipher.Encrypt(tc.plaintext, nil)
 
 			// Verify format preservation
 			if len(encrypted) != len(tc.plaintext) {
@@ -296,7 +297,7 @@ func TestFASTSpecialCases(t *testing.T) {
 			}
 
 			// Verify decryption
-			decrypted := fast.Decrypt(encrypted, nil)
+			decrypted := cipher.Decrypt(encrypted, nil)
 			if !bytes.Equal(decrypted, tc.plaintext) {
 				t.Errorf("%s: Decryption failed", tc.description)
 			}
@@ -313,89 +314,11 @@ func TestFASTSpecialCases(t *testing.T) {
 	}
 }
 
-// TestFASTRoundNumbers verifies the number of rounds for different input sizes
-func TestFASTRoundNumbers(t *testing.T) {
-	key := []byte("0123456789abcdef")
-	fast, err := NewFASTCipher(key)
-	if err != nil {
-		t.Fatalf("Failed to create FAST cipher: %v", err)
-	}
-
-	testCases := []struct {
-		size        int
-		minRounds   int
-		description string
-	}{
-		{1, 64, "Single byte"},
-		{2, 64, "Two bytes"},
-		{4, 64, "Four bytes"},
-		{8, 64, "Eight bytes"},
-		{16, 64, "16 bytes"},
-		{32, 64, "32 bytes"},
-		{33, 132, "33 bytes (>32, so 4*ell min)"},
-		{64, 256, "64 bytes"},
-		{128, 512, "128 bytes"},
-		{256, 1024, "256 bytes"},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.description, func(t *testing.T) {
-			rounds := fast.computeRounds(tc.size)
-
-			// Verify minimum rounds
-			if rounds < tc.minRounds {
-				t.Errorf("Size %d: got %d rounds, expected at least %d", tc.size, rounds, tc.minRounds)
-			}
-
-			// Verify rounds is multiple of size
-			if rounds%tc.size != 0 {
-				t.Errorf("Size %d: rounds %d is not a multiple of size", tc.size, rounds)
-			}
-
-			t.Logf("Size %d: %d rounds (%.1f rounds per byte)", tc.size, rounds, float64(rounds)/float64(tc.size))
-		})
-	}
-}
-
-// TestFASTBranchDistances verifies branch distance calculations
-func TestFASTBranchDistances(t *testing.T) {
-	key := []byte("0123456789abcdef")
-	fast, err := NewFASTCipher(key)
-	if err != nil {
-		t.Fatalf("Failed to create FAST cipher: %v", err)
-	}
-
-	testCases := []struct {
-		size           int
-		expectedW      int
-		expectedWPrime int
-	}{
-		{1, 0, 1},     // Special case
-		{2, 0, 1},     // Special case for ℓ=2
-		{3, 1, 1},     // ceil(sqrt(3)) = 2, min(2, 3-2) = 1
-		{4, 2, 1},     // ceil(sqrt(4)) = 2
-		{5, 3, 2},     // ceil(sqrt(5)) = 3, min(3, 5-2) = 3
-		{8, 3, 2},     // ceil(sqrt(8)) = 3
-		{9, 3, 2},     // ceil(sqrt(9)) = 3
-		{16, 4, 3},    // ceil(sqrt(16)) = 4
-		{25, 5, 4},    // ceil(sqrt(25)) = 5
-		{32, 6, 5},    // ceil(sqrt(32)) = 6
-		{64, 8, 7},    // ceil(sqrt(64)) = 8
-		{100, 10, 9},  // ceil(sqrt(100)) = 10
-		{128, 12, 11}, // ceil(sqrt(128)) = 12, min(12, 126) = 12
-		{256, 16, 15}, // ceil(sqrt(256)) = 16
-	}
-
-	for _, tc := range testCases {
-		t.Run(fmt.Sprintf("size_%d", tc.size), func(t *testing.T) {
-			w, wPrime := fast.computeBranchDistances(tc.size)
-			if w != tc.expectedW || wPrime != tc.expectedWPrime {
-				t.Errorf("Size %d: got w=%d, w'=%d, expected w=%d, w'=%d",
-					tc.size, w, wPrime, tc.expectedW, tc.expectedWPrime)
-			}
-		})
-	}
-}
+// Note: TestFASTRoundNumbers and TestFASTBranchDistances have been removed
+// because they tested internal implementation details that are now handled
+// by the github.com/jedisct1/go-fast library. The correctness of the FAST
+// algorithm is verified through the other tests that check encrypt/decrypt
+// behavior and format preservation.
 
 // TestFASTPerformance benchmarks FAST with different sizes
 func TestFASTPerformance(t *testing.T) {
@@ -404,7 +327,7 @@ func TestFASTPerformance(t *testing.T) {
 	}
 
 	key := []byte("0123456789abcdef")
-	fast, err := NewFASTCipher(key)
+	cipher, err := fast.NewCipher(key)
 	if err != nil {
 		t.Fatalf("Failed to create FAST cipher: %v", err)
 	}
@@ -419,14 +342,14 @@ func TestFASTPerformance(t *testing.T) {
 
 		// Warm up
 		for i := 0; i < 10; i++ {
-			_ = fast.Encrypt(plaintext, nil)
+			_ = cipher.Encrypt(plaintext, nil)
 		}
 
 		// Measure encryption time
 		start := time.Now()
 		iterations := 1000
 		for i := 0; i < iterations; i++ {
-			_ = fast.Encrypt(plaintext, nil)
+			_ = cipher.Encrypt(plaintext, nil)
 		}
 		duration := time.Since(start)
 
