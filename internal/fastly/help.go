@@ -11,6 +11,12 @@ import (
 	"github.com/fastly/mcp/internal/validation"
 )
 
+// CustomHelpText provides additional usage instructions for specific commands.
+// These are appended to the standard help output to provide more context and examples.
+var CustomHelpText = map[string]string{
+	"vcl": "To update the main VCL code of a service, use fastly_execute vcl custom update --name=main --autoclone --service-id=service_id --version=latest --content=file_to_upload.vcl",
+}
+
 // DescribeCommand returns detailed help information for a Fastly command.
 // It validates the command is allowed, executes 'fastly [command] --help',
 // and parses the output into structured help information suitable for AI consumption.
@@ -449,6 +455,17 @@ func addMCPInstructions(info types.HelpInfo) types.HelpInfo {
 		case "purge":
 			info.NextSteps = append(info.NextSteps,
 				"💡 TIP: Use the current_time tool to record when this purge operation is initiated")
+		}
+	}
+
+	// Add custom help text if available for this command
+	if customHelp, exists := CustomHelpText[info.Command]; exists {
+		info.NextSteps = append(info.NextSteps, fmt.Sprintf("💡 EXAMPLE: %s", customHelp))
+	} else if len(cmdParts) > 0 {
+		// Also check just the base command
+		baseCommand := cmdParts[0]
+		if customHelp, exists := CustomHelpText[baseCommand]; exists {
+			info.NextSteps = append(info.NextSteps, fmt.Sprintf("💡 EXAMPLE: %s", customHelp))
 		}
 	}
 
