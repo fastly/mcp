@@ -9,7 +9,6 @@ backend delete
 
 # Deny entire commands
 purge
-log-tail
 
 # You can specify command-subcommand combinations
 compute delete

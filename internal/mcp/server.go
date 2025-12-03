@@ -194,6 +194,127 @@ func CreateServer() (*mcp.Server, error) {
 		},
 	}, makeResultListHandler())
 
+	// Background streaming command tools
+	s.AddTool(&mcp.Tool{
+		Name:        "fastly_background_start",
+		Description: "Start a streaming command (like log-tail) in the background. The command runs until stopped and output can be read with pagination.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"command": map[string]interface{}{
+					"type":        "string",
+					"description": "The streaming command to run (e.g., 'log-tail')",
+				},
+				"args": map[string]interface{}{
+					"type":        "array",
+					"description": "Command arguments",
+					"items":       map[string]interface{}{"type": "string"},
+				},
+				"flags": map[string]interface{}{
+					"type":        "array",
+					"description": "Command flags",
+					"items": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"name":  map[string]interface{}{"type": "string", "description": "Flag name without dashes"},
+							"value": map[string]interface{}{"type": "string", "description": "Flag value"},
+						},
+						"required": []string{"name"},
+					},
+				},
+			},
+			"required": []string{"command"},
+		},
+	}, fastlyTool.makeBackgroundStartHandler())
+
+	s.AddTool(&mcp.Tool{
+		Name:        "fastly_background_stop",
+		Description: "Stop a running background streaming job.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"job_id": map[string]interface{}{
+					"type":        "string",
+					"description": "The ID of the background job to stop",
+				},
+			},
+			"required": []string{"job_id"},
+		},
+	}, makeBackgroundStopHandler())
+
+	s.AddTool(&mcp.Tool{
+		Name:        "fastly_background_list",
+		Description: "List all background streaming jobs and their status.",
+		InputSchema: map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		},
+	}, makeBackgroundListHandler())
+
+	s.AddTool(&mcp.Tool{
+		Name:        "fastly_background_status",
+		Description: "Get detailed status of a background streaming job including output size and line count.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"job_id": map[string]interface{}{
+					"type":        "string",
+					"description": "The ID of the background job",
+				},
+			},
+			"required": []string{"job_id"},
+		},
+	}, makeBackgroundStatusHandler())
+
+	s.AddTool(&mcp.Tool{
+		Name:        "fastly_background_read",
+		Description: "Read output from a background streaming job with pagination.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"job_id": map[string]interface{}{
+					"type":        "string",
+					"description": "The ID of the background job",
+				},
+				"offset": map[string]interface{}{
+					"type":        "number",
+					"description": "Line offset to start reading from (default: 0)",
+					"default":     0,
+				},
+				"limit": map[string]interface{}{
+					"type":        "number",
+					"description": "Number of lines to return (default: 100)",
+					"default":     100,
+				},
+			},
+			"required": []string{"job_id"},
+		},
+	}, makeBackgroundReadHandler())
+
+	s.AddTool(&mcp.Tool{
+		Name:        "fastly_background_query",
+		Description: "Search output from a background streaming job using a pattern or regex.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"job_id": map[string]interface{}{
+					"type":        "string",
+					"description": "The ID of the background job",
+				},
+				"pattern": map[string]interface{}{
+					"type":        "string",
+					"description": "Search pattern (supports regex)",
+				},
+				"max_results": map[string]interface{}{
+					"type":        "number",
+					"description": "Maximum number of matching lines to return (default: 100)",
+					"default":     100,
+				},
+			},
+			"required": []string{"job_id", "pattern"},
+		},
+	}, makeBackgroundQueryHandler())
+
 	s.AddPrompt(&mcp.Prompt{
 		Name:        "system_prompt",
 		Description: "Returns the Fastly MCP system prompt that describes available tools and workflow",
@@ -615,6 +736,14 @@ func handleSystemPrompt(ctx context.Context, request *mcp.GetPromptRequest) (*mc
 - **` + "`fastly_result_query`" + `** - Query/filter cached results
 - **` + "`fastly_result_summary`" + `** - Get summary of cached data
 - **` + "`fastly_result_list`" + `** - List all cached results
+
+#### Background Streaming Tools (for log-tail, stats realtime):
+- **` + "`fastly_background_start`" + `** - Start a streaming command in the background
+- **` + "`fastly_background_stop`" + `** - Stop a running background job
+- **` + "`fastly_background_list`" + `** - List all background jobs
+- **` + "`fastly_background_status`" + `** - Get detailed job status
+- **` + "`fastly_background_read`" + `** - Read output with pagination
+- **` + "`fastly_background_query`" + `** - Search output with pattern matching
 
 #### Core Operations:
 - **Services**: Create/update/list CDN services, manage versions

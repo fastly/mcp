@@ -52,6 +52,15 @@ func GetTokenEncryptionEnabled() bool {
 	return globalTokenEncryptionEnabled
 }
 
+// GetValidator returns the current validator instance.
+// Returns the custom validator if set, otherwise a new default validator.
+func GetValidator() *validation.Validator {
+	if globalValidator != nil {
+		return globalValidator
+	}
+	return validation.NewValidator()
+}
+
 // convertFlagsToInterface converts []types.Flag to []interface{} for cache compatibility.
 func convertFlagsToInterface(flags []types.Flag) []interface{} {
 	result := make([]interface{}, len(flags))
