@@ -104,8 +104,8 @@ func (rs *ResultStore) Store(output string, command string, args []string, flags
 
 // Get retrieves a cached result by ID.
 func (rs *ResultStore) Get(id string) (*CachedResult, error) {
-	rs.mu.RLock()
-	defer rs.mu.RUnlock()
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
 
 	result, exists := rs.results[id]
 	if !exists {
@@ -121,6 +121,10 @@ func (rs *ResultStore) Get(id string) (*CachedResult, error) {
 
 // Read retrieves a portion of cached data.
 func (rs *ResultStore) Read(id string, offset, limit int) (interface{}, error) {
+	if offset < 0 {
+		return nil, fmt.Errorf("offset must be non-negative")
+	}
+
 	result, err := rs.Get(id)
 	if err != nil {
 		return nil, err

@@ -80,6 +80,18 @@ func TestResultStore_Read(t *testing.T) {
 	}
 }
 
+func TestResultStore_ReadNegativeOffset(t *testing.T) {
+	store := NewResultStore(10*time.Minute, 1*time.Hour)
+
+	jsonArray := `[{"id": 1}]`
+	id := store.Store(jsonArray, "service", []string{"list"}, nil)
+
+	_, err := store.Read(id, -1, 10)
+	if err == nil {
+		t.Fatal("Expected error for negative offset")
+	}
+}
+
 func TestResultStore_Query(t *testing.T) {
 	store := NewResultStore(10*time.Minute, 1*time.Hour)
 
