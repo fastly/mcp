@@ -134,7 +134,7 @@ func resolveServiceReferences(flags []Flag) []Flag {
 
 func applySmartDefaults(cmd string, args []string, flags []Flag) []Flag {
 	// Add JSON output for list commands if not specified
-	if len(args) > 0 && args[0] == "list" && !hasFlag(flags, "json") {
+	if len(args) > 0 && args[0] == "list" && cmd != "service" && !hasFlag(flags, "json") {
 		if globalContext.PreferredFormat == "json" || globalContext.PreferredFormat == "" {
 			flags = append(flags, Flag{Name: "json", Value: ""})
 		}
