@@ -6,6 +6,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -425,6 +426,23 @@ func convertFlagsBack(flags []Flag) []types.Flag {
 	return result
 }
 
+func getRawCommandOutput(response types.CommandResponse) string {
+	if response.Output != "" {
+		return response.Output
+	}
+
+	if response.OutputJSON == nil {
+		return ""
+	}
+
+	jsonOutput, err := json.Marshal(response.OutputJSON)
+	if err != nil {
+		return ""
+	}
+
+	return string(jsonOutput)
+}
+
 // NormalizeAddress normalizes the HTTP server address to ensure a valid host:port format.
 // It handles various input formats:
 //   - Empty string -> "127.0.0.1:8080"
@@ -596,7 +614,7 @@ func (ft *FastlyTool) makeExecuteHandler() mcp.ToolHandler {
 			response := fastly.ExecuteCommand(cmdReq)
 
 			// Extract context from the response for future use
-			ExtractContext(processedCmd, processedArgs, processedFlags, response, response.Success)
+			ExtractContext(processedCmd, processedArgs, processedFlags, getRawCommandOutput(response), response.Success)
 
 			// Enhance error responses with intelligent suggestions
 			if !response.Success && response.Error != "" {

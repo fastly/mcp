@@ -83,7 +83,7 @@ func IntelligentPreprocess(cmd string, args []string, flags []Flag) (string, []s
 }
 
 // ExtractContext updates context based on command results
-func ExtractContext(cmd string, args []string, flags []Flag, output interface{}, success bool) {
+func ExtractContext(cmd string, args []string, flags []Flag, output string, success bool) {
 	globalContext.mu.Lock()
 	defer globalContext.mu.Unlock()
 
@@ -219,26 +219,81 @@ func recordCommand(cmd string, args []string, flags []Flag) {
 	globalContext.CommonFlags[cmdPattern] = flags
 }
 
-func extractServiceList(output interface{}) {
+func extractServiceList(output string) {
 	// Parse service list output and update name->ID mappings
-	if data, ok := output.(string); ok {
-		// Try to parse as JSON
-		var services []map[string]interface{}
-		if err := json.Unmarshal([]byte(data), &services); err == nil {
-			for _, service := range services {
-				if name, ok := service["Name"].(string); ok {
-					if id, ok := service["ServiceID"].(string); ok {
-						globalContext.ServiceNameToID[name] = id
+	if strings.TrimSpace(output) == "" {
+		return
+	}
 
-						// Also track active versions
-						if version, ok := service["ActiveVersion"].(float64); ok {
-							globalContext.ActiveVersions[id] = fmt.Sprintf("%.0f", version)
-						}
-					}
-				}
-			}
+	// Try to parse as a JSON array first.
+	var services []map[string]interface{}
+	if err := json.Unmarshal([]byte(output), &services); err != nil {
+		return
+	}
+
+	for _, service := range services {
+		name := getFirstStringValue(service, "Name", "name", "ServiceName", "service_name")
+		id := getFirstStringValue(service, "ServiceID", "service_id", "serviceId", "ID", "Id", "id")
+		if name == "" || id == "" {
+			continue
+		}
+
+		globalContext.ServiceNameToID[name] = id
+
+		// Track active versions when present.
+		version := getFirstStringValue(service, "ActiveVersion", "active_version", "activeVersion")
+		if version != "" {
+			globalContext.ActiveVersions[id] = version
 		}
 	}
+}
+
+func getFirstStringValue(values map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		value, exists := values[key]
+		if !exists {
+			continue
+		}
+
+		switch v := value.(type) {
+		case string:
+			trimmed := strings.TrimSpace(v)
+			if trimmed != "" {
+				return trimmed
+			}
+		case json.Number:
+			trimmed := strings.TrimSpace(v.String())
+			if trimmed != "" {
+				return trimmed
+			}
+		case float64:
+			return fmt.Sprintf("%v", v)
+		case float32:
+			return fmt.Sprintf("%v", v)
+		case int:
+			return fmt.Sprintf("%d", v)
+		case int8:
+			return fmt.Sprintf("%d", v)
+		case int16:
+			return fmt.Sprintf("%d", v)
+		case int32:
+			return fmt.Sprintf("%d", v)
+		case int64:
+			return fmt.Sprintf("%d", v)
+		case uint:
+			return fmt.Sprintf("%d", v)
+		case uint8:
+			return fmt.Sprintf("%d", v)
+		case uint16:
+			return fmt.Sprintf("%d", v)
+		case uint32:
+			return fmt.Sprintf("%d", v)
+		case uint64:
+			return fmt.Sprintf("%d", v)
+		}
+	}
+
+	return ""
 }
 
 func extractVersionInfo(output interface{}) {

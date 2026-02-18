@@ -88,6 +88,24 @@ func NewValidatorWithCommandsAndDenied(allowedCommands, deniedCommands map[strin
 	}
 }
 
+func cloneCommandMap(commands map[string]bool) map[string]bool {
+	if commands == nil {
+		return nil
+	}
+
+	cloned := make(map[string]bool, len(commands))
+	for command, allowed := range commands {
+		cloned[command] = allowed
+	}
+
+	return cloned
+}
+
+// DefaultAllowedCommands returns a copy of the default allowlist.
+func DefaultAllowedCommands() map[string]bool {
+	return cloneCommandMap(defaultAllowedCommands())
+}
+
 // validateStringLength checks if a string length is within bounds
 func validateStringLength(value string, maxLength int, fieldName string) error {
 	if len(value) == 0 {

@@ -555,3 +555,70 @@ func TestRequiresServiceID(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractServiceListSupportsLowercaseKeys(t *testing.T) {
+	originalServiceNameToID := globalContext.ServiceNameToID
+	originalActiveVersions := globalContext.ActiveVersions
+	defer func() {
+		globalContext.ServiceNameToID = originalServiceNameToID
+		globalContext.ActiveVersions = originalActiveVersions
+	}()
+
+	globalContext.ServiceNameToID = make(map[string]string)
+	globalContext.ActiveVersions = make(map[string]string)
+
+	output := `[
+		{"name":"svc-lower","id":"sid-lower","active_version":4},
+		{"Name":"svc-upper","ServiceID":"sid-upper","ActiveVersion":7},
+		{"name":"svc-mixed","service_id":"sid-mixed","activeVersion":"9"}
+	]`
+
+	extractServiceList(output)
+
+	if got := globalContext.ServiceNameToID["svc-lower"]; got != "sid-lower" {
+		t.Fatalf("expected lowercase mapping, got %q", got)
+	}
+	if got := globalContext.ServiceNameToID["svc-upper"]; got != "sid-upper" {
+		t.Fatalf("expected uppercase mapping, got %q", got)
+	}
+	if got := globalContext.ServiceNameToID["svc-mixed"]; got != "sid-mixed" {
+		t.Fatalf("expected mixed mapping, got %q", got)
+	}
+
+	if got := globalContext.ActiveVersions["sid-lower"]; got != "4" {
+		t.Fatalf("expected lowercase active version '4', got %q", got)
+	}
+	if got := globalContext.ActiveVersions["sid-upper"]; got != "7" {
+		t.Fatalf("expected uppercase active version '7', got %q", got)
+	}
+	if got := globalContext.ActiveVersions["sid-mixed"]; got != "9" {
+		t.Fatalf("expected mixed active version '9', got %q", got)
+	}
+}
+
+func TestExtractContextUsesRawOutputString(t *testing.T) {
+	originalServiceNameToID := globalContext.ServiceNameToID
+	originalActiveVersions := globalContext.ActiveVersions
+	defer func() {
+		globalContext.ServiceNameToID = originalServiceNameToID
+		globalContext.ActiveVersions = originalActiveVersions
+	}()
+
+	globalContext.ServiceNameToID = make(map[string]string)
+	globalContext.ActiveVersions = make(map[string]string)
+
+	ExtractContext(
+		"service",
+		[]string{"list"},
+		nil,
+		`[{"name":"svc-raw","id":"sid-raw","active_version":12}]`,
+		true,
+	)
+
+	if got := globalContext.ServiceNameToID["svc-raw"]; got != "sid-raw" {
+		t.Fatalf("expected context extraction to map service name to id, got %q", got)
+	}
+	if got := globalContext.ActiveVersions["sid-raw"]; got != "12" {
+		t.Fatalf("expected context extraction to set active version, got %q", got)
+	}
+}

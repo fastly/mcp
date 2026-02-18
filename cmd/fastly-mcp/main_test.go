@@ -195,6 +195,52 @@ func TestPrettyPrintJSON(t *testing.T) {
 	}
 }
 
+func TestBuildCustomValidator(t *testing.T) {
+	t.Run("returns nil when no overrides are provided", func(t *testing.T) {
+		if validator := buildCustomValidator(nil, nil); validator != nil {
+			t.Fatal("expected nil validator when no overrides are provided")
+		}
+	})
+
+	t.Run("denied-only keeps default allowlist", func(t *testing.T) {
+		validator := buildCustomValidator(nil, map[string]bool{
+			"service delete": true,
+		})
+		if validator == nil {
+			t.Fatal("expected validator")
+		}
+
+		if err := validator.ValidateCommand("service"); err != nil {
+			t.Fatalf("expected default command 'service' to remain allowed, got %v", err)
+		}
+		if err := validator.ValidateCommand("version"); err != nil {
+			t.Fatalf("expected default command 'version' to remain allowed, got %v", err)
+		}
+		if !validator.IsDenied("service", []string{"delete"}) {
+			t.Fatal("expected denied override to block 'service delete'")
+		}
+		if validator.IsDenied("service", []string{"list"}) {
+			t.Fatal("did not expect 'service list' to be denied")
+		}
+	})
+
+	t.Run("explicit allowlist still replaces defaults", func(t *testing.T) {
+		validator := buildCustomValidator(map[string]bool{
+			"version": true,
+		}, nil)
+		if validator == nil {
+			t.Fatal("expected validator")
+		}
+
+		if err := validator.ValidateCommand("version"); err != nil {
+			t.Fatalf("expected explicit command to be allowed, got %v", err)
+		}
+		if err := validator.ValidateCommand("service"); err == nil {
+			t.Fatal("expected default command to be disallowed when custom allowlist is provided")
+		}
+	})
+}
+
 // Integration tests that execute the binary
 // These tests build and run the actual binary to test end-to-end behavior
 

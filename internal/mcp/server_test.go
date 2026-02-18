@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/fastly/mcp/internal/types"
 )
 
 func TestToJSON(t *testing.T) {
@@ -94,6 +96,46 @@ func TestNormalizeAddress(t *testing.T) {
 			result := NormalizeAddress(tt.input)
 			if result != tt.expected {
 				t.Errorf("NormalizeAddress(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGetRawCommandOutput(t *testing.T) {
+	tests := []struct {
+		name     string
+		response types.CommandResponse
+		want     string
+	}{
+		{
+			name: "uses plain output when present",
+			response: types.CommandResponse{
+				Output:     `[{"name":"svc","id":"sid"}]`,
+				OutputJSON: []map[string]interface{}{{"name": "ignored"}},
+			},
+			want: `[{"name":"svc","id":"sid"}]`,
+		},
+		{
+			name: "marshals output json when plain output is empty",
+			response: types.CommandResponse{
+				OutputJSON: []map[string]interface{}{{"name": "svc", "id": "sid"}},
+			},
+			want: `[{"id":"sid","name":"svc"}]`,
+		},
+		{
+			name: "returns empty string when output json cannot be marshaled",
+			response: types.CommandResponse{
+				OutputJSON: map[string]interface{}{"bad": make(chan int)},
+			},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := getRawCommandOutput(tt.response)
+			if got != tt.want {
+				t.Fatalf("getRawCommandOutput() = %q, want %q", got, tt.want)
 			}
 		})
 	}

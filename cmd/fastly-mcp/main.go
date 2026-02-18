@@ -25,6 +25,20 @@ import (
 	"github.com/fastly/mcp/internal/version"
 )
 
+// buildCustomValidator creates a validator for user-supplied allow/deny overrides.
+// If only denied commands are supplied, keep the default allowlist and layer denies on top.
+func buildCustomValidator(allowedCommands, deniedCommands map[string]bool) *validation.Validator {
+	if allowedCommands == nil && deniedCommands == nil {
+		return nil
+	}
+
+	if allowedCommands == nil {
+		allowedCommands = validation.DefaultAllowedCommands()
+	}
+
+	return validation.NewValidatorWithCommandsAndDenied(allowedCommands, deniedCommands)
+}
+
 // main is the application entry point that determines the execution mode based on command-line arguments.
 // It supports:
 //   - Default: MCP server over stdio
@@ -303,9 +317,8 @@ func main() {
 		}
 	}
 
-	// Set custom validator if any commands were loaded
-	if allowedCommands != nil || deniedCommands != nil {
-		customValidator := validation.NewValidatorWithCommandsAndDenied(allowedCommands, deniedCommands)
+	// Set custom validator if command overrides were loaded
+	if customValidator := buildCustomValidator(allowedCommands, deniedCommands); customValidator != nil {
 		fastly.SetCustomValidator(customValidator)
 	}
 
@@ -524,9 +537,8 @@ func runCLIMode(sanitize bool, encryptTokens bool) {
 		}
 	}
 
-	// Set custom validator if any commands were loaded
-	if cliAllowedCommands != nil || cliDeniedCommands != nil {
-		customValidator := validation.NewValidatorWithCommandsAndDenied(cliAllowedCommands, cliDeniedCommands)
+	// Set custom validator if command overrides were loaded
+	if customValidator := buildCustomValidator(cliAllowedCommands, cliDeniedCommands); customValidator != nil {
 		fastly.SetCustomValidator(customValidator)
 	}
 
