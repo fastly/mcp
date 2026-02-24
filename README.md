@@ -779,11 +779,11 @@ The Fastly MCP server is developed and tested primarily using [Roo Code](https:/
 The Fastly MCP server has been successfully tested with the following models:
 
 - Claude Sonnet and Claude Opus
-- GLM-4.5 Air
-- Groq Code Fast
+- Qwen3-Coder-Next
+- GLM-4.7 Air
+- Grok Code Fast
 - Jan-nano-128k
 - Microsoft MAI-DS-R1
-- Qwen3-Coder
 
 **Note**: At the time of writing, we do not recommend Gemini models as they are not optimized for tool usage and MCP interactions.
 
