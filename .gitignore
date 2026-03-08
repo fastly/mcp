@@ -2,6 +2,7 @@
 .env
 .env.local
 .idea/
+.swival/
 .vscode/
 .zig-cache
 *.dll
