@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.1.10] - 2026-04-02
+
+### Added
+- Background streaming commands support
+- Ability to override built-in help for some commands with LLM-friendly information and examples
+
+### Changed
+- Migrated from mcp-go to the official `github.com/modelcontextprotocol/go-sdk`
+- Updated Go SDK and all dependencies to latest versions
+- Updated recommended models list
+- Reduced CI workflow permissions
+- MCP server now reports actual build version instead of hardcoded "1.0.0"
+
+### Fixed
+- cache: Fix ResultStore.Get locking and reject negative offsets
+- Preserve default allowlist when only denied commands are configured
+- Pass raw command output to MCP context extraction instead of CommandResponse
+- Support lowercase and mixed-case Fastly service-list JSON keys for context extraction
+- Fix goreleaser ldflags to set the correct version variable
+
 ## [0.1.9] - 2025-09-16
 
 ### Fixed
