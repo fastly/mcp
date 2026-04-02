@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.11] - 2026-04-02
+
+### Changed
+- Adjust to recent changes of the Fastly CLI
+- Strip heavy fields (e.g., versions array) from service list responses
+
 ## [0.1.10] - 2026-04-02
 
 ### Added
