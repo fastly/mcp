@@ -780,6 +780,7 @@ The Fastly MCP server has been successfully tested with the following models:
 
 - Claude Sonnet and Claude Opus
 - Qwen3-Coder-Next
+- Qwen3.5-27b
 - GLM-4.7 Air
 - Grok Code Fast
 - Jan-nano-128k
