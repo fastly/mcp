@@ -4,67 +4,67 @@
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![GitHub Release](https://img.shields.io/github/v/release/fastly/mcp?color=brightgreen)](https://github.com/fastly/mcp/releases)
 
-> 🤖 **AI-powered Fastly management** - Securely control your Fastly infrastructure through natural language interactions with AI assistants.
+> **AI-powered Fastly management** - Securely control your Fastly infrastructure through natural language interactions with AI assistants.
 
 A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that provides AI agents with secure access to Fastly services. Ask your AI assistant to manage CDN configurations, deploy Compute services, analyze performance metrics, and more - all through simple conversational commands.
 
 The Fastly MCP server is an open-source, actively developed tool with Tier 1 support. Our open-source support policy is detailed in our [documentation](https://www.fastly.com/documentation/developers/community/open-source/#understanding-topics-and-support-levels). We also welcome your feedback on our [community forum](https://community.fastly.com/c/developer-tools/25).
 
-## ✨ What Can You Do?
+## What Can You Do?
 
 With this MCP server, your AI assistant can:
 
-- 🌍 **Manage Fastly Services** - "List my services and their domains"
-- 📊 **Monitor Performance** - "Show me real-time traffic and cache hit ratios"
-- 🚀 **Deploy Changes** - "Update my backend configuration"
-- 🔍 **Analyze Issues** - "Help me troubleshoot 5xx errors"
-- 🛡️ **Control Security** - "Show my ACL rules and TLS certificates"
+- **Manage Fastly Services** - "List my services and their domains"
+- **Monitor Performance** - "Show me real-time traffic and cache hit ratios"
+- **Deploy Changes** - "Update my backend configuration"
+- **Analyze Issues** - "Help me troubleshoot 5xx errors"
+- **Control Security** - "Show my ACL rules and TLS certificates"
 
 ### Key Features
 
-- **🔒 Security First**: Command allowlisting, input validation, and dangerous operation protection
-- **🤖 AI-Optimized**: Full MCP protocol support for seamless AI integration
-- **🔌 Flexible Transport**: Stdio (default), HTTP, and Server-Sent Events
-- **📝 Smart Output**: Automatic pagination and truncation of large responses
-- **🔐 Privacy Options**: Optional PII sanitization and token encryption
+- **Security First**: Command allowlisting, input validation, and dangerous operation protection
+- **AI-Optimized**: Full MCP protocol support for seamless AI integration
+- **Flexible Transport**: Stdio (default), HTTP, and Server-Sent Events
+- **Smart Output**: Automatic pagination and truncation of large responses
+- **Privacy Options**: Optional PII sanitization and token encryption
 
-## 📚 Table of Contents
+## Table of Contents
 
 - [Fastly MCP Server](#fastly-mcp-server)
-  - [✨ What Can You Do?](#-what-can-you-do)
+  - [What Can You Do?](#what-can-you-do)
     - [Key Features](#key-features)
-  - [📚 Table of Contents](#-table-of-contents)
-  - [📋 Prerequisites](#-prerequisites)
-  - [📦 Installation](#-installation)
+  - [Table of Contents](#table-of-contents)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#installation)
     - [Option 1: Pre-built Binaries](#option-1-pre-built-binaries)
     - [Option 2: Install with Go](#option-2-install-with-go)
     - [Option 3: Build from Source](#option-3-build-from-source)
-  - [🚀 Quick Start](#-quick-start)
+  - [Quick Start](#quick-start)
     - [Step 1: Authenticate with Fastly](#step-1-authenticate-with-fastly)
     - [Step 2: Configure Your AI Assistant](#step-2-configure-your-ai-assistant)
     - [Step 3: Start Managing Your CDN!](#step-3-start-managing-your-cdn)
-      - [💡 Example Commands to Try:](#-example-commands-to-try)
-  - [🔧 Available Tools](#-available-tools)
-    - [📋 `fastly_list_commands`](#-fastly_list_commands)
-    - [🔍 `fastly_describe`](#-fastly_describe)
-    - [▶️ `fastly_execute`](#️-fastly_execute)
-    - [🕰️ `current_time`](#️-current_time)
-    - [📦 Cache Management Tools](#-cache-management-tools)
-      - [📖 `fastly_result_read`](#-fastly_result_read)
-      - [🔍 `fastly_result_query`](#-fastly_result_query)
-      - [📊 `fastly_result_summary`](#-fastly_result_summary)
-      - [📋 `fastly_result_list`](#-fastly_result_list)
-  - [🎮 Running Modes](#-running-modes)
+      - [Example Commands to Try:](#example-commands-to-try)
+  - [Available Tools](#available-tools)
+    - [`fastly_list_commands`](#fastly_list_commands)
+    - [`fastly_describe`](#fastly_describe)
+    - [`fastly_execute`](#fastly_execute)
+    - [`current_time`](#current_time)
+    - [Cache Management Tools](#cache-management-tools)
+      - [`fastly_result_read`](#fastly_result_read)
+      - [`fastly_result_query`](#fastly_result_query)
+      - [`fastly_result_summary`](#fastly_result_summary)
+      - [`fastly_result_list`](#fastly_result_list)
+  - [Running Modes](#running-modes)
     - [Stdio Mode (Default)](#stdio-mode-default)
     - [HTTP Mode](#http-mode)
     - [CLI Mode (Testing)](#cli-mode-testing)
-  - [🔒 Security](#-security)
-    - [🛡️ Command Execution Security](#️-command-execution-security)
-    - [📊 Resource Limits](#-resource-limits)
-    - [⚠️ Dangerous Operation Protection](#️-dangerous-operation-protection)
-    - [🚫 Blocked Commands](#-blocked-commands)
-    - [🛡️ Prompt Injection Protection](#️-prompt-injection-protection)
-  - [⚙️ Configuration Options](#️-configuration-options)
+  - [Security](#security)
+    - [Command Execution Security](#command-execution-security)
+    - [Resource Limits](#resource-limits)
+    - [Dangerous Operation Protection](#dangerous-operation-protection)
+    - [Blocked Commands](#blocked-commands)
+    - [Prompt Injection Protection](#prompt-injection-protection)
+  - [Configuration Options](#configuration-options)
     - [Custom Command Allowlist](#custom-command-allowlist)
       - [From file:](#from-file)
       - [Inline specification:](#inline-specification)
@@ -72,13 +72,13 @@ With this MCP server, your AI assistant can:
     - [PII Sanitization (Optional)](#pii-sanitization-optional)
     - [Token Encryption (Optional)](#token-encryption-optional)
     - [Combining Options](#combining-options)
-  - [🤖 Model Recommendations](#-model-recommendations)
-  - [🔌 Custom AI Integration](#-custom-ai-integration)
-  - [🛠️ Development](#️-development)
-  - [🤝 Contributing](#-contributing)
-  - [🔐 Security](#-security-1)
-  - [📜 License](#-license)
-  - [🙏 Acknowledgments](#-acknowledgments)
+  - [Model Recommendations](#model-recommendations)
+  - [Custom AI Integration](#custom-ai-integration)
+  - [Development](#development)
+  - [Contributing](#contributing)
+  - [Security](#security-1)
+  - [License](#license)
+  - [Acknowledgments](#acknowledgments)
   - [Appendix: Recommended AI Assistant Prompt](#appendix-recommended-ai-assistant-prompt)
   - [Appendix: Example Prompts for Fastly MCP](#appendix-example-prompts-for-fastly-mcp)
     - [Service Overview \& Status](#service-overview--status)
@@ -92,15 +92,15 @@ With this MCP server, your AI assistant can:
     - [Capacity Planning \& Forecasting](#capacity-planning--forecasting)
     - [Advanced Analytics \& Insights](#advanced-analytics--insights)
 
-## 📋 Prerequisites
+## Prerequisites
 
 Before getting started, ensure you have:
 
-- ✅ **Go 1.23+** (for building from source)
-- ✅ **[Fastly CLI](https://developer.fastly.com/reference/cli/)** installed and in your PATH
-- ✅ **Fastly account** with CLI authenticated (via `fastly whoami`)
+- **Go 1.23+** (for building from source)
+- **[Fastly CLI](https://developer.fastly.com/reference/cli/)** installed and in your PATH
+- **Fastly account** with CLI authenticated (via `fastly whoami`)
 
-## 📦 Installation
+## Installation
 
 Choose the installation method that works best for you:
 
@@ -172,7 +172,7 @@ make build
 # Binary will be at ./bin/fastly-mcp
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 Get up and running in just 3 steps!
 
@@ -202,10 +202,10 @@ fastly whoami
 
 **Windows Users:** Run these commands in PowerShell, Command Prompt, or Windows Terminal.
 
-> ⚠️ **Important**: The `FASTLY_API_TOKEN` environment variable is not recommended for MCP clients as it may not be properly inherited by the MCP server process. Always use `fastly profile create` for reliable authentication.
+> **Important**: The `FASTLY_API_TOKEN` environment variable is not recommended for MCP clients as it may not be properly inherited by the MCP server process. Always use `fastly profile create` for reliable authentication.
 
 <details>
-<summary>📁 Where are credentials stored?</summary>
+<summary>Where are credentials stored?</summary>
 
 - **macOS**: `~/Library/Application Support/fastly/config.toml`
 - **Linux**: `~/.config/fastly/config.toml`
@@ -217,7 +217,7 @@ fastly whoami
 Choose your AI assistant and follow the configuration steps:
 
 <details>
-<summary><b>🦘 Roo Code</b></summary>
+<summary><b>Roo Code</b></summary>
 
 1. Click the **MCP** button in Roo Code
 2. Select **"Edit Global MCP"** or **"Edit Project MCP"**
@@ -236,7 +236,7 @@ Choose your AI assistant and follow the configuration steps:
 </details>
 
 <details>
-<summary><b>🔧 Augment Code</b></summary>
+<summary><b>Augment Code</b></summary>
 
 Navigate to **Settings → MCP Servers → Add Server**, or edit the configuration directly:
 
@@ -253,7 +253,7 @@ Navigate to **Settings → MCP Servers → Add Server**, or edit the configurati
 </details>
 
 <details>
-<summary><b>🤖 Claude Desktop</b></summary>
+<summary><b>Claude Desktop</b></summary>
 
 Add to your Claude configuration file:
 
@@ -274,7 +274,7 @@ Add to your Claude configuration file:
 </details>
 
 <details>
-<summary><b>💻 Claude Code</b></summary>
+<summary><b>Claude Code</b></summary>
 
 Simply run this command:
 
@@ -291,23 +291,23 @@ claude mcp add fastly C:\path\to\fastly-mcp.exe
 
 ### Step 3: Start Managing Your CDN!
 
-🎉 **You're all set!** Start by asking your AI assistant about your Fastly services:
+**You're all set!** Start by asking your AI assistant about your Fastly services:
 
 ```
-👤 You: "Show me all my Fastly services"
-🤖 Assistant: "I'll list all your Fastly services for you..."
+You: "Show me all my Fastly services"
+Assistant: "I'll list all your Fastly services for you..."
 ```
 
-#### 💡 Example Commands to Try:
+#### Example Commands to Try:
 
-- 📊 **"Show me performance metrics for my main service"**
-- 🌐 **"List all domains and their SSL status"**
-- 🚦 **"Check backend health for service ABC123"**
-- 🧹 **"Help me purge cache for /api/* paths"**
-- 📈 **"Analyze my cache hit ratios"**
+- **"Show me performance metrics for my main service"**
+- **"List all domains and their SSL status"**
+- **"Check backend health for service ABC123"**
+- **"Help me purge cache for /api/* paths"**
+- **"Analyze my cache hit ratios"**
 
 <details>
-<summary>⚠️ <b>Troubleshooting Quick Start Issues</b></summary>
+<summary><b>Troubleshooting Quick Start Issues</b></summary>
 
 **Authentication Issues?**
 - **"Not authenticated" error**:
@@ -340,11 +340,11 @@ claude mcp add fastly C:\path\to\fastly-mcp.exe
 - Ensure your user has access to Fastly CLI config
 </details>
 
-## 🔧 Available Tools
+## Available Tools
 
 The server provides eight powerful tools for AI agents:
 
-### 📋 `fastly_list_commands`
+### `fastly_list_commands`
 **Lists all available Fastly CLI commands**
 
 ```json
@@ -353,7 +353,7 @@ The server provides eight powerful tools for AI agents:
 }
 ```
 
-### 🔍 `fastly_describe`
+### `fastly_describe`
 **Gets detailed information about a specific command**
 
 ```json
@@ -365,7 +365,7 @@ The server provides eight powerful tools for AI agents:
 }
 ```
 
-### ▶️ `fastly_execute`
+### `fastly_execute`
 **Executes a Fastly CLI command with specified parameters**
 
 ```json
@@ -381,7 +381,7 @@ The server provides eight powerful tools for AI agents:
 }
 ```
 
-### 🕰️ `current_time`
+### `current_time`
 **Returns the current time in multiple formats for temporal context**
 
 ```json
@@ -406,11 +406,11 @@ The server provides eight powerful tools for AI agents:
 ```
 </details>
 
-### 📦 Cache Management Tools
+### Cache Management Tools
 
 When command outputs exceed 25KB (configurable via `--output-cache-threshold`), they are automatically cached with a preview. Use these tools to access the full data:
 
-#### 📖 `fastly_result_read`
+#### `fastly_result_read`
 **Read paginated data from cached results**
 
 ```json
@@ -424,7 +424,7 @@ When command outputs exceed 25KB (configurable via `--output-cache-threshold`), 
 }
 ```
 
-#### 🔍 `fastly_result_query`
+#### `fastly_result_query`
 **Query/filter cached data**
 
 ```json
@@ -437,7 +437,7 @@ When command outputs exceed 25KB (configurable via `--output-cache-threshold`), 
 }
 ```
 
-#### 📊 `fastly_result_summary`
+#### `fastly_result_summary`
 **Get statistical summary of cached data**
 
 ```json
@@ -449,7 +449,7 @@ When command outputs exceed 25KB (configurable via `--output-cache-threshold`), 
 }
 ```
 
-#### 📋 `fastly_result_list`
+#### `fastly_result_list`
 **List all currently cached results**
 
 ```json
@@ -495,7 +495,7 @@ Example cached response:
 ```
 </details>
 
-## 🎮 Running Modes
+## Running Modes
 
 ### Stdio Mode (Default)
 
@@ -561,18 +561,18 @@ fastly-mcp.exe describe service list
 fastly-mcp.exe execute '{\"command\":\"version\",\"args\":[]}'
 ```
 
-## 🔒 Security
+## Security
 
 We've designed this server with multiple layers of security:
 
-### 🛡️ Command Execution Security
+### Command Execution Security
 
-- **🚫 No Shell Execution**: Commands run directly without shell interpretation
-- **🏯 Process Isolation**: Direct execution prevents command injection
-- **✅ Argument Validation**: All inputs validated against dangerous patterns
-- **📁 Path Security**: Directory traversal prevention
+- **No Shell Execution**: Commands run directly without shell interpretation
+- **Process Isolation**: Direct execution prevents command injection
+- **Argument Validation**: All inputs validated against dangerous patterns
+- **Path Security**: Directory traversal prevention
 
-### 📊 Resource Limits
+### Resource Limits
 
 - Maximum command length: 50 characters
 - Maximum argument length: 100 characters per argument
@@ -583,7 +583,7 @@ We've designed this server with multiple layers of security:
 - Maximum JSON array items: 100 (truncated if larger)
 - Command execution timeout: 30 seconds
 
-### ⚠️ Dangerous Operation Protection
+### Dangerous Operation Protection
 
 These commands require explicit human approval via `--user-reviewed` flag:
 - `delete` - Removes resources
@@ -614,14 +614,14 @@ Example after human approval:
 }
 ```
 
-### 🚫 Blocked Commands
+### Blocked Commands
 
 These commands are completely blocked for security:
 - `auth-token` - Authentication token management
 - `sso` - Single sign-on operations
 - `profile` - Profile management
 
-### 🛡️ Prompt Injection Protection
+### Prompt Injection Protection
 
 Comprehensive defenses against [prompt injection attacks](https://simonwillison.net/2025/Apr/9/mcp-prompt-injection/):
 
@@ -631,7 +631,7 @@ Comprehensive defenses against [prompt injection attacks](https://simonwillison.
 - Output sanitization strips ANSI sequences
 - Structured responses prevent hidden content
 
-## ⚙️ Configuration Options
+## Configuration Options
 
 ### Custom Command Allowlist
 
@@ -707,7 +707,7 @@ What gets sanitized:
 - AWS/SSH keys → `[REDACTED-AWS-ACCESS-KEY]`
 - JSON sensitive fields (password, secret, token)
 
-⚠️ **Warning**: May redact service IDs and break automation workflows.
+**Warning**: May redact service IDs and break automation workflows.
 
 ### Token Encryption (Optional)
 
@@ -761,7 +761,7 @@ fastly-mcp.exe --http :9000 --encrypt-tokens --allowed-commands-file base.txt --
 fastly-mcp.exe --sanitize --allowed-commands service execute '{\"command\":\"service\",\"args\":[\"list\"]}'
 ```
 
-## 🤖 Model Recommendations
+## Model Recommendations
 
 This server works best with Language Models optimized for:
 - **Tool use and computer interaction**: Function calling and API interactions
@@ -787,7 +787,7 @@ The Fastly MCP server has been successfully tested with the following models:
 
 **Note**: At the time of writing, we do not recommend Gemini models as they are not optimized for tool usage and MCP interactions.
 
-## 🔌 Custom AI Integration
+## Custom AI Integration
 
 For custom applications:
 
@@ -817,7 +817,7 @@ process.stdin.flush()
 response = json.loads(process.stdout.readline())
 ```
 
-## 🛠️ Development
+## Development
 
 ```sh
 make build   # Build binary
@@ -830,19 +830,19 @@ make tidy    # Update dependencies
 make help    # Show all commands
 ```
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions! Please see our [contributing guidelines](CONTRIBUTING.md) for details.
 
-## 🔐 Security
+## Security
 
 Found a security issue? Please report it according to our [security policy](SECURITY.md).
 
-## 📜 License
+## License
 
 MIT License - see [LICENSE](LICENSE) for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - Built on the [Model Context Protocol](https://modelcontextprotocol.io/) specification
 - Uses [go-sdk](https://github.com/modelcontextprotocol/go-sdk) library for MCP implementation
