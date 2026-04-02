@@ -17,7 +17,7 @@ func TestCommandFiltering(t *testing.T) {
 
 COMMANDS
   acl           Manage access control lists (ACLs)
-  auth-token    Manage API tokens (filtered out)
+  auth          Manage stored Fastly API tokens (filtered out)
   backend       Manage service backends
   compute       Manage Compute services
   profile       Manage user profiles (filtered out)
@@ -33,9 +33,9 @@ SEE ALSO
 
 		response := GetCommandList()
 
-		// Check that auth-token, sso, and profile are not in the list
+		// Check that auth, sso, and profile are not in the list
 		for _, cmd := range response.Commands {
-			if cmd.Name == "auth-token" || cmd.Name == "sso" || cmd.Name == "profile" {
+			if cmd.Name == "auth" || cmd.Name == "sso" || cmd.Name == "profile" {
 				t.Errorf("Disallowed command '%s' found in command list", cmd.Name)
 			}
 		}
@@ -84,8 +84,8 @@ COMMANDS
   list      List all services`,
 		},
 		{
-			name:        "disallowed auth-token command",
-			cmdPath:     []string{"auth-token"},
+			name:        "disallowed auth command",
+			cmdPath:     []string{"auth"},
 			expectError: true,
 			errorMsg:    "not available",
 		},

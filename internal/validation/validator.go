@@ -146,11 +146,10 @@ func defaultAllowedCommands() map[string]bool {
 		"service-version":  true,
 		"backend":          true,
 		"domain":           true,
-		"domain-v1":        true,
 		"healthcheck":      true,
 		"logging":          true,
 		"acl":              true,
-		"acl-entry":        true,
+		"aclentry":         true,
 		"vcl":              true,
 		"dictionary":       true,
 		"dictionary-entry": true,
@@ -180,6 +179,8 @@ func defaultAllowedCommands() map[string]bool {
 		"stats":     true,
 
 		// Security and networking
+		"apisecurity":      true,
+		"ngwaf":            true,
 		"rate-limit":       true,
 		"ip-list":          true,
 		"tls-config":       true,

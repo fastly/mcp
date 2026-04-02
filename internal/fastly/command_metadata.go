@@ -24,13 +24,15 @@ var commandMetadataMap = map[string]CommandMetadata{
 	// Service management
 	"service":         {ResourceType: "service", Category: "configuration", RequiresAuth: true},
 	"service-version": {ResourceType: "service", Category: "configuration", RequiresAuth: true},
+	"service-auth":    {ResourceType: "auth", Category: "security", RequiresAuth: true},
 	"backend":         {ResourceType: "service-component", Category: "configuration", RequiresAuth: true},
 	"healthcheck":     {ResourceType: "service-component", Category: "configuration", RequiresAuth: true},
 	"domain":          {ResourceType: "service-component", Category: "configuration", RequiresAuth: true},
+	"resource-link":   {ResourceType: "service-component", Category: "configuration", RequiresAuth: true},
 
 	// Edge logic
 	"acl":              {ResourceType: "acl", Category: "edge-logic", RequiresAuth: true},
-	"acl-entry":        {ResourceType: "acl", Category: "edge-logic", RequiresAuth: true},
+	"aclentry":         {ResourceType: "acl", Category: "edge-logic", RequiresAuth: true},
 	"dictionary":       {ResourceType: "dictionary", Category: "edge-logic", RequiresAuth: true},
 	"dictionary-entry": {ResourceType: "dictionary", Category: "edge-logic", RequiresAuth: true},
 
@@ -39,27 +41,32 @@ var commandMetadataMap = map[string]CommandMetadata{
 	"compute": {ResourceType: "code", Category: "code-deployment", RequiresAuth: true},
 
 	// Monitoring
-	"stats":    {ResourceType: "monitoring", Category: "monitoring", RequiresAuth: true},
-	"log-tail": {ResourceType: "monitoring", Category: "monitoring", RequiresAuth: true},
+	"stats":     {ResourceType: "monitoring", Category: "monitoring", RequiresAuth: true},
+	"log-tail":  {ResourceType: "monitoring", Category: "monitoring", RequiresAuth: true},
+	"alerts":    {ResourceType: "monitoring", Category: "monitoring", RequiresAuth: true},
+	"dashboard": {ResourceType: "monitoring", Category: "monitoring", RequiresAuth: true},
 
-	// Security and auth
-	"auth-token":   {ResourceType: "auth", Category: "security", RequiresAuth: true},
-	"user":         {ResourceType: "auth", Category: "security", RequiresAuth: true},
-	"service-auth": {ResourceType: "auth", Category: "security", RequiresAuth: true},
+	// Security and networking
+	"auth":             {ResourceType: "auth", Category: "security", RequiresAuth: true},
+	"user":             {ResourceType: "auth", Category: "security", RequiresAuth: true},
+	"apisecurity":      {ResourceType: "api-security", Category: "security", RequiresAuth: true},
+	"ngwaf":            {ResourceType: "waf", Category: "security", RequiresAuth: true},
+	"rate-limit":       {ResourceType: "security", Category: "security", RequiresAuth: true},
+	"tls-config":       {ResourceType: "tls", Category: "security", RequiresAuth: true},
+	"tls-custom":       {ResourceType: "tls", Category: "security", RequiresAuth: true},
+	"tls-platform":     {ResourceType: "tls", Category: "security", RequiresAuth: true},
+	"tls-subscription": {ResourceType: "tls", Category: "security", RequiresAuth: true},
 
-	// Secrets and TLS
+	// Secrets
 	"secret-store":       {ResourceType: "secret", Category: "security", RequiresAuth: true},
 	"secret-store-entry": {ResourceType: "secret", Category: "security", RequiresAuth: true},
-	"tls-config":         {ResourceType: "secret", Category: "security", RequiresAuth: true},
-	"tls-custom":         {ResourceType: "secrets", Category: "security", RequiresAuth: true},
-	"tls-platform":       {ResourceType: "secrets", Category: "security", RequiresAuth: true},
-	"tls-subscription":   {ResourceType: "secrets", Category: "security", RequiresAuth: true},
 
 	// Storage
 	"config-store":       {ResourceType: "key-value", Category: "storage", RequiresAuth: true},
 	"config-store-entry": {ResourceType: "key-value", Category: "storage", RequiresAuth: true},
 	"kv-store":           {ResourceType: "key-value", Category: "storage", RequiresAuth: true},
 	"kv-store-entry":     {ResourceType: "key-value", Category: "storage", RequiresAuth: true},
+	"object-storage":     {ResourceType: "object-storage", Category: "storage", RequiresAuth: true},
 
 	// Operations
 	"purge": {ResourceType: "cache", Category: "operations", RequiresAuth: true},
@@ -67,11 +74,18 @@ var commandMetadataMap = map[string]CommandMetadata{
 	// Integrations
 	"logging": {ResourceType: "log-endpoint", Category: "integrations", RequiresAuth: true},
 
+	// Products
+	"products": {ResourceType: "product", Category: "configuration", RequiresAuth: true},
+
 	// Utilities
 	"version": {ResourceType: "system-info", Category: "utilities", RequiresAuth: false},
 	"whoami":  {ResourceType: "system-info", Category: "utilities", RequiresAuth: true},
 	"pops":    {ResourceType: "system-info", Category: "utilities", RequiresAuth: true},
 	"ip-list": {ResourceType: "system-info", Category: "utilities", RequiresAuth: true},
+	"config":  {ResourceType: "system-config", Category: "utilities", RequiresAuth: false},
+	"tools":   {ResourceType: "utility", Category: "utilities", RequiresAuth: false},
+	"install": {ResourceType: "utility", Category: "utilities", RequiresAuth: false},
+	"update":  {ResourceType: "utility", Category: "utilities", RequiresAuth: false},
 }
 
 // GetCommandMetadata returns metadata for a given Fastly CLI command.

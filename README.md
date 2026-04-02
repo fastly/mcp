@@ -617,7 +617,7 @@ Example after human approval:
 ### Blocked Commands
 
 These commands are completely blocked for security:
-- `auth-token` - Authentication token management
+- `auth` - Authentication and token management
 - `sso` - Single sign-on operations
 - `profile` - Profile management
 

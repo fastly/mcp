@@ -135,7 +135,7 @@ func TestAddMCPMetadata(t *testing.T) {
 		},
 		{
 			name:             "auth command",
-			command:          "auth-token",
+			command:          "auth",
 			expectedCategory: "security",
 			expectedResource: "auth",
 		},
