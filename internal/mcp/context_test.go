@@ -316,13 +316,24 @@ func TestApplySmartDefaults(t *testing.T) {
 			},
 		},
 		{
-			name:       "adds json flag for list commands",
-			cmd:        "service",
+			name:       "adds json flag for non-service list commands",
+			cmd:        "kv-store",
 			args:       []string{"list"},
 			inputFlags: []Flag{},
 			checkFunc: func(t *testing.T, flags []Flag) {
 				if !hasFlag(flags, "json") {
 					t.Error("Expected json flag to be added for list command")
+				}
+			},
+		},
+		{
+			name:       "does not add json flag for service list commands",
+			cmd:        "service",
+			args:       []string{"list"},
+			inputFlags: []Flag{},
+			checkFunc: func(t *testing.T, flags []Flag) {
+				if hasFlag(flags, "json") {
+					t.Error("Expected json flag not to be added for service list command")
 				}
 			},
 		},
