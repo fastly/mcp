@@ -17,6 +17,7 @@ import (
 	"github.com/fastly/mcp/internal/cache"
 	"github.com/fastly/mcp/internal/fastly"
 	"github.com/fastly/mcp/internal/types"
+	"github.com/fastly/mcp/internal/version"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -50,7 +51,7 @@ func CreateServer() (*mcp.Server, error) {
 
 	s := mcp.NewServer(&mcp.Implementation{
 		Name:    "Fastly CLI MCP Server",
-		Version: "1.0.0",
+		Version: version.GetVersion(),
 	}, nil)
 
 	s.AddTool(&mcp.Tool{
