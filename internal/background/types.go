@@ -10,13 +10,13 @@ import (
 )
 
 const (
-	DefaultMaxDataSize    = 1 << 30 // 1 GB
-	DefaultMaxJobs        = 5
-	DefaultJobTimeout     = 1 * time.Hour
-	DefaultCleanupAge     = 10 * time.Minute
-	DefaultCleanupTick    = 1 * time.Minute
-	DefaultReadLimit      = 100  // lines per read
-	DefaultShutdownWait   = 5 * time.Second
+	DefaultMaxDataSize  = 1 << 30 // 1 GB
+	DefaultMaxJobs      = 5
+	DefaultJobTimeout   = 1 * time.Hour
+	DefaultCleanupAge   = 10 * time.Minute
+	DefaultCleanupTick  = 1 * time.Minute
+	DefaultReadLimit    = 100 // lines per read
+	DefaultShutdownWait = 5 * time.Second
 )
 
 type JobStatus string
@@ -55,11 +55,11 @@ type JobOutput struct {
 
 // JobQueryResult represents search results from job output.
 type JobQueryResult struct {
-	JobID       string        `json:"job_id"`
-	Pattern     string        `json:"pattern"`
-	Matches     []MatchedLine `json:"matches"`
-	TotalCount  int           `json:"total_count"`
-	Truncated   bool          `json:"truncated,omitempty"`
+	JobID      string        `json:"job_id"`
+	Pattern    string        `json:"pattern"`
+	Matches    []MatchedLine `json:"matches"`
+	TotalCount int           `json:"total_count"`
+	Truncated  bool          `json:"truncated,omitempty"`
 }
 
 // MatchedLine represents a line that matched a search pattern.
@@ -86,13 +86,13 @@ type StartResponse struct {
 
 // StopResponse contains the result of stopping a background job.
 type StopResponse struct {
-	Success      bool      `json:"success"`
-	JobID        string    `json:"job_id"`
-	Status       JobStatus `json:"status"`
-	OutputSize   int64     `json:"output_size"`
-	LineCount    int64     `json:"line_count"`
-	Duration     string    `json:"duration"`
-	Error        string    `json:"error,omitempty"`
+	Success    bool      `json:"success"`
+	JobID      string    `json:"job_id"`
+	Status     JobStatus `json:"status"`
+	OutputSize int64     `json:"output_size"`
+	LineCount  int64     `json:"line_count"`
+	Duration   string    `json:"duration"`
+	Error      string    `json:"error,omitempty"`
 }
 
 // StatusResponse contains detailed status of a background job.
