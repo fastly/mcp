@@ -141,6 +141,96 @@ func TestIsDangerousOperation(t *testing.T) {
 	}
 }
 
+func TestStripHeavyFields(t *testing.T) {
+	tests := []struct {
+		name    string
+		output  string
+		command string
+		args    []string
+		check   func(t *testing.T, result string)
+	}{
+		{
+			name:    "strips versions from service list JSON",
+			command: "service",
+			args:    []string{"list"},
+			output:  `[{"id":"svc1","name":"my-service","versions":[{"number":1},{"number":2},{"number":3}]},{"id":"svc2","name":"other","versions":[{"number":1}]}]`,
+			check: func(t *testing.T, result string) {
+				if strings.Contains(result, "versions") {
+					t.Error("Expected versions to be stripped")
+				}
+				if !strings.Contains(result, "svc1") || !strings.Contains(result, "svc2") {
+					t.Error("Expected service IDs to be preserved")
+				}
+				if !strings.Contains(result, "my-service") {
+					t.Error("Expected service names to be preserved")
+				}
+			},
+		},
+		{
+			name:    "does not strip for non-service commands",
+			command: "backend",
+			args:    []string{"list"},
+			output:  `[{"id":"b1","versions":[1,2,3]}]`,
+			check: func(t *testing.T, result string) {
+				if !strings.Contains(result, "versions") {
+					t.Error("Expected versions to remain for non-service commands")
+				}
+			},
+		},
+		{
+			name:    "does not strip for service describe",
+			command: "service",
+			args:    []string{"describe"},
+			output:  `{"id":"svc1","versions":[{"number":1}]}`,
+			check: func(t *testing.T, result string) {
+				if !strings.Contains(result, "versions") {
+					t.Error("Expected versions to remain for service describe")
+				}
+			},
+		},
+		{
+			name:    "handles non-JSON output",
+			command: "service",
+			args:    []string{"list"},
+			output:  "NAME          ID\nmy-service    svc1\n",
+			check: func(t *testing.T, result string) {
+				if result != "NAME          ID\nmy-service    svc1\n" {
+					t.Error("Expected non-JSON output to be unchanged")
+				}
+			},
+		},
+		{
+			name:    "handles empty output",
+			command: "service",
+			args:    []string{"list"},
+			output:  "",
+			check: func(t *testing.T, result string) {
+				if result != "" {
+					t.Error("Expected empty output to be unchanged")
+				}
+			},
+		},
+		{
+			name:    "handles empty args",
+			command: "service",
+			args:    []string{},
+			output:  `[{"id":"svc1","versions":[1]}]`,
+			check: func(t *testing.T, result string) {
+				if !strings.Contains(result, "versions") {
+					t.Error("Expected versions to remain when args are empty")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := StripHeavyFields(tt.output, tt.command, tt.args)
+			tt.check(t, result)
+		})
+	}
+}
+
 func TestTruncateOutput(t *testing.T) {
 	tests := []struct {
 		name        string

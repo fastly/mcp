@@ -199,6 +199,10 @@ func ExecuteCommand(req types.CommandRequest) types.CommandResponse {
 		cleanedOutput = SanitizeOutput(cleanedOutput, globalSanitizeOpts)
 	}
 
+	// Strip heavy fields (e.g., versions array from service list) before
+	// caching or truncation so the output stays manageable.
+	cleanedOutput = StripHeavyFields(cleanedOutput, req.Command, req.Args)
+
 	response := types.CommandResponse{
 		Command:     cmdStr,
 		CommandLine: fullCmdLine,

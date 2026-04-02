@@ -109,6 +109,46 @@ func CleanANSI(text string) string {
 	return text
 }
 
+// StripHeavyFields removes excessively large fields from JSON command output.
+// Service list responses include a "versions" array per service that can reach
+// megabytes for accounts with many services. Use "service describe" for full
+// version details on a specific service.
+func StripHeavyFields(output string, command string, args []string) string {
+	if command != "service" || len(args) == 0 || args[0] != "list" {
+		return output
+	}
+
+	trimmedBytes := []byte(strings.TrimSpace(output))
+	if len(trimmedBytes) == 0 {
+		return output
+	}
+
+	var jsonData interface{}
+	if err := json.Unmarshal(trimmedBytes, &jsonData); err != nil {
+		return output
+	}
+
+	arr, ok := jsonData.([]interface{})
+	if !ok {
+		return output
+	}
+
+	for _, item := range arr {
+		obj, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		delete(obj, "versions")
+	}
+
+	result, err := json.Marshal(jsonData)
+	if err != nil {
+		return output
+	}
+
+	return string(result)
+}
+
 // TruncateOutput truncates text output to a maximum size while preserving readability.
 // It attempts to truncate at line boundaries within the last 1000 bytes to avoid
 // cutting off mid-line. Returns pagination information when truncation occurs,
