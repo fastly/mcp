@@ -217,25 +217,6 @@ fastly whoami
 Choose your AI assistant and follow the configuration steps:
 
 <details>
-<summary><b>Roo Code</b></summary>
-
-1. Click the **MCP** button in Roo Code
-2. Select **"Edit Global MCP"** or **"Edit Project MCP"**
-3. Add the following configuration:
-
-```json
-{
-  "mcpServers": {
-    "fastly": {
-      "command": "/path/to/fastly-mcp",  // Windows: "C:\\path\\to\\fastly-mcp.exe"
-      "args": []
-    }
-  }
-}
-```
-</details>
-
-<details>
 <summary><b>Augment Code</b></summary>
 
 Navigate to **Settings → MCP Servers → Add Server**, or edit the configuration directly:
