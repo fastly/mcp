@@ -1,0 +1,171 @@
+name: Release CI
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      trusted_publishing:
+        description: "Use npm trusted publishing via GitHub OIDC"
+        required: true
+        type: choice
+        default: "false"
+        options:
+          - "false"
+          - "true"
+      dist_tag:
+        description: "Override npm dist-tag. Leave empty to derive from the version."
+        required: false
+        type: string
+        default: ""
+      dry_run:
+        description: "Run npm publish --dry-run"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish-npm:
+    name: Publish to npmjs.org
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run tests
+        run: bun test
+
+      - name: Validate release metadata
+        id: release
+        shell: bash
+        env:
+          EXPECTED_PKG_NAME: "@fastly/mcp"
+          INPUT_DIST_TAG: ${{ inputs.dist_tag || '' }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
+            echo "::error::Release workflow must run from a tag ref."
+            exit 1
+          fi
+
+          TAG="${GITHUB_REF_NAME}"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Release tag must look like v1.2.3 or v1.2.3-rc.1, got '${TAG}'."
+            exit 1
+          fi
+
+          VERSION="${TAG#v}"
+          PKG_NAME="$(node -p "require('./package.json').name")"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+
+          if [[ "$PKG_NAME" != "$EXPECTED_PKG_NAME" ]]; then
+            echo "::error::package.json name must be '${EXPECTED_PKG_NAME}', got '${PKG_NAME}'."
+            exit 1
+          fi
+
+          if [[ "$PKG_VERSION" != "$VERSION" ]]; then
+            echo "::error::package.json version must match tag '${TAG}', got '${PKG_VERSION}'."
+            exit 1
+          fi
+
+          if [[ -n "$INPUT_DIST_TAG" ]]; then
+            DIST_TAG="$INPUT_DIST_TAG"
+          elif [[ "$VERSION" == *-* ]]; then
+            DIST_TAG="${VERSION#*-}"
+            DIST_TAG="${DIST_TAG%%.*}"
+            DIST_TAG="${DIST_TAG%%+*}"
+          else
+            DIST_TAG="latest"
+          fi
+
+          {
+            echo "version=${VERSION}"
+            echo "dist_tag=${DIST_TAG}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Package : ${PKG_NAME}"
+          echo "Version : ${VERSION}"
+          echo "Dist tag: ${DIST_TAG}"
+
+      - name: Publish to npmjs.org
+        shell: bash
+        env:
+          DIST_TAG: ${{ steps.release.outputs.dist_tag }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          TRUSTED_PUBLISHING: ${{ inputs.trusted_publishing || vars.NPM_TRUSTED_PUBLISHING || 'false' }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$TRUSTED_PUBLISHING" != "true" && "$TRUSTED_PUBLISHING" != "false" ]]; then
+            echo "::error::trusted_publishing must be 'true' or 'false', got '${TRUSTED_PUBLISHING}'."
+            exit 1
+          fi
+
+          if [[ "$DRY_RUN" != "true" && "$DRY_RUN" != "false" ]]; then
+            echo "::error::dry_run must be 'true' or 'false', got '${DRY_RUN}'."
+            exit 1
+          fi
+
+          if [[ "$TRUSTED_PUBLISHING" == "true" ]]; then
+            if [[ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" || -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]]; then
+              echo "::error::OIDC not available."
+              echo "::notice::Hint: Caller must grant: permissions: id-token: write"
+              exit 1
+            fi
+          else
+            if [[ "$DRY_RUN" == "false" && -z "${NPM_TOKEN:-}" ]]; then
+              echo "::error::Token auth not available."
+              echo "::notice::Hint: Set the NPM_TOKEN repository secret for bootstrap publishes."
+              exit 1
+            fi
+
+            if [[ -n "${NPM_TOKEN:-}" ]]; then
+              export NODE_AUTH_TOKEN="$NPM_TOKEN"
+              export NPM_CONFIG_USERCONFIG="${RUNNER_TEMP}/npm-bootstrap-publish.npmrc"
+              {
+                printf 'registry=https://registry.npmjs.org/\n'
+                printf '//registry.npmjs.org/:_authToken=%s\n' "$NODE_AUTH_TOKEN"
+              } > "$NPM_CONFIG_USERCONFIG"
+            fi
+
+            unset ACTIONS_ID_TOKEN_REQUEST_URL
+            unset ACTIONS_ID_TOKEN_REQUEST_TOKEN
+          fi
+
+          echo "Publishing @fastly/mcp v${{ steps.release.outputs.version }} to npmjs.org"
+          echo "  dist-tag           : ${DIST_TAG}"
+          echo "  dry-run            : ${DRY_RUN}"
+          echo "  trusted publishing : ${TRUSTED_PUBLISHING}"
+
+          PUBLISH_ARGS=(
+            --access=public
+            --tag "$DIST_TAG"
+            --registry=https://registry.npmjs.org/
+          )
+
+          if [[ "$DRY_RUN" == "true" ]]; then
+            PUBLISH_ARGS+=(--dry-run)
+          fi
+
+          npm publish "${PUBLISH_ARGS[@]}"
