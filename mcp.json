@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "fastly-js": {
+      "command": "bunx",
+      "args": [
+        "@fastly/mcp"
+      ]
+    }
+  }
+}

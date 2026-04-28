@@ -1,0 +1,16 @@
+# Fastly.PackageMetadata
+
+## Properties
+
+Name | Type | Description | Notes
+------------ | ------------- | ------------- | -------------
+**name** | **String** | Name of the Compute package. | [optional] 
+**description** | **String** | Description of the Compute package. | [optional] 
+**authors** | **[String]** | A list of package authors&#39; email addresses. | [optional] 
+**language** | **String** | The language of the Compute package. | [optional] 
+**size** | **Number** | Size of the Compute package in bytes. This is deprecated along with `hashsum`. | [optional] 
+**hashsum** | **String** | Hash of the Compute package. This is deprecated in favor of `files_hash`. | [optional] 
+**files_hash** | **String** | Hash of the files within the Compute package. | [optional] 
+
+
+[[Back to API list]](../../README.md#endpoints) [[Back to README]](../../README.md)

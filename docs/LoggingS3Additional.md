@@ -1,0 +1,21 @@
+# Fastly.LoggingS3Additional
+
+## Properties
+
+Name | Type | Description | Notes
+------------ | ------------- | ------------- | -------------
+**access_key** | **String** | The access key for your S3 account. Not required if `iam_role` is provided. | [optional] 
+**acl** | **String** | The access control list (ACL) specific request header. See the AWS documentation for [Access Control List (ACL) Specific Request Headers](https://docs.aws.amazon.com/AmazonS3/latest/API/mpUploadInitiate.html#initiate-mpu-acl-specific-request-headers) for more information. | [optional] 
+**bucket_name** | **String** | The bucket name for S3 account. | [optional] 
+**domain** | **String** | The domain of the Amazon S3 endpoint. | [optional] 
+**iam_role** | **String** | The Amazon Resource Name (ARN) for the IAM role granting Fastly access to S3. Not required if `access_key` and `secret_key` are provided. | [optional] 
+**path** | **String** | The path to upload logs to. | [optional]  [defaults to 'null']
+**public_key** | **String** | A PGP public key that Fastly will use to encrypt your log files before writing them to disk. | [optional]  [defaults to 'null']
+**redundancy** | **String** | The S3 redundancy level. | [optional]  [defaults to 'null']
+**secret_key** | **String** | The secret key for your S3 account. Not required if `iam_role` is provided. | [optional] 
+**server_side_encryption_kms_key_id** | **String** | Optional server-side KMS Key Id. Must be set if `server_side_encryption` is set to `aws:kms` or `AES256`. | [optional]  [defaults to 'null']
+**server_side_encryption** | **String** | Set this to `AES256` or `aws:kms` to enable S3 Server Side Encryption. | [optional]  [defaults to 'null']
+**file_max_bytes** | **Number** | The maximum number of bytes for each uploaded file. A value of 0 can be used to indicate there is no limit on the size of uploaded files, otherwise the minimum value is 1048576 bytes (1 MiB.) | [optional] 
+
+
+[[Back to API list]](../../README.md#endpoints) [[Back to README]](../../README.md)

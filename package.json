@@ -1,0 +1,50 @@
+{
+  "name": "@fastly/mcp",
+  "version": "2.0.5",
+  "description": "MCP server that gives AI agents full access to the Fastly API",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "fastly-mcp": "src/index.js"
+  },
+  "scripts": {
+    "start": "bun run src/index.js",
+    "start:node": "node src/index.js",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "update-docs": "./scripts/update-docs.sh"
+  },
+  "files": [
+    "src/",
+    "docs/",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "fastly",
+    "cdn",
+    "api",
+    "mcp",
+    "model-context-protocol",
+    "ai"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fastly/mcp"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "bun": ">=1.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "fast-cipher": "0.1.2",
+    "fastly": "^15.1.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.13"
+  }
+}
