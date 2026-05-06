@@ -42,9 +42,9 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "fast-cipher": "0.1.2",
     "fastly": "^15.1.0",
-    "zod": "^4.3.6"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.13"
+    "@biomejs/biome": "^2.4.14"
   }
 }
