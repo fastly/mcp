@@ -1,6 +1,6 @@
 {
   "name": "@fastly/mcp",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "description": "MCP server that gives AI agents full access to the Fastly API",
   "type": "module",
   "main": "src/index.js",
