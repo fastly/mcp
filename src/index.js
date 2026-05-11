@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -7,11 +9,6 @@ import { SecretShield } from "./secrets.js";
 import { execute } from "./tools/execute.js";
 import { inspect } from "./tools/inspect.js";
 import { search } from "./tools/search.js";
-
-const index = await buildIndex();
-
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 const pkg = JSON.parse(
   readFileSync(
@@ -31,7 +28,12 @@ function parseEncryptKey(hex) {
 }
 
 function parseArgs(argv) {
-  const args = { encryptSecrets: false, encryptKey: undefined };
+  const args = {
+    encryptSecrets: false,
+    encryptKey: undefined,
+    help: false,
+    version: false,
+  };
   for (let i = 2; i < argv.length; i++) {
     if (argv[i] === "--encrypt-secrets") {
       args.encryptSecrets = true;
@@ -39,12 +41,60 @@ function parseArgs(argv) {
       args.encryptKey = argv[++i];
     } else if (argv[i].startsWith("--encrypt-key=")) {
       args.encryptKey = argv[i].slice("--encrypt-key=".length);
+    } else if (argv[i] === "--help" || argv[i] === "-h") {
+      args.help = true;
+    } else if (argv[i] === "--version" || argv[i] === "-V") {
+      args.version = true;
     }
   }
   return args;
 }
 
+function printHelp() {
+  process.stdout.write(`fastly-mcp ${pkg.version}
+
+MCP server that gives AI agents access to the Fastly API. Communicates
+with MCP clients over stdio, so it is normally launched by an MCP client
+rather than run directly.
+
+Usage:
+  fastly-mcp [options]
+
+Options:
+  --encrypt-secrets         Encrypt sensitive values in tool output before
+                            they reach the model. Encrypted values are
+                            transparently decrypted on the way back in.
+  --encrypt-key <hex>       32 hex characters (16 bytes) used as the
+                            encryption key. Defaults to a per-session key.
+                            Also reads FASTLY_MCP_ENCRYPT_KEY.
+  -h, --help                Show this help and exit.
+  -V, --version             Print the version and exit.
+
+Environment:
+  FASTLY_API_TOKEN          Fastly API token used for authenticated calls.
+  FASTLY_MCP_ENCRYPT_SECRETS  Set to "true" or "1" to enable encryption
+                            without passing --encrypt-secrets.
+  FASTLY_MCP_ENCRYPT_KEY    Same as --encrypt-key.
+  FASTLY_MCP_ENCRYPT_TWEAK  Optional tweak string for domain separation.
+
+See the README for client configuration examples and details on the
+search, inspect, and execute tools.
+`);
+}
+
 const cliArgs = parseArgs(process.argv);
+
+if (cliArgs.help) {
+  printHelp();
+  process.exit(0);
+}
+
+if (cliArgs.version) {
+  process.stdout.write(`${pkg.version}\n`);
+  process.exit(0);
+}
+
+const index = await buildIndex();
 
 const encryptionEnabled =
   cliArgs.encryptSecrets ||
