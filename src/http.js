@@ -415,6 +415,9 @@ export async function startHttp(createMcpServer, { cliArgs, env, version }) {
         writeJsonError(res, 421, "Host not allowed");
         return;
       }
+    } else {
+      writeJsonError(res, 421, "Host not allowed");
+      return;
     }
 
     if (!checkAuth(req, authToken)) {
