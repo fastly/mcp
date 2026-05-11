@@ -18,13 +18,38 @@ export const CLI_OPTIONS = {
   "http-allow-network": { type: "boolean" },
 };
 
+const FLAG_NAMES = new Set([
+  ...Object.keys(CLI_OPTIONS).map((k) => `--${k}`),
+  "-h",
+  "-V",
+]);
+
+function rejectFlagShapedValue(optionName, value) {
+  if (typeof value !== "string") return;
+  if (FLAG_NAMES.has(value)) {
+    throw new Error(
+      `--${optionName} expects a value but got "${value}", which is itself a flag. ` +
+        `Use --${optionName}=<value> to pass a literal value that starts with a dash.`,
+    );
+  }
+}
+
 export function parseArgs(argv = process.argv) {
   const { values } = nodeParseArgs({
     args: argv.slice(2),
     options: CLI_OPTIONS,
-    strict: false,
+    strict: true,
     allowPositionals: true,
   });
+  for (const [name, def] of Object.entries(CLI_OPTIONS)) {
+    if (def.type !== "string") continue;
+    const v = values[name];
+    if (def.multiple && Array.isArray(v)) {
+      for (const item of v) rejectFlagShapedValue(name, item);
+    } else {
+      rejectFlagShapedValue(name, v);
+    }
+  }
   return {
     encryptSecrets: !!values["encrypt-secrets"],
     encryptKey: values["encrypt-key"],

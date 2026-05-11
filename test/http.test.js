@@ -266,6 +266,50 @@ describe("helpers: resolveHttpOptions", () => {
       resolveHttpOptions({ cliArgs: emptyCliArgs({ httpPath: "mcp" }) }),
     ).toThrow(/must start with/);
   });
+});
+
+describe("parseArgs: flag-shaped values", () => {
+  test("--http-auth-token followed by another flag throws", () => {
+    expect(() =>
+      parseArgs(["bun", "s", "--http-auth-token", "--http-stateless"]),
+    ).toThrow();
+  });
+
+  test("--http-port followed by another flag throws", () => {
+    expect(() =>
+      parseArgs(["bun", "s", "--http-port", "--http-host"]),
+    ).toThrow();
+  });
+
+  test("--encrypt-key followed by another flag throws", () => {
+    expect(() =>
+      parseArgs(["bun", "s", "--encrypt-key", "--http-stateless"]),
+    ).toThrow();
+  });
+
+  test("--http-allow-origin can be passed multiple times", () => {
+    const args = parseArgs([
+      "bun",
+      "s",
+      "--http-allow-origin",
+      "https://a.example",
+      "--http-allow-origin",
+      "https://b.example",
+    ]);
+    expect(args.httpAllowOrigins).toEqual([
+      "https://a.example",
+      "https://b.example",
+    ]);
+  });
+
+  test("--http-auth-token=- prefix forms still work via =", () => {
+    const args = parseArgs(["bun", "s", "--http-auth-token=-weird-value"]);
+    expect(args.httpAuthToken).toBe("-weird-value");
+  });
+
+  test("unknown flags are rejected (strict mode)", () => {
+    expect(() => parseArgs(["bun", "s", "--bogus-flag"])).toThrow();
+  });
 
   test("malformed port values are rejected", () => {
     expect(() =>
