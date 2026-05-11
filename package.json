@@ -1,6 +1,6 @@
 {
   "name": "@fastly/mcp",
-  "version": "2.0.6",
+  "version": "2.1.0",
   "description": "MCP server that gives AI agents full access to the Fastly API",
   "type": "module",
   "main": "src/index.js",
@@ -10,6 +10,7 @@
   "scripts": {
     "start": "bun run src/index.js",
     "start:node": "node src/index.js",
+    "start:http": "bun run src/index.js --transport http",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
