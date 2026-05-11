@@ -20,6 +20,8 @@ In practice, the assistant should search for the right method, inspect it, and t
 
 The examples below use [Bun](https://bun.sh/) and its `bunx` command, which can download and run the package without a global install. You can also run the server with Node.js 22 or newer if you install the package another way.
 
+The examples invoke the server as `bunx -p @fastly/mcp fastly-mcp` rather than `bunx @fastly/mcp`. The package's binary is `fastly-mcp`, not `mcp`, so the explicit `-p` form tells `bunx` exactly which binary to run instead of guessing from the package name. With the short form, if another `mcp` binary happens to be on your `PATH` (some Python environments ship one), `bunx` can pick it up and the MCP client will see non-JSON on stdout. `npx` users should use `npx -p @fastly/mcp fastly-mcp` for the same reason.
+
 You also need a [Fastly API token](https://docs.fastly.com/en/guides/using-api-tokens). For everyday use, create the narrowest token that fits the work you expect the assistant to do. A read-only token is a good starting point for investigation and reporting. Use a token with write access only when you actually want the assistant to make changes.
 
 Keep the token in your MCP client configuration or shell environment as `FASTLY_API_TOKEN`. Do not paste production tokens into prompts or commit them into a repository.
@@ -33,7 +35,7 @@ Most MCP clients accept a JSON block that describes how to start a server. This 
   "mcpServers": {
     "fastly": {
       "command": "bunx",
-      "args": ["@fastly/mcp"],
+      "args": ["-p", "@fastly/mcp", "fastly-mcp"],
       "env": {
         "FASTLY_API_TOKEN": "your-token-here"
       }
@@ -51,7 +53,7 @@ Keeping the token in the client configuration is often simpler for desktop apps,
 Run the server through `bunx`:
 
 ```sh
-claude mcp add fastly -- bunx @fastly/mcp
+claude mcp add fastly -- bunx -p @fastly/mcp fastly-mcp
 ```
 
 Then make sure `FASTLY_API_TOKEN` is available in the environment where Claude Code starts, or configure the token through your normal Claude Code MCP settings.
@@ -75,7 +77,7 @@ Opencode uses a slightly different shape. Put this in `opencode.json` in your pr
   "mcp": {
     "fastly": {
       "type": "local",
-      "command": ["bunx", "@fastly/mcp"],
+      "command": ["bunx", "-p", "@fastly/mcp", "fastly-mcp"],
       "environment": {
         "FASTLY_API_TOKEN": "your-token-here"
       }
@@ -99,7 +101,7 @@ Add this to `swival.toml` in your project:
 ```toml
 [mcp_servers.fastly]
 command = "bunx"
-args = ["@fastly/mcp"]
+args = ["-p", "@fastly/mcp", "fastly-mcp"]
 env = { FASTLY_API_TOKEN = "your-token-here" }
 ```
 
@@ -110,7 +112,7 @@ If `FASTLY_API_TOKEN` is already set in the environment where Swival runs, the `
 By default the server speaks MCP over stdio, which is what every desktop and CLI client expects. If instead you want one long-lived server that several clients on the same machine can share — or you want to put the server behind a reverse proxy and reach it remotely — start it with the Streamable HTTP transport:
 
 ```sh
-bunx @fastly/mcp --transport http
+bunx -p @fastly/mcp fastly-mcp --transport http
 ```
 
 That listens on `http://127.0.0.1:8231/mcp`. Loopback-only by default, no auth, SSE responses. An MCP client that accepts a streamable-http URL can be configured like this:
@@ -150,7 +152,7 @@ You can set `FASTLY_MCP_HTTP_AUTH_TOKEN` even on a loopback bind. There is no se
 
 ### Run `--help` for the full flag list
 
-Every flag described above shows up in `bunx @fastly/mcp --help`.
+Every flag described above shows up in `bunx -p @fastly/mcp fastly-mcp --help`.
 
 ## Using the server well
 
@@ -180,14 +182,14 @@ Fastly API responses can contain credentials, keys, or other sensitive values. B
 
 When encryption is enabled, recognized token formats are replaced with encrypted stand-ins before they are returned to the assistant. The replacements keep the same general shape and stay consistent during the server session, so the assistant can refer to them in later calls. Before code runs through `execute`, the server decrypts any encrypted values it recognizes.
 
-To enable encryption in an MCP configuration that uses `bunx`, add `--encrypt-secrets` after the package name:
+To enable encryption in an MCP configuration that uses `bunx`, add `--encrypt-secrets` after the binary name:
 
 ```json
 {
   "mcpServers": {
     "fastly": {
       "command": "bunx",
-      "args": ["@fastly/mcp", "--encrypt-secrets"],
+      "args": ["-p", "@fastly/mcp", "fastly-mcp", "--encrypt-secrets"],
       "env": {
         "FASTLY_API_TOKEN": "your-token-here"
       }
@@ -203,7 +205,7 @@ You can also enable it with an environment variable:
   "mcpServers": {
     "fastly": {
       "command": "bunx",
-      "args": ["@fastly/mcp"],
+      "args": ["-p", "@fastly/mcp", "fastly-mcp"],
       "env": {
         "FASTLY_API_TOKEN": "your-token-here",
         "FASTLY_MCP_ENCRYPT_SECRETS": "true"
