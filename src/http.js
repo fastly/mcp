@@ -8,6 +8,7 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 const SESSION_HEADER = "mcp-session-id";
 const STATELESS_ALLOW = "POST, OPTIONS";
+const MAX_SESSIONS = 1000;
 
 export function isLoopbackHost(host) {
   if (!host) return false;
@@ -302,6 +303,11 @@ export async function startHttp(createMcpServer, { cliArgs, env, version }) {
         400,
         "Missing Mcp-Session-Id header. Send an initialize request first.",
       );
+      return;
+    }
+
+    if (sessions.size >= MAX_SESSIONS) {
+      writeJsonError(res, 503, "Too many sessions");
       return;
     }
 
