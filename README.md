@@ -105,6 +105,53 @@ env = { FASTLY_API_TOKEN = "your-token-here" }
 
 If `FASTLY_API_TOKEN` is already set in the environment where Swival runs, the `env` line is optional. Swival can also read the generic JSON block from `.swival/mcp.json`.
 
+## Running over HTTP
+
+By default the server speaks MCP over stdio, which is what every desktop and CLI client expects. If instead you want one long-lived server that several clients on the same machine can share — or you want to put the server behind a reverse proxy and reach it remotely — start it with the Streamable HTTP transport:
+
+```sh
+bunx @fastly/mcp --transport http
+```
+
+That listens on `http://127.0.0.1:8231/mcp`. Loopback-only by default, no auth, SSE responses. An MCP client that accepts a streamable-http URL can be configured like this:
+
+```json
+{
+  "mcpServers": {
+    "fastly": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:8231/mcp"
+    }
+  }
+}
+```
+
+The exact shape varies by client; check your client's documentation for the streamable-http entry format.
+
+### Security notes
+
+A few defaults are deliberately conservative:
+
+- The server binds to `127.0.0.1` unless you say otherwise. Any non-loopback bind (a specific LAN address, `0.0.0.0`, or `--http-allow-network`) refuses to start without an auth token.
+- Set the auth token through `FASTLY_MCP_HTTP_AUTH_TOKEN` rather than `--http-auth-token`. The CLI flag works, but it lands in shell history and shows up in `ps`. With the token set, every request except `OPTIONS` preflights and `GET /healthz` must carry `Authorization: Bearer <token>`.
+- Requests with an `Origin` header that is not on the allowlist (set with `--http-allow-origin`, repeatable, or `FASTLY_MCP_HTTP_ALLOW_ORIGIN` as a comma-separated list) get `403`. Browser-based clients have to opt in. Native clients and `curl` do not send `Origin` and pass through.
+- The `Host` header is also validated. Off-loopback binds will reject requests whose `Host` does not match the bound interface, which is a small but useful guard against DNS rebinding.
+- There is no built-in TLS. Run the server behind a reverse proxy (or an ssh tunnel) when you want HTTPS.
+
+### Stateful vs stateless
+
+The default mode is stateful: the first request initializes a session, the response carries an `Mcp-Session-Id` header, and the client sends that header back on every subsequent request. When the client is done it sends `DELETE /mcp` with the same header and the server tears the session down (`204 No Content`).
+
+Stateless mode (`--http-stateless`) builds a fresh MCP server for every request and closes it when the response ends. There are no session IDs, no `GET` SSE stream, and no `DELETE`. It is the right choice behind a load balancer or for short-lived clients that do not want to manage session state. Stateless mode implies single-shot JSON responses; pass `--http-sse` alongside it if you really want SSE framing.
+
+### `Authorization: Bearer` on the loopback
+
+You can set `FASTLY_MCP_HTTP_AUTH_TOKEN` even on a loopback bind. There is no security harm in doing so, and it makes the configuration portable to a non-loopback deploy later.
+
+### Run `--help` for the full flag list
+
+Every flag described above shows up in `bunx @fastly/mcp --help`.
+
 ## Using the server well
 
 A Fastly API token can expose real production configuration, and write-capable tokens can change it. The server does not guess your intent, so the safest workflow is to be explicit about whether the assistant may change anything.
