@@ -67,8 +67,9 @@ describe("inspect", () => {
     expect(result.description).toBe("List services");
     expect(result.returnType).toBe("[ServiceResponse]");
     expect(result.params).toHaveLength(1);
-    expect(result.usage).toContain("Fastly.ServiceApi");
+    expect(result.usage).toContain("serviceApi");
     expect(result.usage).toContain("listServices");
+    expect(result.usage).not.toContain("new Fastly");
   });
 
   test("case-insensitive match", () => {
@@ -138,5 +139,109 @@ describe("inspect", () => {
     // bulkPurgeTag has params too. Let's just test the general structure.
     const result = inspect(mockIndex, "listServices");
     expect(result.usage).toContain("return await");
+  });
+
+  test("inspect surfaces constraints when present", () => {
+    const idx = [
+      {
+        apiClass: "StatsApi",
+        method: "getServiceStats",
+        httpMethod: "GET",
+        httpPath: "/service/{service_id}/stats/summary",
+        description:
+          "Get the stats from a service for a block of time. Use either a timestamp range (using start_time and end_time) or a specified month/year combo (using month and year).",
+        params: [
+          {
+            name: "service_id",
+            type: "String",
+            required: true,
+            description: "",
+          },
+          {
+            name: "start_time",
+            type: "Number",
+            required: false,
+            description: "",
+          },
+          {
+            name: "end_time",
+            type: "Number",
+            required: false,
+            description: "",
+          },
+          { name: "month", type: "String", required: false, description: "" },
+          { name: "year", type: "String", required: false, description: "" },
+        ],
+        returnType: "Stats",
+        constraints: [
+          {
+            kind: "oneOf",
+            groups: [
+              ["start_time", "end_time"],
+              ["month", "year"],
+            ],
+            sourceText:
+              "Use either a timestamp range (using start_time and end_time) or a specified month/year combo (using month and year).",
+          },
+        ],
+      },
+    ];
+    const result = inspect(idx, "getServiceStats");
+    expect(result.ok).toBe(true);
+    expect(result.constraints).toBeDefined();
+    expect(result.constraints[0].kind).toBe("oneOf");
+    expect(result.constraints[0].groups).toEqual([
+      ["start_time", "end_time"],
+      ["month", "year"],
+    ]);
+    expect(result.constraints[0].sourceText).toContain(
+      "start_time and end_time",
+    );
+  });
+
+  test("inspect omits constraints when empty or absent", () => {
+    const idxEmpty = [
+      {
+        apiClass: "FooApi",
+        method: "foo",
+        httpMethod: "GET",
+        httpPath: "/foo",
+        description: "Plain endpoint.",
+        params: [],
+        returnType: "void",
+        constraints: [],
+      },
+    ];
+    expect(inspect(idxEmpty, "foo").constraints).toBeUndefined();
+
+    const idxAbsent = [
+      {
+        apiClass: "FooApi",
+        method: "foo",
+        httpMethod: "GET",
+        httpPath: "/foo",
+        description: "Plain endpoint.",
+        params: [],
+        returnType: "void",
+      },
+    ];
+    expect(inspect(idxAbsent, "foo").constraints).toBeUndefined();
+  });
+
+  test("inspect retains the heavy fields that search drops", () => {
+    // Search projects to a slim record; inspect is the canonical source
+    // for full description, full params (with types + per-param descriptions),
+    // and returnType.
+    const result = inspect(mockIndex, "bulkPurgeTag");
+    expect(result.ok).toBe(true);
+    expect(result.description).toBe("Purge multiple surrogate key tags");
+    expect(result.returnType).toBe("{String: String}");
+    expect(Array.isArray(result.params)).toBe(true);
+    expect(result.params[0]).toEqual({
+      name: "service_id",
+      type: "String",
+      required: true,
+      description: "Service ID",
+    });
   });
 });

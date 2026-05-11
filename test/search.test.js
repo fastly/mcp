@@ -229,4 +229,264 @@ describe("search", () => {
     expect(result.matches.length).toBeGreaterThanOrEqual(1);
     expect(result.matches[0].method).toBe("createService");
   });
+
+  describe("compact projection", () => {
+    test("matches expose only the projected fields", () => {
+      const result = search(mockIndex, "bulkPurgeTag");
+      expect(result.ok).toBe(true);
+      const match = result.matches[0];
+
+      expect(Object.keys(match).sort()).toEqual(
+        [
+          "apiClass",
+          "hasServiceIdParam",
+          "httpMethod",
+          "httpPath",
+          "method",
+          "pathParams",
+          "requiredParams",
+          "summary",
+        ].sort(),
+      );
+    });
+
+    test("heavy fields are absent from search matches", () => {
+      const result = search(mockIndex, "bulkPurgeTag");
+      const match = result.matches[0];
+
+      expect(match.description).toBeUndefined();
+      expect(match.returnType).toBeUndefined();
+      expect(match.params).toBeUndefined();
+      expect(match.example).toBeUndefined();
+    });
+
+    test("requiredParams reflects parsed required metadata", () => {
+      const result = search(mockIndex, "bulkPurgeTag");
+      const match = result.matches[0];
+      expect(match.requiredParams).toEqual(["service_id"]);
+
+      const tlsResult = search(mockIndex, "createTlsCert");
+      const tlsMatch = tlsResult.matches[0];
+      expect(tlsMatch.requiredParams).toEqual([]);
+    });
+
+    test("pathParams comes from httpPath placeholders, not params metadata", () => {
+      const bulk = search(mockIndex, "bulkPurgeTag").matches[0];
+      expect(bulk.pathParams).toEqual(["service_id"]);
+
+      const single = search(mockIndex, "purgeSingleUrl").matches[0];
+      expect(single.pathParams).toEqual(["cached_url"]);
+
+      const list = search(mockIndex, "listTlsCerts").matches[0];
+      expect(list.pathParams).toEqual([]);
+    });
+
+    test("pathParams and requiredParams can diverge", () => {
+      // createService takes a required `name` param but has no path placeholders
+      const result = search(mockIndex, "createService");
+      const match = result.matches[0];
+      expect(match.requiredParams).toEqual(["name"]);
+      expect(match.pathParams).toEqual([]);
+    });
+
+    test("hasServiceIdParam is true when service_id appears in params", () => {
+      const bulk = search(mockIndex, "bulkPurgeTag").matches[0];
+      expect(bulk.hasServiceIdParam).toBe(true);
+
+      const list = search(mockIndex, "listTlsCerts").matches[0];
+      expect(list.hasServiceIdParam).toBe(false);
+
+      const usage = search(mockIndex, "getUsageService").matches[0];
+      expect(usage.hasServiceIdParam).toBe(false);
+    });
+
+    test("summary trims and shortens the description", () => {
+      const longDesc =
+        "Fetches historical stats for each of your Fastly services and groups the results by service ID. Additional details follow this sentence and should not appear in the summary.";
+      const longIndex = [
+        {
+          apiClass: "HistoricalApi",
+          method: "getHistStats",
+          httpMethod: "GET",
+          httpPath: "/stats",
+          description: longDesc,
+          params: [],
+          returnType: "void",
+        },
+      ];
+      const result = search(longIndex, "getHistStats");
+      const match = result.matches[0];
+
+      expect(match.summary.length).toBeLessThanOrEqual(160);
+      expect(match.summary).toContain("Fetches historical stats");
+      expect(match.summary).not.toContain("Additional details");
+    });
+
+    test("summary handles empty or missing descriptions", () => {
+      const emptyIndex = [
+        {
+          apiClass: "FooApi",
+          method: "foo",
+          httpMethod: "GET",
+          httpPath: "/foo",
+          description: "",
+          params: [],
+          returnType: "void",
+        },
+      ];
+      const result = search(emptyIndex, "foo");
+      expect(result.matches[0].summary).toBe("");
+    });
+
+    test("scope is detected from generic prose cues, not a method lookup", () => {
+      const scopedIndex = [
+        {
+          apiClass: "HistoricalApi",
+          method: "getHistStats",
+          httpMethod: "GET",
+          httpPath: "/stats",
+          description:
+            "Fetches historical stats for each of your Fastly services and groups the results by service ID.",
+          params: [],
+          returnType: "void",
+        },
+        {
+          apiClass: "HistoricalApi",
+          method: "getHistStatsAggregated",
+          httpMethod: "GET",
+          httpPath: "/stats/aggregate",
+          description:
+            "Fetches historical stats information aggregated across all of your Fastly services.",
+          params: [],
+          returnType: "void",
+        },
+        {
+          apiClass: "HistoricalApi",
+          method: "getHistStatsService",
+          httpMethod: "GET",
+          httpPath: "/stats/service/{service_id}",
+          description: "Fetches historical stats for a given service.",
+          params: [],
+          returnType: "void",
+        },
+      ];
+
+      const all = search(scopedIndex, "historical stats").matches;
+      const byMethod = Object.fromEntries(all.map((m) => [m.method, m]));
+
+      expect(byMethod.getHistStats.scope.tag).toBe("all-services");
+      expect(byMethod.getHistStatsAggregated.scope.tag).toBe("aggregated");
+      expect(byMethod.getHistStatsService.scope.tag).toBe("single-service");
+    });
+
+    test("scope evidence is the verbatim source snippet", () => {
+      const idx = [
+        {
+          apiClass: "FooApi",
+          method: "foo",
+          httpMethod: "GET",
+          httpPath: "/foo",
+          description:
+            "Fetches historical stats for each of your Fastly services and does more things afterward.",
+          params: [],
+          returnType: "void",
+        },
+      ];
+      const match = search(idx, "foo").matches[0];
+      expect(match.scope).toBeDefined();
+      expect(match.scope.evidence).toContain(
+        "for each of your Fastly services",
+      );
+    });
+
+    test("scope is omitted when no cue matches", () => {
+      const idx = [
+        {
+          apiClass: "TlsApi",
+          method: "createCert",
+          httpMethod: "POST",
+          httpPath: "/tls/certs",
+          description: "Create a TLS certificate.",
+          params: [],
+          returnType: "void",
+        },
+      ];
+      const match = search(idx, "createCert").matches[0];
+      expect(match.scope).toBeUndefined();
+    });
+
+    test("aggregated cue is preferred over all-services when both could match", () => {
+      // "aggregated across all" appears before "for each of your services"
+      // in the cue list, so the more specific "aggregated" tag wins.
+      const idx = [
+        {
+          apiClass: "FooApi",
+          method: "foo",
+          httpMethod: "GET",
+          httpPath: "/foo",
+          description:
+            "Returns usage information aggregated across all Fastly services. Also exposes data for each of your services.",
+          params: [],
+          returnType: "void",
+        },
+      ];
+      const match = search(idx, "foo").matches[0];
+      expect(match.scope.tag).toBe("aggregated");
+    });
+
+    test("payload size shrinks noticeably versus the raw record", () => {
+      // Mirrors the shape of real Fastly docs: long prose descriptions,
+      // multiple params each with their own description text, return type
+      // references, and example code blocks.
+      const heavyIndex = Array.from({ length: 10 }, (_, i) => ({
+        apiClass: "ServiceApi",
+        method: `serviceMethod${i}`,
+        httpMethod: "GET",
+        httpPath: `/service/{service_id}/method/${i}`,
+        description:
+          "Fetches a detailed view of this resource. Accepts an optional timestamp range using start_time and end_time, or a month/year combo. Results are grouped by PoP location and include cache hit ratios, request counts, bandwidth consumed, and a number of other metrics that callers typically need when building dashboards or reports.",
+        params: [
+          {
+            name: "service_id",
+            type: "String",
+            required: true,
+            description:
+              "Alphanumeric string identifying the service. Must be a valid service ID that the caller has access to.",
+          },
+          {
+            name: "start_time",
+            type: "Number",
+            required: false,
+            description:
+              "Epoch timestamp marking the start of the window. Limits the results returned to entries on or after this timestamp.",
+          },
+          {
+            name: "end_time",
+            type: "Number",
+            required: false,
+            description:
+              "Epoch timestamp marking the end of the window. Limits the results returned to entries on or before this timestamp.",
+          },
+          {
+            name: "region",
+            type: "String",
+            required: false,
+            description:
+              "Limit query to a specific geographic region. One of: usa, europe, asia, asia_india, asia_southkorea, africa_std, mexico, southamerica_std.",
+          },
+        ],
+        returnType: "DetailedServiceMetricsResponse",
+        example:
+          "const options = {\n  service_id: 'SU1Z0isxPaozGVKXdv0eY',\n  start_time: 1608560817,\n  end_time: 1608647217,\n};\n\napi.serviceMethod" +
+          i +
+          "(options).then((data) => console.log(data));",
+      }));
+
+      const projected = search(heavyIndex, "service");
+      const projectedBytes = JSON.stringify(projected.matches).length;
+      const rawBytes = JSON.stringify(heavyIndex).length;
+
+      expect(projectedBytes).toBeLessThan(rawBytes * 0.5);
+    });
+  });
 });

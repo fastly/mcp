@@ -18,6 +18,26 @@ if (process.env.FASTLY_API_TOKEN) {
   Fastly.ApiClient.instance.authenticate(process.env.FASTLY_API_TOKEN);
 }
 
+function lowerFirst(name) {
+  return name.charAt(0).toLowerCase() + name.slice(1);
+}
+
+// Pre-instantiate every Fastly.*Api class and expose each as a lowercased-
+// first-letter global. Runtime discovery — adding a new Api class upstream
+// surfaces here automatically without code changes.
+const apiInstances = {};
+for (const name of Object.keys(Fastly)) {
+  if (!/Api$/.test(name)) continue;
+  const Ctor = Fastly[name];
+  if (typeof Ctor !== "function") continue;
+  try {
+    apiInstances[lowerFirst(name)] = new Ctor();
+  } catch {
+    // Construction failed — skip silently. User code can still do
+    // `new Fastly.${name}()` explicitly if it needs to.
+  }
+}
+
 const consoleLogs = [];
 const sandboxConsole = {
   log: (...args) =>
@@ -39,6 +59,7 @@ function pick(name) {
 
 const exposed = {
   Fastly,
+  ...apiInstances,
   console: sandboxConsole,
 
   fetch: pick("fetch"),

@@ -42,11 +42,18 @@ export function inspect(index, method) {
     params: match.params,
   };
 
+  if (Array.isArray(match.constraints) && match.constraints.length > 0) {
+    doc.constraints = match.constraints;
+  }
+
   if (match.example) {
     doc.example = match.example;
   }
 
-  doc.usage = `const api = new Fastly.${match.apiClass}();\nreturn await api.${match.method}(${match.params.length > 0 ? "{ /* params */ }" : ""});`;
+  const shortcut =
+    match.apiClass.charAt(0).toLowerCase() + match.apiClass.slice(1);
+  const args = match.params.length > 0 ? "{ /* params */ }" : "";
+  doc.usage = `return await ${shortcut}.${match.method}(${args});`;
 
   return doc;
 }

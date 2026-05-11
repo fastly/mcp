@@ -20,6 +20,35 @@ describe("execute", () => {
     expect(result).toEqual({ result: "object" });
   }, 10000);
 
+  test("Fastly.*Api classes are pre-instantiated as lowercased globals", async () => {
+    const result = await execute(
+      "return [typeof serviceApi, typeof statsApi, typeof purgeApi, typeof tlsCertificatesApi];",
+    );
+    expect(result.result).toEqual(["object", "object", "object", "object"]);
+  }, 10000);
+
+  test("pre-instantiated globals expose the expected methods", async () => {
+    const result = await execute(
+      "return [typeof serviceApi.listServices, typeof statsApi.getServiceStats, typeof purgeApi.purgeTag];",
+    );
+    expect(result.result).toEqual(["function", "function", "function"]);
+  }, 10000);
+
+  test("pre-instantiated globals are independent of the Fastly namespace constructor path", async () => {
+    // Both approaches should work; the shortcut is just sugar.
+    const result = await execute(
+      "const explicit = new Fastly.ServiceApi(); return [typeof explicit.listServices, typeof serviceApi.listServices, explicit.constructor === serviceApi.constructor];",
+    );
+    expect(result.result).toEqual(["function", "function", true]);
+  }, 10000);
+
+  test("user-declared const shadows pre-instantiated global cleanly", async () => {
+    const result = await execute(
+      "const serviceApi = { listServices: () => 'shadowed' }; return serviceApi.listServices();",
+    );
+    expect(result).toEqual({ result: "shadowed" });
+  }, 10000);
+
   test("empty code returns error", async () => {
     const result = await execute("");
     expect(result).toEqual({ error: "code must be a non-empty string" });

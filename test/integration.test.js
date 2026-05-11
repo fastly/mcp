@@ -124,7 +124,8 @@ describe("MCP integration", () => {
     expect(parsed.apiClass).toBe("ServiceApi");
     expect(parsed.method).toBe("listServices");
     expect(parsed.httpMethod).toBe("GET");
-    expect(parsed.usage).toContain("Fastly.ServiceApi");
+    expect(parsed.usage).toContain("serviceApi.listServices");
+    expect(parsed.usage).not.toContain("new Fastly");
     expect(parsed.params).toBeDefined();
   }, 10000);
 

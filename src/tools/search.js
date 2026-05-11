@@ -95,6 +95,94 @@ function scoreMethod(method, tokens) {
   return total;
 }
 
+const SUMMARY_MAX_CHARS = 160;
+
+function summarize(description) {
+  if (typeof description !== "string" || !description) return "";
+  const collapsed = description.replace(/\s+/g, " ").trim();
+  if (!collapsed) return "";
+
+  const sentenceEnd = collapsed.search(/[.!?](\s|$)/);
+  if (sentenceEnd !== -1 && sentenceEnd + 1 <= SUMMARY_MAX_CHARS) {
+    return collapsed.slice(0, sentenceEnd + 1);
+  }
+
+  if (collapsed.length <= SUMMARY_MAX_CHARS) return collapsed;
+  return `${collapsed.slice(0, SUMMARY_MAX_CHARS - 1).trimEnd()}…`;
+}
+
+function extractPathParams(httpPath) {
+  if (typeof httpPath !== "string") return [];
+  const out = [];
+  const re = /\{([^}]+)\}/g;
+  let m = re.exec(httpPath);
+  while (m !== null) {
+    out.push(m[1]);
+    m = re.exec(httpPath);
+  }
+  return out;
+}
+
+// Generic English phrases that hint at the scope of an endpoint. Each entry
+// maps a phrase to a short tag. The list is intentionally not endpoint- or
+// resource-specific — adding a new Fastly API does not require touching it.
+// Earlier entries win when multiple phrases match.
+const SCOPE_CUES = [
+  { phrase: "aggregated across all", tag: "aggregated" },
+  { phrase: "information aggregated across", tag: "aggregated" },
+  { phrase: "for each of your fastly services", tag: "all-services" },
+  { phrase: "for each of your services", tag: "all-services" },
+  { phrase: "groups the results by service", tag: "all-services" },
+  { phrase: "for a single service", tag: "single-service" },
+  { phrase: "for a given service", tag: "single-service" },
+  { phrase: "stats from a service", tag: "single-service" },
+  { phrase: "from a service for", tag: "single-service" },
+];
+
+const SCOPE_EVIDENCE_PADDING = 20;
+
+function detectScope(description) {
+  if (typeof description !== "string" || !description) return undefined;
+  const lower = description.toLowerCase();
+  for (const cue of SCOPE_CUES) {
+    const idx = lower.indexOf(cue.phrase);
+    if (idx === -1) continue;
+    const start = Math.max(0, idx - SCOPE_EVIDENCE_PADDING);
+    const end = Math.min(
+      description.length,
+      idx + cue.phrase.length + SCOPE_EVIDENCE_PADDING,
+    );
+    const snippet = description.slice(start, end).replace(/\s+/g, " ").trim();
+    return { tag: cue.tag, evidence: snippet };
+  }
+  return undefined;
+}
+
+function projectMatch(method) {
+  const params = Array.isArray(method.params) ? method.params : [];
+  const requiredParams = params
+    .filter((p) => p && p.required === true)
+    .map((p) => p.name);
+  const pathParams = extractPathParams(method.httpPath);
+  const hasServiceIdParam = params.some((p) => p && p.name === "service_id");
+
+  const projected = {
+    apiClass: method.apiClass,
+    method: method.method,
+    httpMethod: method.httpMethod,
+    httpPath: method.httpPath,
+    summary: summarize(method.description),
+    requiredParams,
+    pathParams,
+    hasServiceIdParam,
+  };
+
+  const scope = detectScope(method.description);
+  if (scope) projected.scope = scope;
+
+  return projected;
+}
+
 export function search(index, query) {
   if (typeof query !== "string" || !query.trim()) {
     return { ok: false, error: "query must be a non-empty string" };
@@ -103,7 +191,6 @@ export function search(index, query) {
   const trimmed = query.trim();
   const tokens = tokenize(trimmed);
 
-  // Also try the full query as a single token for exact/substring matching
   const fullLower = trimmed.toLowerCase();
   if (!tokens.includes(fullLower)) {
     tokens.push(fullLower);
@@ -120,7 +207,9 @@ export function search(index, query) {
   scored.sort((a, b) => b.score - a.score);
 
   const total = scored.length;
-  const matches = scored.slice(0, MAX_RESULTS).map((s) => s.method);
+  const matches = scored
+    .slice(0, MAX_RESULTS)
+    .map((s) => projectMatch(s.method));
 
   let hint;
   if (total === 0) {

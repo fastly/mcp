@@ -142,7 +142,9 @@ Rules:
 - API methods return values directly (arrays, objects). Do NOT assume responses are wrapped in a \`.result\` property — access the returned value directly.
 - If a result is unexpectedly empty, return the raw response first to inspect its shape: \`return await api.method(params);\`
 
-Example: \`const api = new Fastly.ServiceApi(); return await api.listServices();\``,
+Every Fastly.*Api class is pre-instantiated and exposed as a lowercased-first-letter global. Prefer the shortcut: use \`serviceApi\`, \`statsApi\`, \`purgeApi\`, etc. directly instead of writing \`new Fastly.ServiceApi()\`. The \`Fastly\` namespace is still available for cases where you need the constructor or other exports.
+
+Example: \`return await serviceApi.listServices();\``,
   {
     code: z
       .string()

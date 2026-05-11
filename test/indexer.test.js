@@ -62,6 +62,58 @@ describe("buildIndex – parse correctness", () => {
       expect(method.returnType.length).toBeGreaterThan(0);
     }
   });
+
+  test("StatsApi.getServiceStats has a oneOf constraint extracted from prose", () => {
+    const m = index.find(
+      (x) => x.apiClass === "StatsApi" && x.method === "getServiceStats",
+    );
+    expect(m).toBeDefined();
+    expect(Array.isArray(m.constraints)).toBe(true);
+    expect(m.constraints).toHaveLength(1);
+
+    const c = m.constraints[0];
+    expect(c.kind).toBe("oneOf");
+    expect(c.groups).toEqual([
+      ["start_time", "end_time"],
+      ["month", "year"],
+    ]);
+    expect(c.sourceText).toContain("Use either");
+    expect(c.sourceText).toContain("start_time and end_time");
+    expect(c.sourceText).toContain("month and year");
+  });
+
+  test("constraints are absent for endpoints whose prose is unrelated to params", () => {
+    // updateTlsCert says "It must either have an exact matching list or
+    // contain a superset" — the "either ... or" is about cert content,
+    // not parameters, so neither branch contains a known param name.
+    const m = index.find((x) => x.method === "updateTlsCert");
+    expect(m).toBeDefined();
+    expect(m.constraints).toEqual([]);
+  });
+
+  test("constraints field is present on every method (possibly empty)", () => {
+    for (const m of index) {
+      expect(Array.isArray(m.constraints)).toBe(true);
+    }
+  });
+
+  test("description includes the long prose, not just the table summary", () => {
+    // Regression: the parser used to look for ``` fences but missed the
+    // opening ```javascript fence, so descriptions fell back to the
+    // one-line table summary. Pick a method whose section prose is known
+    // to extend past the summary line.
+    const getServiceStats = index.find(
+      (m) => m.apiClass === "StatsApi" && m.method === "getServiceStats",
+    );
+    expect(getServiceStats).toBeDefined();
+    expect(getServiceStats.description.length).toBeGreaterThan(80);
+    expect(getServiceStats.description).toContain("start_time");
+
+    const getHistStats = index.find(
+      (m) => m.apiClass === "HistoricalApi" && m.method === "getHistStats",
+    );
+    expect(getHistStats.description).toContain("for each of your");
+  });
 });
 
 describe("buildIndex – golden test", () => {

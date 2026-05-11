@@ -4,6 +4,70 @@ import { basename, join } from "node:path";
 // API docs are bundled in the docs/ directory at the package root.
 const DOCS_DIR = join(import.meta.dirname ?? import.meta.dir, "../docs");
 
+// Pulls every parameter-name-shaped token from a text fragment and keeps only
+// those that appear in the supplied set. Order of first appearance is
+// preserved; duplicates are dropped.
+function collectKnownParams(text, paramNames) {
+  const found = [];
+  const re = /\b[a-z_][a-z0-9_]*\b/gi;
+  let m = re.exec(text);
+  while (m !== null) {
+    const name = m[0];
+    if (paramNames.has(name) && !found.includes(name)) found.push(name);
+    m = re.exec(text);
+  }
+  return found;
+}
+
+// Extracts cross-parameter constraints from the prose description.
+//
+// Detects only "one of" patterns triggered by generic English phrases
+// ("use either ... or ...", "must specify either ... or ...", etc.). A
+// constraint is emitted only when both branches of the "or" contain at least
+// one parameter name that exists in `params` — this is the false-positive
+// guard: prose like "the certificate must either contain SANs or a superset"
+// doesn't reference parameter names, so it produces nothing.
+function extractConstraints(description, params) {
+  if (typeof description !== "string" || !description) return [];
+  if (!Array.isArray(params) || params.length === 0) return [];
+
+  const paramNames = new Set(params.map((p) => p.name));
+  if (paramNames.size === 0) return [];
+
+  const constraints = [];
+  const triggerRe =
+    /\b(?:use either|must use either|must specify either|specify either|requires one of|requires either|provide either)\b/gi;
+
+  const sentences = description.split(/(?<=[.!?])\s+/);
+  for (const sentence of sentences) {
+    triggerRe.lastIndex = 0;
+    const triggerMatch = triggerRe.exec(sentence);
+    if (!triggerMatch) continue;
+
+    const afterTrigger = sentence.slice(
+      triggerMatch.index + triggerMatch[0].length,
+    );
+    const orMatch = / or /i.exec(afterTrigger);
+    if (!orMatch) continue;
+
+    const before = afterTrigger.slice(0, orMatch.index);
+    const after = afterTrigger.slice(orMatch.index + orMatch[0].length);
+
+    const groupA = collectKnownParams(before, paramNames);
+    const groupB = collectKnownParams(after, paramNames);
+
+    if (groupA.length === 0 || groupB.length === 0) continue;
+
+    constraints.push({
+      kind: "oneOf",
+      groups: [groupA, groupB],
+      sourceText: sentence.trim(),
+    });
+  }
+
+  return constraints;
+}
+
 function cleanDocText(text) {
   return text
     .trim()
@@ -56,11 +120,12 @@ function parseApiDoc(content, apiClass) {
     const summary = summaryMap.get(name);
     if (!summary) continue;
 
-    // Extract description: text between the code block (```...```) and ### Example
     let description = summary.shortDesc;
-    const codeBlockEnd = section.indexOf("```\n", section.indexOf("```\n") + 4);
-    if (codeBlockEnd !== -1) {
-      const afterCode = section.slice(codeBlockEnd + 4);
+    const signatureBlockMatch = section.match(/```[a-zA-Z]*\n[\s\S]*?\n```\n/);
+    if (signatureBlockMatch) {
+      const afterCode = section.slice(
+        signatureBlockMatch.index + signatureBlockMatch[0].length,
+      );
       const exampleIdx = afterCode.indexOf("### Example");
       if (exampleIdx !== -1) {
         const rawDesc = cleanDocText(afterCode.slice(0, exampleIdx));
@@ -125,6 +190,8 @@ function parseApiDoc(content, apiClass) {
       }
     }
 
+    const constraints = extractConstraints(description, params);
+
     methods.push({
       apiClass,
       method: name,
@@ -132,6 +199,7 @@ function parseApiDoc(content, apiClass) {
       httpPath: summary.httpPath,
       description,
       params,
+      constraints,
       returnType,
       example,
     });
