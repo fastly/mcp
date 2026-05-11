@@ -154,6 +154,7 @@ export async function execute(code) {
           return resolve(out);
         }
         const out = { error: raw.error };
+        if (raw.line) out.line = raw.line;
         if (raw.stack) out.stack = raw.stack;
         if (raw.console?.length) out.console = raw.console;
         return resolve(out);

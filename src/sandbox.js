@@ -110,18 +110,67 @@ for (const k of Object.keys(exposed)) {
 
 const context = vm.createContext(exposed);
 
+function rewriteError(err, source) {
+  const out = { error: err.message };
+  if (!err.stack || typeof err.stack !== "string") return out;
+
+  const frameRe = /(?:user-code|evalmachine\.<anonymous>):(\d+):(\d+)/;
+  const lines = err.stack.split("\n");
+  const kept = [];
+  let firstUserFrame = null;
+
+  if (lines.length > 0) kept.push(lines[0]);
+
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    const m = line.match(frameRe);
+    if (m) {
+      const rawLine = parseInt(m[1], 10);
+      const col = parseInt(m[2], 10);
+      const userLine = Math.max(1, rawLine - 1);
+      kept.push(line.replace(frameRe, `user-code:${userLine}:${col}`));
+      if (!firstUserFrame) firstUserFrame = { number: userLine, column: col };
+      continue;
+    }
+    if (
+      line.includes("/sandbox.js") ||
+      line.includes("node:internal") ||
+      line.includes("node:vm") ||
+      /bunx-\d+/.test(line)
+    ) {
+      continue;
+    }
+    kept.push(line);
+  }
+
+  out.stack = kept.join("\n");
+
+  if (firstUserFrame) {
+    const srcLines = source.split("\n");
+    const raw = srcLines[firstUserFrame.number - 1];
+    if (raw !== undefined) {
+      const trimmed = raw.length > 200 ? `${raw.slice(0, 200)}…` : raw;
+      out.line = {
+        number: firstUserFrame.number,
+        column: firstUserFrame.column,
+        source: trimmed,
+      };
+    }
+  }
+
+  return out;
+}
+
 try {
-  const wrapped = `(async () => { ${code} })()`;
-  const result = await vm.runInContext(wrapped, context);
+  const wrapped = `(async () => {\n${code}\n})()`;
+  const result = await vm.runInContext(wrapped, context, {
+    filename: "user-code",
+  });
   const out = { ok: true, result: safeSerialize(result) };
   if (consoleLogs.length > 0) out.console = consoleLogs;
   process.stdout.write(JSON.stringify(out));
 } catch (err) {
-  const out = {
-    ok: false,
-    error: err.message,
-    stack: err.stack,
-  };
+  const out = { ok: false, ...rewriteError(err, code) };
   if (consoleLogs.length > 0) out.console = consoleLogs;
   process.stdout.write(JSON.stringify(out));
 }
