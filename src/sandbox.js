@@ -110,8 +110,54 @@ for (const k of Object.keys(exposed)) {
 
 const context = vm.createContext(exposed);
 
+function describeThrown(err) {
+  if (err === null) return { error: "null was thrown" };
+  if (err === undefined) return { error: "undefined was thrown" };
+  if (typeof err === "string") return { error: err };
+  if (typeof err !== "object") return { error: String(err) };
+
+  const out = {};
+
+  if (typeof err.message === "string" && err.message) {
+    out.error = err.message;
+  } else if (typeof err.statusText === "string" && err.statusText) {
+    const status = typeof err.status === "number" ? `${err.status} ` : "";
+    out.error = `HTTP ${status}${err.statusText}`.trim();
+  } else if (typeof err.status === "number") {
+    out.error = `HTTP ${err.status}`;
+  } else if (err.error && typeof err.error.message === "string") {
+    out.error = err.error.message;
+  } else if (err.constructor && err.constructor.name !== "Object") {
+    out.error = `${err.constructor.name} (no message)`;
+  } else {
+    try {
+      const dump = JSON.stringify(err);
+      out.error =
+        dump && dump !== "{}" ? dump : "Unknown error (empty object thrown)";
+    } catch {
+      out.error = "Unknown error (unserializable value thrown)";
+    }
+  }
+
+  if (typeof err.status === "number") out.status = err.status;
+  if (typeof err.statusText === "string" && err.statusText) {
+    out.statusText = err.statusText;
+  }
+  if (err.body !== undefined) {
+    try {
+      const body =
+        typeof err.body === "string" ? err.body : JSON.stringify(err.body);
+      if (body)
+        out.body = body.length > 2000 ? `${body.slice(0, 2000)}…` : body;
+    } catch {}
+  }
+
+  return out;
+}
+
 function rewriteError(err, source) {
-  const out = { error: err.message };
+  const out = describeThrown(err);
+  if (!err || typeof err !== "object") return out;
   if (!err.stack || typeof err.stack !== "string") return out;
 
   const frameRe = /(?:user-code|evalmachine\.<anonymous>):(\d+):(\d+)/;
