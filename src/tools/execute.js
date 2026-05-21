@@ -92,6 +92,9 @@ export async function execute(code) {
     if (process.env.FASTLY_API_TOKEN) {
       childEnv.FASTLY_API_TOKEN = process.env.FASTLY_API_TOKEN;
     }
+    if (process.env.NODE_EXTRA_CA_CERTS) {
+      childEnv.NODE_EXTRA_CA_CERTS = process.env.NODE_EXTRA_CA_CERTS;
+    }
 
     const child = spawn(process.execPath, [SANDBOX_PATH], {
       stdio: ["pipe", "pipe", "pipe"],
