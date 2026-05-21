@@ -5,7 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { parseArgs } from "./cli.js";
-import { startHttp } from "./http.js";
+import { resolveTransport, startHttp } from "./http.js";
 import { buildIndex } from "./indexer.js";
 import { SecretShield } from "./secrets.js";
 import { execute } from "./tools/execute.js";
@@ -267,11 +267,7 @@ export function createMcpServer({ shield, index }) {
   return mcp;
 }
 
-const transportChoice = (
-  cliArgs.transport ??
-  process.env.FASTLY_MCP_TRANSPORT ??
-  "stdio"
-).toLowerCase();
+const transportChoice = resolveTransport(cliArgs, process.env);
 
 if (transportChoice !== "stdio" && transportChoice !== "http") {
   process.stderr.write(

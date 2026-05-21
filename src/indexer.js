@@ -1,12 +1,8 @@
 import { readdir, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 
-// API docs are bundled in the docs/ directory at the package root.
 const DOCS_DIR = join(import.meta.dirname ?? import.meta.dir, "../docs");
 
-// Pulls every parameter-name-shaped token from a text fragment and keeps only
-// those that appear in the supplied set. Order of first appearance is
-// preserved; duplicates are dropped.
 function collectKnownParams(text, paramNames) {
   const found = [];
   const re = /\b[a-z_][a-z0-9_]*\b/gi;
@@ -19,14 +15,10 @@ function collectKnownParams(text, paramNames) {
   return found;
 }
 
-// Extracts cross-parameter constraints from the prose description.
-//
-// Detects only "one of" patterns triggered by generic English phrases
-// ("use either ... or ...", "must specify either ... or ...", etc.). A
-// constraint is emitted only when both branches of the "or" contain at least
-// one parameter name that exists in `params` — this is the false-positive
-// guard: prose like "the certificate must either contain SANs or a superset"
-// doesn't reference parameter names, so it produces nothing.
+// Detects only "one of" patterns triggered by generic English phrases.
+// A constraint is emitted only when both branches of the "or" contain at
+// least one parameter name from `params` — guards against false positives
+// from generic prose like "must either contain SANs or a superset".
 function extractConstraints(description, params) {
   if (typeof description !== "string" || !description) return [];
   if (!Array.isArray(params) || params.length === 0) return [];
@@ -79,13 +71,9 @@ function cleanDocText(text) {
     .trim();
 }
 
-/**
- * Parse a single *Api.md file into an array of method records.
- */
 function parseApiDoc(content, apiClass) {
   const methods = [];
 
-  // 1. Parse the summary table to get method -> httpMethod + httpPath + short description
   const summaryMap = new Map();
   const tableRegex =
     /\[?\*\*(\w+)\*\*\]?\([^)]*\)\s*\|\s*\*\*(\w+)\*\*\s+([^\s|]+)\s*\|\s*(.+)/g;
@@ -99,8 +87,6 @@ function parseApiDoc(content, apiClass) {
     m = tableRegex.exec(content);
   }
 
-  // 2. Parse per-method sections
-  // Each method section starts with: ## `methodName`
   const sectionRegex = /^## `(\w+)`$/gm;
   const sectionStarts = [];
   m = sectionRegex.exec(content);
@@ -133,14 +119,12 @@ function parseApiDoc(content, apiClass) {
       }
     }
 
-    // Extract params from Options table
     const params = [];
     const optionsIdx = section.indexOf("### Options");
     const returnIdx = section.indexOf("### Return type");
     if (optionsIdx !== -1) {
       const optionsEnd = returnIdx !== -1 ? returnIdx : section.length;
       const optionsBlock = section.slice(optionsIdx, optionsEnd);
-      // Parse table rows line-by-line: **name** | **Type** | Description | Notes
       const lines = optionsBlock.split("\n");
       for (const line of lines) {
         const pm = line.match(
@@ -161,7 +145,6 @@ function parseApiDoc(content, apiClass) {
       }
     }
 
-    // Extract example code block
     let example = "";
     const exampleIdx = section.indexOf("### Example");
     if (exampleIdx !== -1) {
@@ -176,12 +159,10 @@ function parseApiDoc(content, apiClass) {
       }
     }
 
-    // Extract return type
     let returnType = "void";
     if (returnIdx !== -1) {
       const returnBlock = section.slice(returnIdx + 15).trim();
       const firstLine = returnBlock.split("\n")[0].trim();
-      // Could be: **Type**, [**Type**](link), **{Type: Type}**
       const typeMatch = firstLine.match(/\[?\*\*([^*]+)\*\*\]?(?:\([^)]*\))?/);
       if (typeMatch) {
         returnType = typeMatch[1].trim();
@@ -208,10 +189,36 @@ function parseApiDoc(content, apiClass) {
   return methods;
 }
 
-/**
- * Build the full index from all docs/*Api.md files.
- * Returns the flat array of method records.
- */
+function extractPathParams(httpPath) {
+  if (typeof httpPath !== "string") return [];
+  const out = [];
+  const re = /\{([^}]+)\}/g;
+  let m = re.exec(httpPath);
+  while (m !== null) {
+    out.push(m[1]);
+    m = re.exec(httpPath);
+  }
+  return out;
+}
+
+export function enrichMethod(method) {
+  if (!Array.isArray(method.params)) method.params = [];
+  if (method.methodLower !== undefined) return method;
+  const apiClass = method.apiClass;
+  method.shortcut = apiClass.charAt(0).toLowerCase() + apiClass.slice(1);
+  method.methodLower = method.method.toLowerCase();
+  method.classLower = apiClass.toLowerCase();
+  method.pathLower = (method.httpPath ?? "").toLowerCase();
+  method.descLower = (method.description ?? "").toLowerCase();
+  method.returnLower = (method.returnType ?? "").toLowerCase();
+  method.paramsLower = method.params.map((p) => p.name.toLowerCase());
+  method.requiredParams = method.params
+    .filter((p) => p.required === true)
+    .map((p) => p.name);
+  method.pathParams = extractPathParams(method.httpPath);
+  return method;
+}
+
 export async function buildIndex(docsDir = DOCS_DIR) {
   const files = await readdir(docsDir);
   const apiFiles = files.filter(
@@ -226,9 +233,15 @@ export async function buildIndex(docsDir = DOCS_DIR) {
   let filesWithMethods = 0;
   const warnings = [];
 
-  for (const file of apiFiles) {
-    const apiClass = basename(file, ".md");
-    const content = await readFile(join(docsDir, file), "utf-8");
+  const docs = await Promise.all(
+    apiFiles.map(async (file) => ({
+      file,
+      apiClass: basename(file, ".md"),
+      content: await readFile(join(docsDir, file), "utf-8"),
+    })),
+  );
+
+  for (const { file, apiClass, content } of docs) {
     const methods = parseApiDoc(content, apiClass);
 
     if (methods.length > 0) {
@@ -248,10 +261,10 @@ export async function buildIndex(docsDir = DOCS_DIR) {
       }
     }
 
+    for (const method of methods) enrichMethod(method);
     index.push(...methods);
   }
 
-  // Required checks
   if (index.length === 0) {
     throw new Error("Index is empty — no methods were parsed from any file");
   }
@@ -263,7 +276,6 @@ export async function buildIndex(docsDir = DOCS_DIR) {
     );
   }
 
-  // Quality warnings
   if (apiFiles.length !== 133) {
     warnings.push(`Expected 133 Api.md files, found ${apiFiles.length}`);
   }

@@ -101,12 +101,16 @@ function parseCsv(value) {
     .filter(Boolean);
 }
 
-export function resolveHttpOptions({ cliArgs, env = {}, defaults = {} }) {
-  const transport = (
+export function resolveTransport(cliArgs, env = {}) {
+  return (
     cliArgs.transport ??
     env.FASTLY_MCP_TRANSPORT ??
     "stdio"
   ).toLowerCase();
+}
+
+export function resolveHttpOptions({ cliArgs, env = {}, defaults = {} }) {
+  const transport = resolveTransport(cliArgs, env);
 
   const allowNetwork = !!cliArgs.httpAllowNetwork;
   const host = cliArgs.httpHost ?? (allowNetwork ? "0.0.0.0" : "127.0.0.1");
@@ -258,7 +262,11 @@ export async function startHttp(createMcpServer, { cliArgs, env, version }) {
   } = opts;
 
   const sessions = new Map();
-  let allowedHosts;
+  let allowedHosts = buildAllowedHosts({
+    port,
+    extra: allowHostsExtras,
+    includeNetwork: includeNetworkHosts,
+  });
 
   function closeSession(sessionId, { skipTransport = false } = {}) {
     const entry = sessions.get(sessionId);
@@ -281,6 +289,15 @@ export async function startHttp(createMcpServer, { cliArgs, env, version }) {
         }
       }
     };
+  }
+
+  function requireSession(req, res) {
+    const sessionId = req.headers[SESSION_HEADER];
+    if (typeof sessionId !== "string" || !sessions.has(sessionId)) {
+      writeJsonError(res, 404, "Unknown session");
+      return null;
+    }
+    return { sessionId, entry: sessions.get(sessionId) };
   }
 
   async function handleStatefulPost(req, res, parsedBody) {
@@ -313,10 +330,12 @@ export async function startHttp(createMcpServer, { cliArgs, env, version }) {
 
     const mcp = createMcpServer();
     let transport;
+    let registered = false;
     transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       enableJsonResponse: jsonResponse,
       onsessioninitialized: (id) => {
+        registered = true;
         sessions.set(id, { mcp, transport });
       },
       onsessionclosed: (id) => {
@@ -324,27 +343,30 @@ export async function startHttp(createMcpServer, { cliArgs, env, version }) {
       },
     });
 
-    await mcp.connect(transport);
-    await transport.handleRequest(req, res, parsedBody);
+    try {
+      await mcp.connect(transport);
+      await transport.handleRequest(req, res, parsedBody);
+    } catch (err) {
+      if (!registered) {
+        Promise.allSettled([
+          Promise.resolve().then(() => transport.close()),
+          Promise.resolve().then(() => mcp.close()),
+        ]);
+      }
+      throw err;
+    }
   }
 
   async function handleStatefulGet(req, res) {
-    const sessionId = req.headers[SESSION_HEADER];
-    if (typeof sessionId !== "string" || !sessions.has(sessionId)) {
-      writeJsonError(res, 404, "Unknown session");
-      return;
-    }
-    const { transport } = sessions.get(sessionId);
-    await transport.handleRequest(req, res);
+    const session = requireSession(req, res);
+    if (!session) return;
+    await session.entry.transport.handleRequest(req, res);
   }
 
   async function handleStatefulDelete(req, res) {
-    const sessionId = req.headers[SESSION_HEADER];
-    if (typeof sessionId !== "string" || !sessions.has(sessionId)) {
-      writeJsonError(res, 404, "Unknown session");
-      return;
-    }
-    await closeSession(sessionId);
+    const session = requireSession(req, res);
+    if (!session) return;
+    await closeSession(session.sessionId);
     if (!res.headersSent && !res.writableEnded) {
       res.writeHead(204);
       res.end();
@@ -504,11 +526,13 @@ export async function startHttp(createMcpServer, { cliArgs, env, version }) {
 
   const actual = server.address();
   const boundPort = actual && typeof actual === "object" ? actual.port : port;
-  allowedHosts = buildAllowedHosts({
-    port: boundPort,
-    extra: allowHostsExtras,
-    includeNetwork: includeNetworkHosts,
-  });
+  if (boundPort !== port) {
+    allowedHosts = buildAllowedHosts({
+      port: boundPort,
+      extra: allowHostsExtras,
+      includeNetwork: includeNetworkHosts,
+    });
+  }
   const displayHost = reachableDisplayHost(host);
   process.stderr.write(
     `[fastly-mcp] Server started (http) version=${version} listening on http://${displayHost}:${boundPort}${path} ` +

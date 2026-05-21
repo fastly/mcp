@@ -1,12 +1,3 @@
-/**
- * Safely serialize a value into a JSON-compatible plain JS object.
- * Handles: circular refs, BigInt, Buffer/Uint8Array, functions, symbols,
- * undefined in arrays.
- *
- * Two-phase approach:
- * 1. walk() normalizes into a plain JS value (no circular refs, no exotic types)
- * 2. If JSON.stringify output exceeds maxSize, reduce depth and retry
- */
 export function safeSerialize(value, { maxDepth = 6, maxSize = 100_000 } = {}) {
   function walk(val, depth, seen, depthLimit) {
     if (depth > depthLimit) return "[truncated: max depth]";
@@ -21,7 +12,6 @@ export function safeSerialize(value, { maxDepth = 6, maxSize = 100_000 } = {}) {
     )
       return val;
 
-    // Buffer / Uint8Array
     if (
       (typeof Buffer !== "undefined" && Buffer.isBuffer(val)) ||
       val instanceof Uint8Array

@@ -1,3 +1,5 @@
+import { enrichMethod } from "../indexer.js";
+
 export function inspect(index, method) {
   if (typeof method !== "string" || !method.trim()) {
     return { ok: false, error: "method must be a non-empty string" };
@@ -6,22 +8,22 @@ export function inspect(index, method) {
   const query = method.trim();
   const queryLower = query.toLowerCase();
 
-  let match = index.find((m) => m.method.toLowerCase() === queryLower);
+  for (const m of index) enrichMethod(m);
+
+  let match = index.find((m) => m.methodLower === queryLower);
 
   if (!match && query.includes(".")) {
     const [cls, meth] = query.split(".", 2);
     const clsLower = cls.toLowerCase();
     const methLower = meth.toLowerCase();
     match = index.find(
-      (m) =>
-        m.apiClass.toLowerCase() === clsLower &&
-        m.method.toLowerCase() === methLower,
+      (m) => m.classLower === clsLower && m.methodLower === methLower,
     );
   }
 
   if (!match) {
     const partial = index
-      .filter((m) => m.method.toLowerCase().includes(queryLower))
+      .filter((m) => m.methodLower.includes(queryLower))
       .slice(0, 5)
       .map((m) => `${m.apiClass}.${m.method}`);
 
@@ -50,10 +52,8 @@ export function inspect(index, method) {
     doc.example = match.example;
   }
 
-  const shortcut =
-    match.apiClass.charAt(0).toLowerCase() + match.apiClass.slice(1);
   const args = match.params.length > 0 ? "{ /* params */ }" : "";
-  doc.usage = `return await ${shortcut}.${match.method}(${args});`;
+  doc.usage = `return await ${match.shortcut}.${match.method}(${args});`;
 
   return doc;
 }

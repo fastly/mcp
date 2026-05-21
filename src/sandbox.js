@@ -12,10 +12,10 @@ const input =
           resolve(Buffer.concat(chunks).toString()),
         );
       });
-const { code } = JSON.parse(input);
+const { code, fastlyApiToken } = JSON.parse(input);
 
-if (process.env.FASTLY_API_TOKEN) {
-  Fastly.ApiClient.instance.authenticate(process.env.FASTLY_API_TOKEN);
+if (fastlyApiToken) {
+  Fastly.ApiClient.instance.authenticate(fastlyApiToken);
 }
 
 function lowerFirst(name) {
@@ -120,16 +120,22 @@ const exposed = {
   setImmediate: pick("setImmediate"),
   clearImmediate: pick("clearImmediate"),
   queueMicrotask,
-
-  Buffer: pick("Buffer"),
-  WebAssembly: pick("WebAssembly"),
 };
 
 for (const k of Object.keys(exposed)) {
   if (exposed[k] === undefined) delete exposed[k];
 }
 
-const context = vm.createContext(exposed);
+const sandboxGlobals = {};
+for (const [k, v] of Object.entries(exposed)) {
+  Object.defineProperty(sandboxGlobals, k, {
+    value: v,
+    writable: true,
+    configurable: true,
+    enumerable: false,
+  });
+}
+const context = vm.createContext(sandboxGlobals);
 
 function describeThrown(err) {
   if (err === null) return { error: "null was thrown" };

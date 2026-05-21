@@ -1,3 +1,5 @@
+import { enrichMethod } from "../indexer.js";
+
 const MAX_RESULTS = 10;
 
 const SUGGESTED_CATEGORIES = [
@@ -37,36 +39,30 @@ function tokenize(query) {
 function scoreToken(method, token) {
   let score = 0;
 
-  const methodLower = method.method.toLowerCase();
-  const classLower = method.apiClass.toLowerCase();
-  const pathLower = method.httpPath.toLowerCase();
-  const descLower = method.description.toLowerCase();
-  const returnLower = method.returnType.toLowerCase();
-
-  if (methodLower === token) {
+  if (method.methodLower === token) {
     score += 100;
-  } else if (methodLower.includes(token)) {
+  } else if (method.methodLower.includes(token)) {
     score += 50;
   }
 
-  if (classLower.includes(token)) {
+  if (method.classLower.includes(token)) {
     score += 30;
   }
 
-  if (pathLower.includes(token)) {
+  if (method.pathLower.includes(token)) {
     score += 20;
   }
 
-  if (descLower.includes(token)) {
+  if (method.descLower.includes(token)) {
     score += 10;
   }
 
-  if (returnLower.includes(token)) {
+  if (method.returnLower.includes(token)) {
     score += 5;
   }
 
-  for (const p of method.params) {
-    if (p.name.toLowerCase().includes(token)) {
+  for (const name of method.paramsLower) {
+    if (name.includes(token)) {
       score += 5;
       break;
     }
@@ -111,18 +107,6 @@ function summarize(description) {
   return `${collapsed.slice(0, SUMMARY_MAX_CHARS - 1).trimEnd()}…`;
 }
 
-function extractPathParams(httpPath) {
-  if (typeof httpPath !== "string") return [];
-  const out = [];
-  const re = /\{([^}]+)\}/g;
-  let m = re.exec(httpPath);
-  while (m !== null) {
-    out.push(m[1]);
-    m = re.exec(httpPath);
-  }
-  return out;
-}
-
 // Generic English phrases that hint at the scope of an endpoint. Each entry
 // maps a phrase to a short tag. The list is intentionally not endpoint- or
 // resource-specific — adding a new Fastly API does not require touching it.
@@ -159,22 +143,15 @@ function detectScope(description) {
 }
 
 function projectMatch(method) {
-  const params = Array.isArray(method.params) ? method.params : [];
-  const requiredParams = params
-    .filter((p) => p && p.required === true)
-    .map((p) => p.name);
-  const pathParams = extractPathParams(method.httpPath);
-  const hasServiceIdParam = params.some((p) => p && p.name === "service_id");
-
   const projected = {
     apiClass: method.apiClass,
     method: method.method,
     httpMethod: method.httpMethod,
     httpPath: method.httpPath,
     summary: summarize(method.description),
-    requiredParams,
-    pathParams,
-    hasServiceIdParam,
+    requiredParams: method.requiredParams,
+    pathParams: method.pathParams,
+    hasServiceIdParam: method.params.some((p) => p.name === "service_id"),
   };
 
   const scope = detectScope(method.description);
@@ -198,6 +175,7 @@ export function search(index, query) {
 
   const scored = [];
   for (const method of index) {
+    enrichMethod(method);
     const score = scoreMethod(method, tokens);
     if (score > 0) {
       scored.push({ method, score });

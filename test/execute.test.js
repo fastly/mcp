@@ -200,11 +200,11 @@ describe("execute", () => {
     expect(result).toEqual({ result: [2, 99] });
   }, 10000);
 
-  test("Buffer is exposed for binary work", async () => {
+  test("Buffer is not exposed (use Uint8Array / TextEncoder instead)", async () => {
     const result = await execute(
       "return Buffer.from('hello').toString('hex');",
     );
-    expect(result).toEqual({ result: "68656c6c6f" });
+    expect(result.error).toMatch(/Buffer is not defined/);
   }, 10000);
 
   test("streams API is present", async () => {

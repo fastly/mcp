@@ -89,9 +89,6 @@ export async function execute(code) {
 
   return new Promise((resolve) => {
     const childEnv = {};
-    if (process.env.FASTLY_API_TOKEN) {
-      childEnv.FASTLY_API_TOKEN = process.env.FASTLY_API_TOKEN;
-    }
     if (process.env.NODE_EXTRA_CA_CERTS) {
       childEnv.NODE_EXTRA_CA_CERTS = process.env.NODE_EXTRA_CA_CERTS;
     }
@@ -181,7 +178,9 @@ export async function execute(code) {
       });
     });
 
-    child.stdin.write(JSON.stringify({ code }));
+    child.stdin.write(
+      JSON.stringify({ code, fastlyApiToken: process.env.FASTLY_API_TOKEN }),
+    );
     child.stdin.end();
   });
 }
