@@ -142,6 +142,14 @@ function detectScope(description) {
   return undefined;
 }
 
+function buildUsage(method) {
+  const args =
+    method.requiredParams.length > 0
+      ? `{ ${method.requiredParams.map((p) => `${p}: '...'`).join(", ")} }`
+      : "";
+  return `return await ${method.shortcut}.${method.method}(${args});`;
+}
+
 function projectMatch(method) {
   const projected = {
     apiClass: method.apiClass,
@@ -152,6 +160,7 @@ function projectMatch(method) {
     requiredParams: method.requiredParams,
     pathParams: method.pathParams,
     hasServiceIdParam: method.params.some((p) => p.name === "service_id"),
+    usage: buildUsage(method),
   };
 
   const scope = detectScope(method.description);

@@ -178,7 +178,7 @@ function makeShielded(shield) {
 }
 
 const SEARCH_DESCRIPTION =
-  "Search functions available to perform actions on Fastly";
+  "Find Fastly API methods by keyword, class name, method name, or HTTP path. Each result includes a ready-to-use `usage` snippet you can pass directly to `execute`. For simple calls, go straight from search to execute. Use `inspect` only when you need full parameter docs.";
 
 const SEARCH_INPUT_SCHEMA = {
   query: z
@@ -188,15 +188,12 @@ const SEARCH_INPUT_SCHEMA = {
     ),
 };
 
-const EXECUTE_DESCRIPTION = `Execute JavaScript code in a sandbox with the Fastly API client pre-authenticated.
+const EXECUTE_DESCRIPTION = `Run JavaScript in a sandbox with the Fastly API client pre-authenticated. Use the \`usage\` snippet from a \`search\` result as your code.
 
 Rules:
-- Always use \`search\` or \`inspect\` first to find the correct method, parameters, and return type.
-- You MUST use \`return\` to get results. The code runs as an async function body — only the returned value is captured. console.log output is included separately but is not a substitute for return.
-- API methods return values directly (arrays, objects). Do NOT assume responses are wrapped in a \`.result\` property — access the returned value directly.
-- If a result is unexpectedly empty, return the raw response first to inspect its shape: \`return await api.method(params);\`
-
-Every Fastly.*Api class is pre-instantiated and exposed as a lowercased-first-letter global. Prefer the shortcut: use \`serviceApi\`, \`statsApi\`, \`purgeApi\`, etc. directly instead of writing \`new Fastly.ServiceApi()\`. The \`Fastly\` namespace is still available for cases where you need the constructor or other exports.
+- You MUST use \`return\` to produce output. The code runs as an async function body — only the returned value is captured.
+- API methods return values directly (arrays, objects), not wrapped in \`.result\`.
+- Every Fastly.*Api class is pre-instantiated as a camelCase global: \`serviceApi\`, \`statsApi\`, \`purgeApi\`, etc.
 
 Example: \`return await serviceApi.listServices();\``;
 

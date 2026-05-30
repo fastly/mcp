@@ -246,6 +246,7 @@ describe("search", () => {
           "pathParams",
           "requiredParams",
           "summary",
+          "usage",
         ].sort(),
       );
     });
