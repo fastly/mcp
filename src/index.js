@@ -188,12 +188,11 @@ const SEARCH_INPUT_SCHEMA = {
     ),
 };
 
-const EXECUTE_DESCRIPTION = `Run JavaScript in a sandbox with the Fastly API client pre-authenticated. Use the \`usage\` snippet from a \`search\` result as your code.
+const EXECUTE_DESCRIPTION = `Run JavaScript in a sandbox with the Fastly API client pre-authenticated.
 
-Rules:
-- You MUST use \`return\` to produce output. The code runs as an async function body — only the returned value is captured.
-- API methods return values directly (arrays, objects), not wrapped in \`.result\`.
-- Every Fastly.*Api class is pre-instantiated as a camelCase global: \`serviceApi\`, \`statsApi\`, \`purgeApi\`, etc.
+If you already know the method, call it directly. Otherwise, use \`search\` first and copy its \`usage\` snippet.
+
+You MUST use \`return\` to produce output. API methods return values directly (arrays, objects), not wrapped in \`.result\`. Every Fastly.*Api class is pre-instantiated as a camelCase global: \`serviceApi\`, \`purgeApi\`, \`backendApi\`, etc.
 
 Example: \`return await serviceApi.listServices();\``;
 
