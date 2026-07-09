@@ -72,6 +72,16 @@ describe("SecretShield", () => {
     shield.destroy();
   });
 
+  test("encrypting ciphertext again keeps it decryptable in one pass", () => {
+    const shield = new SecretShield({ key: TEST_KEY });
+    const text = `token: ${GITHUB_PAT}`;
+    const encrypted = shield.encrypt(text);
+
+    expect(shield.encrypt(encrypted)).toBe(encrypted);
+    expect(shield.decrypt(encrypted)).toBe(text);
+    shield.destroy();
+  });
+
   test("destroy lifecycle: encrypt and decrypt throw after destroy", () => {
     const shield = new SecretShield({ key: TEST_KEY });
     shield.destroy();

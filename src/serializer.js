@@ -23,15 +23,17 @@ export function safeSerialize(value, { maxDepth = 6, maxSize = 100_000 } = {}) {
       if (seen.has(val)) return "[circular]";
       seen.add(val);
 
+      let normalized;
       if (Array.isArray(val)) {
-        return val.map((v) => walk(v, depth + 1, seen, depthLimit));
+        normalized = val.map((v) => walk(v, depth + 1, seen, depthLimit));
+      } else {
+        normalized = {};
+        for (const [k, v] of Object.entries(val)) {
+          normalized[k] = walk(v, depth + 1, seen, depthLimit);
+        }
       }
-
-      const out = {};
-      for (const [k, v] of Object.entries(val)) {
-        out[k] = walk(v, depth + 1, seen, depthLimit);
-      }
-      return out;
+      seen.delete(val);
+      return normalized;
     }
 
     return val;

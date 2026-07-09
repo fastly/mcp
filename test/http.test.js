@@ -569,6 +569,17 @@ describe("Streamable HTTP transport — stateless mode", () => {
     const res = await fetch(server.url, { method: "DELETE" });
     expect(res.status).toBe(405);
   }, 10000);
+
+  test("oversized request body returns 413", async () => {
+    const res = await fetch(server.url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "x".repeat(4 * 1024 * 1024 + 1),
+    });
+
+    expect(res.status).toBe(413);
+    expect((await res.json()).error.message).toBe("Request body too large");
+  }, 10000);
 });
 
 describe("Streamable HTTP transport — auth and CORS", () => {

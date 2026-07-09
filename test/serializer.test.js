@@ -10,6 +10,15 @@ describe("safeSerialize", () => {
     expect(result.self).toBe("[circular]");
   });
 
+  test("repeated non-circular references are serialized in every branch", () => {
+    const shared = { value: 1 };
+
+    expect(safeSerialize({ first: shared, second: shared })).toEqual({
+      first: { value: 1 },
+      second: { value: 1 },
+    });
+  });
+
   test("BigInt produces string with n suffix", () => {
     const result = safeSerialize(42n);
     expect(result).toBe("42n");

@@ -100,6 +100,14 @@ describe("execute", () => {
     expect(result.error).toMatch(/process is not defined/);
   }, 10000);
 
+  test("sandbox facades cannot escape through Function constructors", async () => {
+    const result = await execute(
+      'return console.log.constructor("return typeof process")();',
+    );
+
+    expect(result.error).toMatch(/Code generation from strings disallowed/);
+  }, 10000);
+
   test("Bun global is not reachable", async () => {
     const result = await execute("return Bun.version;");
     expect(result.error).toMatch(/Bun is not defined/);

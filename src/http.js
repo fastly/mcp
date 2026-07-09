@@ -218,17 +218,21 @@ function checkAuth(req, token) {
 async function readBody(req) {
   const chunks = [];
   let total = 0;
+  let tooLarge = false;
   return new Promise((resolve, reject) => {
     req.on("data", (chunk) => {
+      if (tooLarge) return;
       total += chunk.length;
       if (total > MAX_BODY_BYTES) {
+        tooLarge = true;
         reject(new Error("Request body too large"));
-        req.destroy();
         return;
       }
       chunks.push(chunk);
     });
-    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("end", () => {
+      if (!tooLarge) resolve(Buffer.concat(chunks));
+    });
     req.on("error", reject);
   });
 }
