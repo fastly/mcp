@@ -160,7 +160,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**InlineResponse20010**](InlineResponse20010.md)
+[**InlineResponse20017**](InlineResponse20017.md)
 
 
 ## `kvStorePut`

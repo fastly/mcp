@@ -20,7 +20,7 @@ Method | HTTP request | Description
 ## `createBackend`
 
 ```javascript
-createBackend({ service_id, version_id, [address, ][auto_loadbalance, ][between_bytes_timeout, ][client_cert, ][comment, ][connect_timeout, ][first_byte_timeout, ][fetch_timeout, ][healthcheck, ][hostname, ][ipv4, ][ipv6, ][keepalive_time, ][max_conn, ][max_tls_version, ][min_tls_version, ][name, ][override_host, ][port, ][prefer_ipv6, ][request_condition, ][share_key, ][shield, ][ssl_ca_cert, ][ssl_cert_hostname, ][ssl_check_cert, ][ssl_ciphers, ][ssl_client_cert, ][ssl_client_key, ][ssl_hostname, ][ssl_sni_hostname, ][tcp_keepalive_enable, ][tcp_keepalive_interval, ][tcp_keepalive_probes, ][tcp_keepalive_time, ][use_ssl, ][weight] })
+createBackend({ service_id, version_id, [address, ][auto_loadbalance, ][between_bytes_timeout, ][client_cert, ][comment, ][connect_timeout, ][first_byte_timeout, ][fetch_timeout, ][healthcheck, ][hostname, ][ipv4, ][ipv6, ][keepalive_time, ][max_conn, ][max_lifetime, ][max_tls_version, ][min_tls_version, ][max_use, ][name, ][override_host, ][port, ][prefer_ipv6, ][request_condition, ][share_key, ][shield, ][ssl_ca_cert, ][ssl_cert_hostname, ][ssl_check_cert, ][ssl_ciphers, ][ssl_client_cert, ][ssl_client_key, ][ssl_hostname, ][ssl_sni_hostname, ][tcp_keepalive_enable, ][tcp_keepalive_interval, ][tcp_keepalive_probes, ][tcp_keepalive_time, ][use_ssl, ][weight] })
 ```
 
 Create a backend for a particular service and version.
@@ -45,8 +45,10 @@ const options = {
   ipv6: "ipv6_example",
   keepalive_time: 56,
   max_conn: 56,
+  max_lifetime: 56,
   max_tls_version: "max_tls_version_example",
   min_tls_version: "min_tls_version_example",
+  max_use: 56,
   name: "name_example",
   override_host: "override_host_example",
   port: 56,
@@ -97,10 +99,12 @@ Name | Type | Description  | Notes
 **hostname** | **String** | The hostname of the backend. May be used as an alternative to `address` to set the backend location. | [optional]
 **ipv4** | **String** | IPv4 address of the backend. May be used as an alternative to `address` to set the backend location. | [optional]
 **ipv6** | **String** | IPv6 address of the backend. May be used as an alternative to `address` to set the backend location. | [optional]
-**keepalive_time** | **Number** | How long in seconds to keep a persistent connection to the backend between requests. By default, Varnish keeps connections open as long as it can. | [optional]
+**keepalive_time** | **Number** | How long (in seconds) to keep a persistent connection to the backend between requests. By default, Fastly keeps connections open as long as it can. | [optional]
 **max_conn** | **Number** | Maximum number of concurrent connections this backend will accept. | [optional]
+**max_lifetime** | **Number** | Maximum time from creation (in milliseconds) that a pooled HTTP keepalive connection will be eligible for reuse; 0 is treated as unlimited. | [optional]
 **max_tls_version** | **String** | Maximum allowed TLS version on SSL connections to this backend. If your backend server is not able to negotiate a connection meeting this constraint, a synthetic `503` error response will be generated. | [optional]
 **min_tls_version** | **String** | Minimum allowed TLS version on SSL connections to this backend. If your backend server is not able to negotiate a connection meeting this constraint, a synthetic `503` error response will be generated. | [optional]
+**max_use** | **Number** | Maximum number of requests allowed over a single, pooled HTTP keepalive connection to this backend; 0 is treated as unlimited. | [optional]
 **name** | **String** | The name of the backend. | [optional]
 **override_host** | **String** | If set, will replace the client-supplied HTTP `Host` header on connections to this backend. Applied after VCL has been processed, so this setting will take precedence over changing `bereq.http.Host` in VCL. | [optional]
 **port** | **Number** | Port on which the backend server is listening for connections from Fastly. Setting `port` to 80 or 443 will also set `use_ssl` automatically (to false and true respectively), unless explicitly overridden by setting `use_ssl` in the same request. | [optional]
@@ -246,7 +250,7 @@ Name | Type | Description  | Notes
 ## `updateBackend`
 
 ```javascript
-updateBackend({ service_id, version_id, backend_name, [address, ][auto_loadbalance, ][between_bytes_timeout, ][client_cert, ][comment, ][connect_timeout, ][first_byte_timeout, ][fetch_timeout, ][healthcheck, ][hostname, ][ipv4, ][ipv6, ][keepalive_time, ][max_conn, ][max_tls_version, ][min_tls_version, ][name, ][override_host, ][port, ][prefer_ipv6, ][request_condition, ][share_key, ][shield, ][ssl_ca_cert, ][ssl_cert_hostname, ][ssl_check_cert, ][ssl_ciphers, ][ssl_client_cert, ][ssl_client_key, ][ssl_hostname, ][ssl_sni_hostname, ][tcp_keepalive_enable, ][tcp_keepalive_interval, ][tcp_keepalive_probes, ][tcp_keepalive_time, ][use_ssl, ][weight] })
+updateBackend({ service_id, version_id, backend_name, [address, ][auto_loadbalance, ][between_bytes_timeout, ][client_cert, ][comment, ][connect_timeout, ][first_byte_timeout, ][fetch_timeout, ][healthcheck, ][hostname, ][ipv4, ][ipv6, ][keepalive_time, ][max_conn, ][max_lifetime, ][max_tls_version, ][min_tls_version, ][max_use, ][name, ][override_host, ][port, ][prefer_ipv6, ][request_condition, ][share_key, ][shield, ][ssl_ca_cert, ][ssl_cert_hostname, ][ssl_check_cert, ][ssl_ciphers, ][ssl_client_cert, ][ssl_client_key, ][ssl_hostname, ][ssl_sni_hostname, ][tcp_keepalive_enable, ][tcp_keepalive_interval, ][tcp_keepalive_probes, ][tcp_keepalive_time, ][use_ssl, ][weight] })
 ```
 
 Update the backend for a particular service and version.
@@ -272,8 +276,10 @@ const options = {
   ipv6: "ipv6_example",
   keepalive_time: 56,
   max_conn: 56,
+  max_lifetime: 56,
   max_tls_version: "max_tls_version_example",
   min_tls_version: "min_tls_version_example",
+  max_use: 56,
   name: "name_example",
   override_host: "override_host_example",
   port: 56,
@@ -325,10 +331,12 @@ Name | Type | Description  | Notes
 **hostname** | **String** | The hostname of the backend. May be used as an alternative to `address` to set the backend location. | [optional]
 **ipv4** | **String** | IPv4 address of the backend. May be used as an alternative to `address` to set the backend location. | [optional]
 **ipv6** | **String** | IPv6 address of the backend. May be used as an alternative to `address` to set the backend location. | [optional]
-**keepalive_time** | **Number** | How long in seconds to keep a persistent connection to the backend between requests. By default, Varnish keeps connections open as long as it can. | [optional]
+**keepalive_time** | **Number** | How long (in seconds) to keep a persistent connection to the backend between requests. By default, Fastly keeps connections open as long as it can. | [optional]
 **max_conn** | **Number** | Maximum number of concurrent connections this backend will accept. | [optional]
+**max_lifetime** | **Number** | Maximum time from creation (in milliseconds) that a pooled HTTP keepalive connection will be eligible for reuse; 0 is treated as unlimited. | [optional]
 **max_tls_version** | **String** | Maximum allowed TLS version on SSL connections to this backend. If your backend server is not able to negotiate a connection meeting this constraint, a synthetic `503` error response will be generated. | [optional]
 **min_tls_version** | **String** | Minimum allowed TLS version on SSL connections to this backend. If your backend server is not able to negotiate a connection meeting this constraint, a synthetic `503` error response will be generated. | [optional]
+**max_use** | **Number** | Maximum number of requests allowed over a single, pooled HTTP keepalive connection to this backend; 0 is treated as unlimited. | [optional]
 **name** | **String** | The name of the backend. | [optional]
 **override_host** | **String** | If set, will replace the client-supplied HTTP `Host` header on connections to this backend. Applied after VCL has been processed, so this setting will take precedence over changing `bereq.http.Host` in VCL. | [optional]
 **port** | **Number** | Port on which the backend server is listening for connections from Fastly. Setting `port` to 80 or 443 will also set `use_ssl` automatically (to false and true respectively), unless explicitly overridden by setting `use_ssl` in the same request. | [optional]

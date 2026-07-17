@@ -134,7 +134,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**InlineResponse20011**](InlineResponse20011.md)
+[**InlineResponse20018**](InlineResponse20018.md)
 
 
 ## `kvStoreUpsertItem`

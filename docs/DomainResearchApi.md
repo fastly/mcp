@@ -91,7 +91,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**InlineResponse2009**](InlineResponse2009.md)
+[**InlineResponse20016**](InlineResponse20016.md)
 
 
 [[Back to top]](#) [[Back to API list]](../../README.md#endpoints)

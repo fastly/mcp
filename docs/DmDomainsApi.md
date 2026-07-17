@@ -168,7 +168,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**InlineResponse2007**](InlineResponse2007.md)
+[**InlineResponse20014**](InlineResponse20014.md)
 
 
 ## `updateDmDomain`

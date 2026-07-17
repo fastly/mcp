@@ -4,10 +4,10 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**current_page** | **Number** | Current page. | [optional] 
-**per_page** | **Number** | Number of records per page. | [optional]  [defaults to 20]
-**record_count** | **Number** | Total records in result set. | [optional] 
-**total_pages** | **Number** | Total pages in result set. | [optional] 
+**limit** | **Number** | The number of records returned per page. | [optional] 
+**next_cursor** | **String** | Cursor value used to retrieve the next page of results. Empty if there are no more results. | [optional] 
+**previous_cursor** | **String** | Cursor value used to retrieve the previous page of results. Empty if there is no previous page. | [optional] 
+**sort** | **String** | The sort order applied to the results. | [optional] 
 
 
 [[Back to API list]](../../README.md#endpoints) [[Back to README]](../../README.md)

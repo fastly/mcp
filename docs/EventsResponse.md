@@ -5,7 +5,7 @@
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **links** | [**PaginationLinks**](PaginationLinks.md) |  | [optional] 
-**meta** | [**PaginationMeta**](PaginationMeta.md) |  | [optional] 
+**meta** | [**PaginationMeta1**](PaginationMeta1.md) |  | [optional] 
 **data** | [**[Event]**](Event.md) |  | [optional] 
 
 

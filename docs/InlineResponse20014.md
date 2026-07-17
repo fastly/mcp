@@ -4,7 +4,8 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**data** | [**[ServiceAuthorizationResponseData]**](ServiceAuthorizationResponseData.md) |  | [optional] 
+**data** | [**[SuccessfulResponseAsObject]**](SuccessfulResponseAsObject.md) |  | [optional] 
+**meta** | **Object** | Meta for the pagination. | [optional] 
 
 
 [[Back to API list]](../../README.md#endpoints) [[Back to README]](../../README.md)

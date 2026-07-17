@@ -4,8 +4,8 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**data** | [**[SecretResponse]**](SecretResponse.md) |  | [optional] 
-**meta** | [**PaginationCursorMeta**](PaginationCursorMeta.md) |  | [optional] 
+**data** | [**[DdosProtectionRuleWithStats]**](DdosProtectionRuleWithStats.md) |  | 
+**meta** | [**PaginationCursorMeta**](PaginationCursorMeta.md) |  | 
 
 
 [[Back to API list]](../../README.md#endpoints) [[Back to README]](../../README.md)

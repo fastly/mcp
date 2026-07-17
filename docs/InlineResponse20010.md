@@ -4,8 +4,8 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**data** | [**[KvStoreDetails]**](KvStoreDetails.md) |  | [optional] 
-**meta** | [**PaginationCursorMeta**](PaginationCursorMeta.md) |  | [optional] 
+**data** | [**[SecurityHeader]**](SecurityHeader.md) |  | [optional] 
+**meta** | [**PaginationMeta**](PaginationMeta.md) |  | [optional] 
 
 
 [[Back to API list]](../../README.md#endpoints) [[Back to README]](../../README.md)

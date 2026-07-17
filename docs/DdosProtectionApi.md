@@ -95,7 +95,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**InlineResponse2005**](InlineResponse2005.md)
+[**InlineResponse20012**](InlineResponse20012.md)
 
 
 ## `ddosProtectionEventRuleList`
@@ -136,7 +136,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**InlineResponse2006**](InlineResponse2006.md)
+[**InlineResponse20013**](InlineResponse20013.md)
 
 
 ## `ddosProtectionRuleGet`

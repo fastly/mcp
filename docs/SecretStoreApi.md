@@ -188,7 +188,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**InlineResponse20012**](InlineResponse20012.md)
+[**InlineResponse20020**](InlineResponse20020.md)
 
 
 ## `signingKey`

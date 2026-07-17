@@ -165,7 +165,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**InlineResponse20013**](InlineResponse20013.md)
+[**InlineResponse20021**](InlineResponse20021.md)
 
 
 ## `mustRecreateSecret`

@@ -121,7 +121,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**InlineResponse20014**](InlineResponse20014.md)
+[**InlineResponse20022**](InlineResponse20022.md)
 
 
 ## `listServiceAuthorization`
