@@ -2,14 +2,12 @@ export function safeSerialize(value, { maxDepth = 6, maxSize = 100_000 } = {}) {
   function walk(val, depth, seen, depthLimit) {
     if (depth > depthLimit) return "[truncated: max depth]";
     if (val === null || val === undefined) return val;
-    if (typeof val === "bigint") return `${val.toString()}n`;
-    if (typeof val === "function") return "[function]";
-    if (typeof val === "symbol") return val.toString();
-    if (
-      typeof val === "boolean" ||
-      typeof val === "number" ||
-      typeof val === "string"
-    )
+
+    const type = typeof val;
+    if (type === "bigint") return `${val.toString()}n`;
+    if (type === "function") return "[function]";
+    if (type === "symbol") return val.toString();
+    if (type === "boolean" || type === "number" || type === "string")
       return val;
 
     if (
@@ -19,7 +17,7 @@ export function safeSerialize(value, { maxDepth = 6, maxSize = 100_000 } = {}) {
       return `[Buffer: ${val.length} bytes]`;
     }
 
-    if (typeof val === "object") {
+    if (type === "object") {
       if (seen.has(val)) return "[circular]";
       seen.add(val);
 

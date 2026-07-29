@@ -24,8 +24,7 @@ const FLAG_NAMES = new Set([
 ]);
 
 function rejectFlagShapedValue(optionName, value) {
-  if (typeof value !== "string") return;
-  if (FLAG_NAMES.has(value)) {
+  if (typeof value === "string" && FLAG_NAMES.has(value)) {
     throw new Error(
       `--${optionName} expects a value but got "${value}", which is itself a flag. ` +
         `Use --${optionName}=<value> to pass a literal value that starts with a dash.`,

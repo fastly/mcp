@@ -13,8 +13,7 @@ export function isLoopbackHost(host) {
   if (lower === "localhost") return true;
   const v = isIP(lower);
   if (v === 4) return lower.startsWith("127.");
-  if (v === 6) return lower === "::1" || lower === "0:0:0:0:0:0:0:1";
-  return false;
+  return v === 6 && (lower === "::1" || lower === "0:0:0:0:0:0:0:1");
 }
 
 export function reachableDisplayHost(host) {

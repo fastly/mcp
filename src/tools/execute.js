@@ -70,9 +70,7 @@ function smartSummarize(value) {
         _hint:
           keys.length > OBJECT_KEY_THRESHOLD
             ? `Large object with ${keys.length} keys. Showing first ${OBJECT_KEY_THRESHOLD}. Access specific keys in your code.`
-            : json.length > AUTO_SUMMARY_SIZE
-              ? `Object serializes to ${json.length} bytes. Nested values summarized. Access specific keys in your code.`
-              : undefined,
+            : `Object serializes to ${json.length} bytes. Nested values summarized. Access specific keys in your code.`,
         preview,
       },
       wasTruncated: true,
