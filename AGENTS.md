@@ -17,7 +17,9 @@
 - `search` results stay compact: discovery fields only, with full `description`, `params`, `returnType`, and `example` reserved for `inspect`.
 - `search` and `inspect` must work without `FASTLY_API_TOKEN`; real API calls through `execute` need it.
 - When secret encryption is enabled, decrypt input strings before handlers and re-encrypt text output before returning it.
-- HTTP defaults are loopback `127.0.0.1`, port `8231`, path `/mcp`, stateful SSE; stateless implies JSON unless `--http-sse` is passed, and non-loopback/network binds require auth.
+- HTTP defaults are loopback `127.0.0.1`, port `8231`, path `/mcp`, and `auto` response framing; `--http-json` and `--http-sse` pin the framing and are mutually exclusive, and non-loopback/network binds require auth. Both flags reach the 2026 leg only — the 2025 fallback always answers with SSE.
+- The server speaks the `2026-07-28` revision plus the 2025 family. There are no sessions in either era: `createMcpHandler` serves the modern path and falls back to per-request stateless serving for 2025 clients, both off the same `createMcpServer` factory.
+- Modern requests must carry `Mcp-Method` (and `Mcp-Name` on `tools/call`); the server rejects a request whose headers and body disagree. Keep those two on the CORS allow-headers list.
 - `docs/*Api.md` are generated inputs to the runtime index. Regenerate with `bun run update-docs` rather than hand-editing generated API docs.
 
 ## Commit & Pull Request Guidelines
