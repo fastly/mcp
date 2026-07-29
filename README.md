@@ -211,7 +211,11 @@ You can also enable it with an environment variable:
 }
 ```
 
-By default, the encryption key is generated when the server starts. That is usually fine for one session, but encrypted values from an old session cannot be decrypted after a restart. If you need stable encrypted values across restarts, set `FASTLY_MCP_ENCRYPT_KEY` to exactly 32 hex characters, which is a 16-byte key. You can also set `FASTLY_MCP_ENCRYPT_TWEAK` if you want a separate tweak value for domain separation.
+By default, the encryption key is generated when the server starts.
+Decryption relies on a table the server builds in memory as it encrypts, so an encrypted value can only be turned back into the original secret by the same server session that produced it.
+After a restart, old encrypted values can no longer be decrypted, even if the key is pinned.
+Setting `FASTLY_MCP_ENCRYPT_KEY` to exactly 32 hex characters, which is a 16-byte key, keeps the encrypted forms stable across restarts, but it does not bring old values back.
+You can also set `FASTLY_MCP_ENCRYPT_TWEAK` if you want a separate tweak value for domain separation.
 
 Secret encryption is a safety feature, not a complete data classification system. It only encrypts values that match known token patterns. You should still use least-privilege Fastly tokens and avoid asking the assistant to retrieve secrets unless the task requires it.
 

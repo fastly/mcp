@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
-import { createServer } from "node:http";
 import { join } from "node:path";
-import { expectNoInternals } from "./helpers.js";
+import { expectNoInternals, startLocalServer } from "./helpers.js";
 
 const ENTRY = join(import.meta.dir, "fixtures/sandbox-with-local-api.mjs");
 
@@ -11,17 +10,16 @@ let basePath;
 let nextResponse;
 
 beforeAll(async () => {
-  server = createServer((_req, res) => {
+  server = await startLocalServer((_req, res) => {
     const { status, contentType, body } = nextResponse;
     res.writeHead(status, { "content-type": contentType });
     res.end(body);
   });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  basePath = `http://127.0.0.1:${server.address().port}`;
+  basePath = server.url;
 });
 
 afterAll(async () => {
-  if (server) await new Promise((resolve) => server.close(resolve));
+  if (server) await server.close();
 });
 
 function runSandbox(code, { fastlyApiToken, runtime = process.execPath } = {}) {

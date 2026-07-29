@@ -1,7 +1,9 @@
 import { spawn } from "node:child_process";
 import { join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
+import { setKey } from "../serializer.js";
 
-const SANDBOX_PATH = join(
+export const SANDBOX_PATH = join(
   import.meta.dirname ?? import.meta.dir,
   "../sandbox.js",
 );
@@ -13,16 +15,21 @@ const ARRAY_SUMMARY_THRESHOLD = 10;
 const OBJECT_KEY_THRESHOLD = 30;
 const AUTO_SUMMARY_SIZE = 20_000;
 
+function jsonByteSize(value) {
+  return Buffer.byteLength(JSON.stringify(value));
+}
+
 function smartSummarize(value) {
   if (value === null || value === undefined || typeof value !== "object") {
     return { value, wasTruncated: false };
   }
 
   if (Array.isArray(value)) {
-    const json = JSON.stringify(value);
+    // Measuring costs a full serialization pass, so skip it when the
+    // count alone already forces a summary.
     const tooMany = value.length > ARRAY_SUMMARY_THRESHOLD;
-    const tooLarge = json.length > AUTO_SUMMARY_SIZE;
-    if (tooMany || tooLarge) {
+    const jsonBytes = tooMany ? null : jsonByteSize(value);
+    if (tooMany || jsonBytes > AUTO_SUMMARY_SIZE) {
       const preview = value.slice(0, ARRAY_SUMMARY_THRESHOLD);
       return {
         value: {
@@ -31,7 +38,7 @@ function smartSummarize(value) {
           _showing: Math.min(ARRAY_SUMMARY_THRESHOLD, value.length),
           _hint: tooMany
             ? `Showing first ${ARRAY_SUMMARY_THRESHOLD} of ${value.length} items. Filter in your code to reduce output.`
-            : `Array items are large (${json.length} bytes serialized). Showing all ${value.length} items but nested values may be truncated.`,
+            : `Array items are large (${jsonBytes} bytes serialized). Showing all ${value.length} items but nested values may be truncated.`,
           items: preview,
         },
         wasTruncated: true,
@@ -41,24 +48,28 @@ function smartSummarize(value) {
   }
 
   const keys = Object.keys(value);
-  const json = JSON.stringify(value);
-  if (keys.length > OBJECT_KEY_THRESHOLD || json.length > AUTO_SUMMARY_SIZE) {
+  const tooManyKeys = keys.length > OBJECT_KEY_THRESHOLD;
+  const jsonBytes = tooManyKeys ? null : jsonByteSize(value);
+  if (tooManyKeys || jsonBytes > AUTO_SUMMARY_SIZE) {
     const previewKeys = keys.slice(0, OBJECT_KEY_THRESHOLD);
     const preview = {};
     for (const k of previewKeys) {
       const v = value[k];
       if (typeof v === "object" && v !== null) {
         if (Array.isArray(v)) {
-          preview[k] = `[Array: ${v.length} items]`;
+          setKey(preview, k, `[Array: ${v.length} items]`);
         } else {
           const subKeys = Object.keys(v);
-          preview[k] =
+          setKey(
+            preview,
+            k,
             subKeys.length <= 5
               ? v
-              : `{Object: keys=${subKeys.slice(0, 5).join(", ")}... (${subKeys.length} total)}`;
+              : `{Object: keys=${subKeys.slice(0, 5).join(", ")}... (${subKeys.length} total)}`,
+          );
         }
       } else {
-        preview[k] = v;
+        setKey(preview, k, v);
       }
     }
 
@@ -67,10 +78,9 @@ function smartSummarize(value) {
         _type: "object",
         _totalKeys: keys.length,
         _showing: previewKeys.length,
-        _hint:
-          keys.length > OBJECT_KEY_THRESHOLD
-            ? `Large object with ${keys.length} keys. Showing first ${OBJECT_KEY_THRESHOLD}. Access specific keys in your code.`
-            : `Object serializes to ${json.length} bytes. Nested values summarized. Access specific keys in your code.`,
+        _hint: tooManyKeys
+          ? `Large object with ${keys.length} keys. Showing first ${OBJECT_KEY_THRESHOLD}. Access specific keys in your code.`
+          : `Object serializes to ${jsonBytes} bytes. Nested values summarized. Access specific keys in your code.`,
         preview,
       },
       wasTruncated: true,
@@ -100,8 +110,14 @@ export async function execute(code) {
     });
 
     let stdout = "";
+    let stdoutBytes = 0;
     let stderr = "";
     let killed = false;
+
+    // Pipe chunks can split a multibyte character; the decoders carry the
+    // partial sequence across chunks.
+    const stdoutDecoder = new StringDecoder("utf8");
+    const stderrDecoder = new StringDecoder("utf8");
 
     const timer = setTimeout(() => {
       killed = true;
@@ -109,8 +125,13 @@ export async function execute(code) {
     }, TIMEOUT_MS);
 
     child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-      if (!killed && stdout.length > MAX_STDOUT) {
+      // The cap is a byte budget, so count raw chunk bytes, not decoded
+      // string length.
+      stdoutBytes += chunk.length;
+      // Both kill paths discard stdout, so decoding after one is wasted work.
+      if (killed) return;
+      stdout += stdoutDecoder.write(chunk);
+      if (stdoutBytes > MAX_STDOUT) {
         killed = true;
         child.kill("SIGKILL");
       }
@@ -118,15 +139,19 @@ export async function execute(code) {
 
     child.stderr.on("data", (chunk) => {
       if (stderr.length >= MAX_STDERR) return;
-      stderr += chunk.toString().slice(0, MAX_STDERR - stderr.length);
+      stderr += stderrDecoder.write(chunk).slice(0, MAX_STDERR - stderr.length);
     });
 
     child.on("close", (exitCode) => {
       clearTimeout(timer);
+      stdout += stdoutDecoder.end();
+      if (stderr.length < MAX_STDERR) {
+        stderr += stderrDecoder.end().slice(0, MAX_STDERR - stderr.length);
+      }
 
-      if (killed && stdout.length > MAX_STDOUT) {
+      if (killed && stdoutBytes > MAX_STDOUT) {
         return resolve({
-          error: `Output too large (${stdout.length} bytes, max ${MAX_STDOUT}). Reduce scope of your query.`,
+          error: `Output too large (${stdoutBytes} bytes, max ${MAX_STDOUT}). Reduce scope of your query.`,
         });
       }
 

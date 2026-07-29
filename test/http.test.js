@@ -243,6 +243,64 @@ describe("helpers: buildAllowedHosts", () => {
     });
     expect(hosts.has("[2001:db8::1]:9000")).toBe(true);
   });
+
+  test("the configured bind host is allowed", () => {
+    const hosts = buildAllowedHosts({ host: "127.0.0.2", port: 8231 });
+    expect(hosts.has("127.0.0.2:8231")).toBe(true);
+
+    const v6 = buildAllowedHosts({ host: "2001:db8::7", port: 8231 });
+    expect(v6.has("[2001:db8::7]:8231")).toBe(true);
+  });
+
+  test("wildcard binds do not leak into the allow list", () => {
+    const wildcards = [
+      "0.0.0.0",
+      "::",
+      "[::]",
+      "0:0:0:0:0:0:0:0",
+      "::0",
+      "[::0]",
+      "0::0",
+    ];
+    for (const host of wildcards) {
+      const hosts = buildAllowedHosts({ host, port: 8231 });
+      expect(hosts.size).toBe(3);
+    }
+  });
+
+  test("port 80 also allows portless Host values", () => {
+    const hosts = buildAllowedHosts({ host: "127.0.0.2", port: 80 });
+    expect(hosts.has("localhost")).toBe(true);
+    expect(hosts.has("localhost:80")).toBe(true);
+    expect(hosts.has("127.0.0.1")).toBe(true);
+    expect(hosts.has("[::1]")).toBe(true);
+    expect(hosts.has("127.0.0.2")).toBe(true);
+  });
+
+  test("ports other than 80 stay port-qualified", () => {
+    const hosts = buildAllowedHosts({ port: 8231 });
+    expect(hosts.has("localhost")).toBe(false);
+  });
+
+  test("extra entries without a port are also allowed portless", () => {
+    const hosts = buildAllowedHosts({
+      port: 8231,
+      extra: ["mcp.example.com", "[2001:db8::1]", "2001:db8::2"],
+    });
+    expect(hosts.has("mcp.example.com")).toBe(true);
+    expect(hosts.has("mcp.example.com:8231")).toBe(true);
+    expect(hosts.has("[2001:db8::1]")).toBe(true);
+    expect(hosts.has("[2001:db8::2]")).toBe(true);
+  });
+
+  test("extra entries with an explicit port stay port-specific", () => {
+    const hosts = buildAllowedHosts({
+      port: 8231,
+      extra: ["mcp.example.com:9000"],
+    });
+    expect(hosts.has("mcp.example.com:9000")).toBe(true);
+    expect(hosts.has("mcp.example.com")).toBe(false);
+  });
 });
 
 describe("helpers: resolveHttpOptions", () => {
@@ -394,6 +452,12 @@ describe("helpers: reachableDisplayHost", () => {
   test("rewrites IPv6 wildcard to bracketed loopback", () => {
     expect(reachableDisplayHost("::")).toBe("[::1]");
     expect(reachableDisplayHost("0:0:0:0:0:0:0:0")).toBe("[::1]");
+  });
+
+  test("rewrites IPv6 wildcard aliases the same way", () => {
+    expect(reachableDisplayHost("::0")).toBe("[::1]");
+    expect(reachableDisplayHost("0::0")).toBe("[::1]");
+    expect(reachableDisplayHost("[::0]")).toBe("[::1]");
   });
 
   test("brackets bare IPv6 literals", () => {
@@ -634,16 +698,17 @@ describe("Streamable HTTP transport — auth and CORS", () => {
     if (server) await server.close();
   });
 
-  test("missing bearer token is 401", async () => {
+  test("missing bearer token is 401 with a WWW-Authenticate challenge", async () => {
     const res = await fetch(server.url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     });
     expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toBe("Bearer");
   }, 10000);
 
-  test("wrong bearer token is 401", async () => {
+  test("wrong bearer token is 401 with a WWW-Authenticate challenge", async () => {
     const res = await fetch(server.url, {
       method: "POST",
       headers: {
@@ -653,6 +718,7 @@ describe("Streamable HTTP transport — auth and CORS", () => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     });
     expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toBe("Bearer");
   }, 10000);
 
   test("correct bearer token passes", async () => {
@@ -738,6 +804,85 @@ describe("Streamable HTTP transport — host guard", () => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     });
     expect(res.status).toBe(421);
+  }, 10000);
+});
+
+describe("Streamable HTTP transport: reverse-proxy Host", () => {
+  let server;
+
+  beforeAll(async () => {
+    server = await spawnHttpServer({
+      args: ["--http-allow-host", "mcp.example.com"],
+    });
+  }, 15000);
+
+  afterAll(async () => {
+    if (server) await server.close();
+  });
+
+  test("an allowed Host without a port passes the guard", async () => {
+    const res = await rpc(
+      server.url,
+      { jsonrpc: "2.0", id: 1, method: "tools/list" },
+      { Host: "mcp.example.com" },
+    );
+    expect(res.status).toBe(200);
+  }, 10000);
+
+  test("the same Host with the listening port also passes", async () => {
+    const port = new URL(server.url).port;
+    const res = await rpc(
+      server.url,
+      { jsonrpc: "2.0", id: 1, method: "tools/list" },
+      { Host: `mcp.example.com:${port}` },
+    );
+    expect(res.status).toBe(200);
+  }, 10000);
+});
+
+describe("CLI argument errors (spawned)", () => {
+  test("an unknown flag exits 2 with a clean message", async () => {
+    const { code, stderr } = await spawnExpectFail({ args: ["--bogus-flag"] });
+    expect(code).toBe(2);
+    expect(stderr).toMatch(/--bogus-flag/);
+    expect(stderr).toMatch(/--help/);
+    expect(stderr).not.toMatch(/\n\s+at /);
+  }, 10000);
+
+  test("a positional argument exits 2 with a clean message", async () => {
+    const { code, stderr } = await spawnExpectFail({ args: ["serve"] });
+    expect(code).toBe(2);
+    expect(stderr).toMatch(/Unexpected argument "serve"/);
+    expect(stderr).not.toMatch(/\n\s+at /);
+  }, 10000);
+
+  test("an invalid encryption key exits 2 with a clean message", async () => {
+    const { code, stderr } = await spawnExpectFail({
+      args: ["--encrypt-secrets", "--encrypt-key", "nope"],
+    });
+    expect(code).toBe(2);
+    expect(stderr).toMatch(/32 hex characters/);
+    expect(stderr).not.toMatch(/\n\s+at /);
+  }, 10000);
+
+  test("an invalid encryption key is rejected even with encryption off", async () => {
+    const { code, stderr } = await spawnExpectFail({
+      args: ["--encrypt-key", "nope"],
+    });
+    expect(code).toBe(2);
+    expect(stderr).toMatch(/32 hex characters/);
+  }, 10000);
+
+  test("an explicitly empty encryption key is rejected, not ignored", async () => {
+    const viaFlag = await spawnExpectFail({ args: ["--encrypt-key="] });
+    expect(viaFlag.code).toBe(2);
+    expect(viaFlag.stderr).toMatch(/32 hex characters/);
+
+    const viaEnv = await spawnExpectFail({
+      env: { FASTLY_MCP_ENCRYPT_SECRETS: "true", FASTLY_MCP_ENCRYPT_KEY: "" },
+    });
+    expect(viaEnv.code).toBe(2);
+    expect(viaEnv.stderr).toMatch(/32 hex characters/);
   }, 10000);
 });
 

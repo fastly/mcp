@@ -20,10 +20,10 @@ const pkg = JSON.parse(
 );
 
 function parseEncryptKey(hex) {
-  if (!hex) return undefined;
+  if (hex === undefined) return undefined;
   if (!/^[0-9a-fA-F]{32}$/.test(hex)) {
     throw new Error(
-      `FASTLY_MCP_ENCRYPT_KEY must be exactly 32 hex characters (16 bytes), got ${hex.length} chars`,
+      `--encrypt-key / FASTLY_MCP_ENCRYPT_KEY must be exactly 32 hex characters (16 bytes), got ${hex.length} chars`,
     );
   }
   return Buffer.from(hex, "hex");
@@ -101,7 +101,17 @@ search, inspect, and execute tools.
 `);
 }
 
-const cliArgs = parseArgs(process.argv);
+function fail(...lines) {
+  for (const line of lines) process.stderr.write(`[fastly-mcp] ${line}\n`);
+  process.exit(2);
+}
+
+let cliArgs;
+try {
+  cliArgs = parseArgs(process.argv);
+} catch (err) {
+  fail(err.message, "Run fastly-mcp --help for usage.");
+}
 
 if (cliArgs.help) {
   printHelp();
@@ -113,8 +123,6 @@ if (cliArgs.version) {
   process.exit(0);
 }
 
-const index = await buildIndex();
-
 const encryptionEnabled =
   cliArgs.encryptSecrets ||
   process.env.FASTLY_MCP_ENCRYPT_SECRETS === "true" ||
@@ -123,18 +131,28 @@ const encryptionEnabled =
 const encryptKeyHex =
   cliArgs.encryptKey ?? process.env.FASTLY_MCP_ENCRYPT_KEY ?? undefined;
 
-const shield = encryptionEnabled
-  ? new SecretShield({
-      key: parseEncryptKey(encryptKeyHex),
+// Validate the key before any real work, even with encryption off, so a
+// typo fails at startup with a clean one-line error.
+let shield = null;
+try {
+  const encryptKey = parseEncryptKey(encryptKeyHex);
+  if (encryptionEnabled) {
+    shield = new SecretShield({
+      key: encryptKey,
       tweak: process.env.FASTLY_MCP_ENCRYPT_TWEAK
         ? new TextEncoder().encode(process.env.FASTLY_MCP_ENCRYPT_TWEAK)
         : undefined,
-    })
-  : null;
+    });
+  }
+} catch (err) {
+  fail(err.message);
+}
 
 if (shield) {
   process.on("exit", () => shield.destroy());
 }
+
+const index = await buildIndex();
 
 function walkStrings(value, fn) {
   if (typeof value === "string") return fn(value);
@@ -277,10 +295,9 @@ export function createMcpServer({ shield, index }) {
 const transportChoice = resolveTransport(cliArgs, process.env);
 
 if (transportChoice !== "stdio" && transportChoice !== "http") {
-  process.stderr.write(
-    `[fastly-mcp] Unknown transport "${transportChoice}". Use --transport stdio or --transport http.\n`,
+  fail(
+    `Unknown transport "${transportChoice}". Use --transport stdio or --transport http.`,
   );
-  process.exit(2);
 }
 
 if (transportChoice === "http") {
@@ -291,8 +308,7 @@ if (transportChoice === "http") {
       version: pkg.version,
     });
   } catch (err) {
-    process.stderr.write(`[fastly-mcp] ${err.message}\n`);
-    process.exit(2);
+    fail(err.message);
   }
 } else {
   serveStdio(() => createMcpServer({ shield, index }), {

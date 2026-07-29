@@ -33,12 +33,17 @@ function rejectFlagShapedValue(optionName, value) {
 }
 
 export function parseArgs(argv = process.argv) {
-  const { values } = nodeParseArgs({
+  const { values, positionals } = nodeParseArgs({
     args: argv.slice(2),
     options: CLI_OPTIONS,
     strict: true,
     allowPositionals: true,
   });
+  if (positionals.length > 0) {
+    throw new Error(
+      `Unexpected argument "${positionals[0]}". fastly-mcp takes options only.`,
+    );
+  }
   for (const [name, def] of Object.entries(CLI_OPTIONS)) {
     if (def.type !== "string") continue;
     const v = values[name];

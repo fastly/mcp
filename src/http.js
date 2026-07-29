@@ -16,33 +16,70 @@ export function isLoopbackHost(host) {
   return v === 6 && (lower === "::1" || lower === "0:0:0:0:0:0:0:1");
 }
 
+function unbracketHost(host) {
+  const lower = String(host).toLowerCase();
+  if (lower.startsWith("[") && lower.endsWith("]")) {
+    return lower.slice(1, -1);
+  }
+  return lower;
+}
+
 export function reachableDisplayHost(host) {
   if (!host) return "127.0.0.1";
-  const lower = String(host).toLowerCase();
-  if (lower === "0.0.0.0") return "127.0.0.1";
-  if (lower === "::" || lower === "0:0:0:0:0:0:0:0") return "[::1]";
-  if (isIP(lower) === 6 && !lower.startsWith("[")) return `[${lower}]`;
+  const lower = unbracketHost(host);
+  // Every wildcard spelling maps to the loopback of its family, so the
+  // advertised URL always carries a Host the allow list accepts.
+  if (isWildcardHost(lower)) {
+    return lower === "0.0.0.0" ? "127.0.0.1" : "[::1]";
+  }
+  if (isIP(lower) === 6) return `[${lower}]`;
   return host;
+}
+
+function bareHostKey(addr) {
+  const lower = String(addr).toLowerCase();
+  if (lower.includes(":") && !lower.startsWith("[")) {
+    return `[${lower}]`;
+  }
+  return lower;
 }
 
 export function formatHostKey(addr, port) {
   if (!addr) return "";
-  const lower = String(addr).toLowerCase();
-  if (lower.includes(":") && !lower.startsWith("[")) {
-    return `[${lower}]:${port}`;
-  }
-  return `${lower}:${port}`;
+  return `${bareHostKey(addr)}:${port}`;
+}
+
+function isWildcardHost(host) {
+  const lower = unbracketHost(host);
+  if (lower === "0.0.0.0") return true;
+  // All-zero IPv6 spellings like ::, ::0 and 0:0:0:0:0:0:0:0 are the
+  // same wildcard and get URL-normalized to :: by clients.
+  return isIP(lower) === 6 && /^[0:]+$/.test(lower);
 }
 
 export function buildAllowedHosts({
+  host,
   port,
   extra = [],
   includeNetwork = false,
 }) {
   const hosts = new Set();
-  hosts.add(formatHostKey("127.0.0.1", port));
-  hosts.add(formatHostKey("::1", port));
-  hosts.add(formatHostKey("localhost", port));
+
+  // Clients omit the default port from the Host header, so a server on
+  // port 80 must also accept the portless spellings.
+  const add = (addr) => {
+    hosts.add(formatHostKey(addr, port));
+    if (port === 80) hosts.add(bareHostKey(addr));
+  };
+
+  add("127.0.0.1");
+  add("::1");
+  add("localhost");
+
+  // Wildcard binds are not valid Host headers.
+  if (host && !isWildcardHost(host)) {
+    add(host);
+  }
 
   if (includeNetwork) {
     const ifaces = networkInterfaces();
@@ -50,11 +87,11 @@ export function buildAllowedHosts({
       if (!list) continue;
       for (const iface of list) {
         if (iface.internal) continue;
-        hosts.add(formatHostKey(iface.address, port));
+        add(iface.address);
       }
     }
     const name = osHostname();
-    if (name) hosts.add(formatHostKey(name, port));
+    if (name) add(name);
   }
 
   for (const entry of extra) {
@@ -63,27 +100,24 @@ export function buildAllowedHosts({
     if (!trimmed) continue;
     const lower = trimmed.toLowerCase();
 
+    // Entries without an explicit port are also allowed bare: a reverse
+    // proxy on a default port forwards a portless Host header.
     if (lower.startsWith("[")) {
       const close = lower.indexOf("]");
       if (close === -1) continue;
-      if (close === lower.length - 1) {
-        hosts.add(`${lower}:${port}`);
-      } else {
-        hosts.add(lower);
-      }
+      hosts.add(lower);
+      if (close === lower.length - 1) hosts.add(formatHostKey(lower, port));
       continue;
     }
 
     if (isIP(lower) === 6) {
-      hosts.add(`[${lower}]:${port}`);
+      hosts.add(bareHostKey(lower));
+      hosts.add(formatHostKey(lower, port));
       continue;
     }
 
-    if (lower.includes(":")) {
-      hosts.add(lower);
-    } else {
-      hosts.add(`${lower}:${port}`);
-    }
+    hosts.add(lower);
+    if (!lower.includes(":")) hosts.add(`${lower}:${port}`);
   }
 
   return hosts;
@@ -177,12 +211,17 @@ function writeJson(res, status, body, extraHeaders = {}) {
   res.end(JSON.stringify(body));
 }
 
-function writeJsonError(res, status, message, id = null) {
-  writeJson(res, status, {
-    jsonrpc: "2.0",
-    error: { code: status, message },
-    id,
-  });
+function writeJsonError(res, status, message, extraHeaders = {}) {
+  writeJson(
+    res,
+    status,
+    {
+      jsonrpc: "2.0",
+      error: { code: status, message },
+      id: null,
+    },
+    extraHeaders,
+  );
 }
 
 function constantTimeEquals(a, b) {
@@ -267,6 +306,7 @@ export async function startHttp(createMcpServer, { cliArgs, env, version }) {
   const handleMcp = toNodeHandler(mcpHandler, { onerror: logError });
 
   let allowedHosts = buildAllowedHosts({
+    host,
     port,
     extra: allowHostsExtras,
     includeNetwork: includeNetworkHosts,
@@ -318,7 +358,9 @@ export async function startHttp(createMcpServer, { cliArgs, env, version }) {
     }
 
     if (!checkAuth(req, authToken)) {
-      writeJsonError(res, 401, "Unauthorized");
+      writeJsonError(res, 401, "Unauthorized", {
+        "WWW-Authenticate": "Bearer",
+      });
       return;
     }
 
@@ -379,6 +421,7 @@ export async function startHttp(createMcpServer, { cliArgs, env, version }) {
   const boundPort = actual && typeof actual === "object" ? actual.port : port;
   if (boundPort !== port) {
     allowedHosts = buildAllowedHosts({
+      host,
       port: boundPort,
       extra: allowHostsExtras,
       includeNetwork: includeNetworkHosts,

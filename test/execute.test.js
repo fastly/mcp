@@ -1,6 +1,39 @@
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
 import { execute } from "../src/tools/execute.js";
 import { expectNoInternals } from "./helpers.js";
+
+const NODE_HARNESS_PATH = join(
+  import.meta.dir,
+  "fixtures/run-sandbox-under-node.mjs",
+);
+
+const NODE_EXECUTE_HARNESS_PATH = join(
+  import.meta.dir,
+  "fixtures/run-execute-under-node.mjs",
+);
+
+const LATE_REJECTION_CODE =
+  'Promise.reject(new Error("late")); console.log("x".repeat(90000)); return 7;';
+
+function runUnderNode(harnessPath, code, env) {
+  return spawnSync("node", [harnessPath, code], {
+    encoding: "utf8",
+    timeout: 15000,
+    maxBuffer: 1024 * 1024,
+    ...(env ? { env: { ...process.env, ...env } } : {}),
+  });
+}
+
+function expectFullLateRejectionResult(proc) {
+  const { exitCode, stdout } = JSON.parse(proc.stdout);
+  expect(exitCode).toBe(0);
+  const parsed = JSON.parse(stdout);
+  expect(parsed.ok).toBe(true);
+  expect(parsed.result).toBe(7);
+  expect(parsed.console[0].text.length).toBe(90000);
+}
 
 describe("execute", () => {
   test("successful code returns result directly", async () => {
@@ -119,6 +152,23 @@ describe("execute", () => {
     expect(result.result._showing).toBe(10);
     expect(result.result.items).toHaveLength(10);
     expect(result.truncated).toBe(true);
+  }, 10000);
+
+  test("a __proto__ key survives object auto-summarization", async () => {
+    const result = await execute(`
+      const obj = {};
+      Object.defineProperty(obj, "__proto__", {
+        value: 1, enumerable: true, writable: true, configurable: true,
+      });
+      for (let i = 0; i < 40; i++) obj["key" + i] = i;
+      return obj;
+    `);
+    expect(result.result._type).toBe("object");
+    expect(result.truncated).toBe(true);
+    const preview = result.result.preview;
+    expect(Object.getPrototypeOf(preview)).toBe(Object.prototype);
+    expect(Object.getOwnPropertyDescriptor(preview, "__proto__").value).toBe(1);
+    expect(preview.key0).toBe(0);
   }, 10000);
 
   test("small array is NOT summarized", async () => {
@@ -268,12 +318,81 @@ describe("execute", () => {
     expect(result.result).toBe("AbortError");
   }, 10000);
 
+  // A fatal unhandled rejection between event loop turns used to truncate
+  // the result at the 64 KB pipe boundary. Only a Node parent draining the
+  // pipe reproduces it, hence the harness.
+  test("a late unhandled rejection cannot truncate the result under Node", () => {
+    const proc = runUnderNode(NODE_HARNESS_PATH, LATE_REJECTION_CODE);
+    expectFullLateRejectionResult(proc);
+  }, 20000);
+
+  // Strict mode promotes the rejection to an uncaughtException, which
+  // needs its own safeguard.
+  test("strict unhandled-rejections mode cannot truncate the result either", () => {
+    const proc = runUnderNode(NODE_HARNESS_PATH, LATE_REJECTION_CODE, {
+      NODE_OPTIONS: "--unhandled-rejections=strict",
+    });
+    expectFullLateRejectionResult(proc);
+  }, 20000);
+
+  // safeSerialize shrinks a large return value before it can reach the
+  // cap; only console text, which crosses the bridge verbatim, can drive
+  // the output past it.
   test("parent-side stdout cap kills subprocess on oversize output", async () => {
-    const result = await execute(`return "x".repeat(200000);`);
-    expect(
-      result.error?.includes("Output too large") ||
-        result.result?._truncated === true,
-    ).toBe(true);
+    const result = await execute('console.log("x".repeat(120000)); return 1;');
+    expect(result.error).toContain("Output too large");
+  }, 15000);
+
+  // "€" is one code unit but three UTF-8 bytes, so counting string length
+  // instead of chunk bytes would let this 120 KB payload through.
+  test("the cap counts bytes, not string length", async () => {
+    const result = await execute(
+      'console.log("\\u20ac".repeat(40000)); return 1;',
+    );
+    expect(result.error).toContain("Output too large");
+  }, 15000);
+
+  // Node splits the sandbox pipe at the 64 KB boundary, here mid
+  // character. A Bun host chunks the stream differently and never shows
+  // the corruption, hence the execute() harness.
+  test("sub-cap multibyte output crosses chunk boundaries intact under Node", () => {
+    const proc = runUnderNode(
+      NODE_EXECUTE_HARNESS_PATH,
+      'console.log("\\u20ac".repeat(30000)); return 1;',
+    );
+    const result = JSON.parse(proc.stdout);
+    expect(result.error).toBeUndefined();
+    expect(result.result).toBe(1);
+    expect(result.console[0].text).toBe("€".repeat(30000));
+  }, 20000);
+
+  test("oversized multibyte output is rejected under a Node host too", () => {
+    const proc = runUnderNode(
+      NODE_EXECUTE_HARNESS_PATH,
+      'console.log("\\u20ac".repeat(40000)); return 1;',
+    );
+    const result = JSON.parse(proc.stdout);
+    expect(result.error).toContain("Output too large");
+  }, 20000);
+
+  // 40,000 euro signs are 40,002 code units but 120,002 UTF-8 bytes; a
+  // code-unit budget would let them through to die at the parent cap.
+  test("serializer truncation triggers on bytes, not code units", async () => {
+    const result = await execute('return "\\u20ac".repeat(40000);');
+    expect(result.error).toBeUndefined();
+    expect(result.result._truncated).toBe(true);
+    expect(result.result._message).toContain("Result too large (120002 bytes");
+  }, 15000);
+
+  // Same unit bug, auto-summary flavor: five 3,000-euro strings are under
+  // the 20 KB summary threshold in code units but 45 KB serialized.
+  test("auto-summary size threshold counts bytes, not code units", async () => {
+    const result = await execute(
+      'return Array.from({length: 5}, () => "\\u20ac".repeat(3000));',
+    );
+    expect(result.truncated).toBe(true);
+    expect(result.result._type).toBe("array");
+    expect(result.result._hint).toContain("bytes serialized");
   }, 15000);
 
   // Skipped: takes ~30s to trigger the timeout. Run manually with:
