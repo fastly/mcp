@@ -1,5 +1,6 @@
 import vm from "node:vm";
 import Fastly from "fastly";
+import { describeThrown } from "./errors.js";
 import { safeSerialize } from "./serializer.js";
 
 const input =
@@ -38,22 +39,44 @@ for (const name of Object.keys(Fastly)) {
 
 const consoleLogs = [];
 
+const NO_TOKEN_HINT =
+  "No Fastly API token is configured. Set FASTLY_API_TOKEN in the environment of the MCP server and restart it.";
+const BAD_TOKEN_HINT =
+  "Fastly rejected the API token. Check that FASTLY_API_TOKEN is current and has not been revoked.";
+const FORBIDDEN_HINT =
+  "The API token was accepted but is not allowed to perform this operation. Check its scope and whether it can reach this service or customer account.";
+
+function authHint(status) {
+  if (status !== 401 && status !== 403) return undefined;
+  if (!fastlyApiToken) return NO_TOKEN_HINT;
+  return status === 401 ? BAD_TOKEN_HINT : FORBIDDEN_HINT;
+}
+
+async function callFastly(payload) {
+  const { apiClass, method, args } = JSON.parse(payload);
+  const instance = apiInstances[lowerFirst(apiClass)];
+  if (!instance || typeof instance[method] !== "function") {
+    throw new Error(`Unknown Fastly API method: ${apiClass}.${method}`);
+  }
+  try {
+    const result = await instance[method](...args);
+    return JSON.stringify({ ok: true, value: safeSerialize(result) });
+  } catch (err) {
+    const failure = describeThrown(err);
+    const hint = authHint(failure.status);
+    if (hint) failure.hint = hint;
+    return JSON.stringify({ ok: false, failure });
+  }
+}
+
 async function hostBridge(kind, payload) {
   try {
-    if (kind === "api") {
-      const { apiClass, method, args } = JSON.parse(payload);
-      const instance = apiInstances[lowerFirst(apiClass)];
-      if (!instance || typeof instance[method] !== "function") {
-        throw new Error(`Unknown Fastly API method: ${apiClass}.${method}`);
-      }
-      const result = await instance[method](...args);
-      return JSON.stringify({ ok: true, value: safeSerialize(result) });
-    }
+    if (kind === "api") return await callFastly(payload);
 
     if (kind === "console") {
       const { level, text } = JSON.parse(payload);
       consoleLogs.push({ level, text });
-      return "";
+      return JSON.stringify({ ok: true, value: null });
     }
 
     if (kind === "fetch") {
@@ -83,10 +106,7 @@ async function hostBridge(kind, payload) {
 
     throw new Error(`Unknown sandbox bridge operation: ${kind}`);
   } catch (err) {
-    return JSON.stringify({
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    });
+    return JSON.stringify({ ok: false, failure: describeThrown(err) });
   }
 }
 
@@ -100,8 +120,13 @@ const installFacade = vm.runInContext(
   (bridge, apiClasses) => {
     const invoke = async (kind, payload) => {
       const reply = JSON.parse(await bridge(kind, JSON.stringify(payload)));
-      if (!reply.ok) throw new Error(reply.error);
-      return reply.value;
+      if (reply.ok) return reply.value;
+      const failure = reply.failure ?? {};
+      const error = new Error(failure.error ?? "Unknown sandbox bridge failure");
+      for (const field of ["status", "statusText", "body", "hint"]) {
+        if (failure[field] !== undefined) error[field] = failure[field];
+      }
+      throw error;
     };
 
     const makeApi = (apiClass) => new Proxy({}, {
@@ -194,61 +219,17 @@ const installFacade = vm.runInContext(
   }
 `,
   context,
+  { filename: "sandbox-facade" },
 );
 installFacade(hostBridge, apiClasses);
-
-function describeThrown(err) {
-  if (err === null) return { error: "null was thrown" };
-  if (err === undefined) return { error: "undefined was thrown" };
-  if (typeof err === "string") return { error: err };
-  if (typeof err !== "object") return { error: String(err) };
-
-  const out = {};
-
-  if (typeof err.message === "string" && err.message) {
-    out.error = err.message;
-  } else if (typeof err.statusText === "string" && err.statusText) {
-    const status = typeof err.status === "number" ? `${err.status} ` : "";
-    out.error = `HTTP ${status}${err.statusText}`.trim();
-  } else if (typeof err.status === "number") {
-    out.error = `HTTP ${err.status}`;
-  } else if (err.error && typeof err.error.message === "string") {
-    out.error = err.error.message;
-  } else if (err.constructor && err.constructor.name !== "Object") {
-    out.error = `${err.constructor.name} (no message)`;
-  } else {
-    try {
-      const dump = JSON.stringify(err);
-      out.error =
-        dump && dump !== "{}" ? dump : "Unknown error (empty object thrown)";
-    } catch {
-      out.error = "Unknown error (unserializable value thrown)";
-    }
-  }
-
-  if (typeof err.status === "number") out.status = err.status;
-  if (typeof err.statusText === "string" && err.statusText) {
-    out.statusText = err.statusText;
-  }
-  if (err.body !== undefined) {
-    try {
-      const body =
-        typeof err.body === "string" ? err.body : JSON.stringify(err.body);
-      if (body)
-        out.body = body.length > 2000 ? `${body.slice(0, 2000)}…` : body;
-    } catch {}
-  }
-
-  return out;
-}
 
 function rewriteError(err, source) {
   const out = describeThrown(err);
   if (!err || typeof err !== "object") return out;
   if (!err.stack || typeof err.stack !== "string") return out;
 
-  const frameRe = /(?:user-code|evalmachine\\.<anonymous>):(\\d+):(\\d+)/;
-  const lines = err.stack.split("\\n");
+  const frameRe = /user-code:(\d+):(\d+)/;
+  const lines = err.stack.split("\n");
   const kept = [];
   let firstUserFrame = null;
 
@@ -267,19 +248,24 @@ function rewriteError(err, source) {
     }
     if (
       line.includes("/sandbox.js") ||
+      line.includes("sandbox-facade") ||
+      line.includes("evalmachine.<anonymous>") ||
       line.includes("node:internal") ||
       line.includes("node:vm") ||
-      /bunx-\\d+/.test(line)
+      line.includes("native:") ||
+      line.includes("(unknown)") ||
+      /bunx-\d+/.test(line)
     ) {
       continue;
     }
     kept.push(line);
   }
 
-  out.stack = kept.join("\\n");
+  // A stack whose frames were all internal says nothing the message did not.
+  if (kept.length > 1) out.stack = kept.join("\n");
 
   if (firstUserFrame) {
-    const srcLines = source.split("\\n");
+    const srcLines = source.split("\n");
     const raw = srcLines[firstUserFrame.number - 1];
     if (raw !== undefined) {
       const trimmed = raw.length > 200 ? `${raw.slice(0, 200)}…` : raw;

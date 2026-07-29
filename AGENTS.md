@@ -16,6 +16,7 @@
 - Prefer sandbox globals like `serviceApi`, `statsApi`, `purgeApi`, and `tlsCertificatesApi` over `new Fastly.ServiceApi()` in examples and generated usage.
 - `search` results stay compact: discovery fields only, with full `description`, `params`, `returnType`, and `example` reserved for `inspect`.
 - `search` and `inspect` must work without `FASTLY_API_TOKEN`; real API calls through `execute` need it.
+- Everything thrown inside the sandbox, on either side of the host bridge, goes through `describeThrown` in `src/errors.js`. The Fastly client rejects with a plain object rather than an `Error`, so `String(err)` or a bare `err.message` silently turns a 401 into `[object Object]`. Failures reach the model as `{error, status, statusText, body, hint}`.
 - When secret encryption is enabled, decrypt input strings before handlers and re-encrypt text output before returning it.
 - HTTP defaults are loopback `127.0.0.1`, port `8231`, path `/mcp`, and `auto` response framing; `--http-json` and `--http-sse` pin the framing and are mutually exclusive, and non-loopback/network binds require auth. Both flags reach the 2026 leg only — the 2025 fallback always answers with SSE.
 - The server speaks the `2026-07-28` revision plus the 2025 family. There are no sessions in either era: `createMcpHandler` serves the modern path and falls back to per-request stateless serving for 2025 clients, both off the same `createMcpServer` factory.

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { execute } from "../src/tools/execute.js";
+import { expectNoInternals } from "./helpers.js";
 
 describe("execute", () => {
   test("successful code returns result directly", async () => {
@@ -13,6 +14,44 @@ describe("execute", () => {
     expect(result.stack).toBeDefined();
     expect(typeof result.stack).toBe("string");
     expect(result.result).toBeUndefined();
+  }, 10000);
+
+  test("stack points at the offending user line and hides sandbox internals", async () => {
+    const result = await execute(
+      "const a = 1;\nconst b = 2;\nthrow new Error('boom');",
+    );
+
+    expect(result.line.number).toBe(3);
+    expect(result.line.source).toBe("throw new Error('boom');");
+    expect(result.stack).toContain("user-code:3:");
+    expectNoInternals(expect, result.stack);
+  }, 10000);
+
+  test("bridge failures arrive as real Errors, not [object Object]", async () => {
+    const result = await execute(
+      "try { await serviceApi.thisMethodDoesNotExist(); } catch (e) { return { isError: e instanceof Error, message: e.message }; }",
+    );
+
+    expect(result.result.isError).toBe(true);
+    expect(result.result.message).toBe(
+      "Unknown Fastly API method: ServiceApi.thisMethodDoesNotExist",
+    );
+  }, 10000);
+
+  test("awaiting console.log does not blow up the sandbox", async () => {
+    const result = await execute('await console.log("first"); return "done";');
+    expect(result.result).toBe("done");
+    expect(result.console).toEqual([{ level: "log", text: "first" }]);
+  }, 10000);
+
+  // Node says "fetch failed: connect ECONNREFUSED ...", Bun words it its own way;
+  // either is fine as long as it explains itself.
+  test("a failed fetch reports why it failed", async () => {
+    const result = await execute(
+      "try { await fetch('http://127.0.0.1:1/'); } catch (e) { return e.message; }",
+    );
+    expect(result.result).toMatch(/connect|fetch failed/i);
+    expect(result.result).not.toBe("[object Object]");
   }, 10000);
 
   test("Fastly client is available in sandbox", async () => {

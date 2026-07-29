@@ -156,13 +156,9 @@ export async function execute(code) {
           if (raw.console?.length) out.console = raw.console;
           return resolve(out);
         }
-        const out = { error: raw.error ?? "Unknown error" };
-        if (raw.status !== undefined) out.status = raw.status;
-        if (raw.statusText) out.statusText = raw.statusText;
-        if (raw.body !== undefined) out.body = raw.body;
-        if (raw.line) out.line = raw.line;
-        if (raw.stack) out.stack = raw.stack;
-        if (raw.console?.length) out.console = raw.console;
+        const { ok, console: logs, error, ...failure } = raw;
+        const out = { error: error ?? "Unknown error", ...failure };
+        if (logs?.length) out.console = logs;
         return resolve(out);
       } catch (e) {
         return resolve({

@@ -130,6 +130,8 @@ That listens on `http://127.0.0.1:8231/mcp`. Loopback-only by default, no auth. 
 
 The exact shape varies by client; check your client's documentation for the streamable-http entry format.
 
+Nothing is kept between requests, so the server sits behind a load balancer without any sticky-session configuration.
+
 ### Security notes
 
 A few defaults are deliberately conservative:
@@ -139,16 +141,6 @@ A few defaults are deliberately conservative:
 - Requests with an `Origin` header that is not on the allowlist (set with `--http-allow-origin`, repeatable, or `FASTLY_MCP_HTTP_ALLOW_ORIGIN` as a comma-separated list) get `403`. Browser-based clients have to opt in. Native clients and `curl` do not send `Origin` and pass through.
 - The `Host` header is also validated. Off-loopback binds will reject requests whose `Host` does not match the bound interface, which is a small but useful guard against DNS rebinding.
 - There is no built-in TLS. Run the server behind a reverse proxy (or an ssh tunnel) when you want HTTPS.
-
-### Protocol versions
-
-The server speaks the current MCP revision, `2026-07-28`, and still answers older clients that have not caught up. You should not have to think about which one your client uses.
-
-One consequence is worth knowing if you were running an older release: sessions are gone. The server no longer hands out a session ID, and nothing is kept between requests, so it sits behind a load balancer without any sticky-session configuration.
-
-### Response framing
-
-By default the server replies with plain JSON and only switches to a streaming response when it has progress to report along the way. If your client cannot handle streaming at all, `--http-json` keeps every reply to a single JSON body; `--http-sse` forces the opposite. Passing both is a startup error.
 
 ### `Authorization: Bearer` on the loopback
 
@@ -226,6 +218,19 @@ Secret encryption is a safety feature, not a complete data classification system
 ## Troubleshooting
 
 If the server starts but Fastly API calls fail, check that `FASTLY_API_TOKEN` is set in the environment seen by the MCP server. Search and inspect can work without a token because they use bundled documentation, but real API calls need authentication.
+
+A failed call reports what the API said, so the answer is usually in the tool output itself:
+
+```json
+{
+  "error": "HTTP 401 Unauthorized",
+  "status": 401,
+  "body": "{\"msg\":\"Provided credentials are missing or invalid\"}",
+  "hint": "Fastly rejected the API token. Check that FASTLY_API_TOKEN is current and has not been revoked."
+}
+```
+
+The hint on a 401 or 403 distinguishes the three cases that need different fixes: no token reached the server, Fastly refused the token it got, or the token is valid but not allowed to perform that operation. The same fields are attached to the error object inside `execute`, so a snippet can catch a failure and read `e.status` or `e.body` itself.
 
 If the assistant cannot find the right method, ask it to use broader search terms such as `service`, `domain`, `backend`, `purge`, `tls`, `logging`, `dictionary`, `acl`, `vcl`, `stats`, or a fragment of the HTTP path from Fastly's API docs.
 
