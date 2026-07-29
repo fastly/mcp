@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { McpServer } from "@modelcontextprotocol/server";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
 import { parseArgs } from "./cli.js";
 import { resolveTransport, startHttp } from "./http.js";
@@ -69,15 +69,17 @@ HTTP transport (only used when --transport http is set):
                             request. Prefer the env var below — the CLI
                             form leaks into shell history and ps output.
                             Also reads FASTLY_MCP_HTTP_AUTH_TOKEN.
-  --http-stateless          Build a fresh server per request, no session
-                            IDs. Implies --http-json unless --http-sse is
-                            also passed.
-  --http-json               Return single-shot JSON responses instead of
-                            SSE streams. Required for clients that cannot
-                            speak text/event-stream.
-  --http-sse                Force SSE responses. Mainly useful with
-                            --http-stateless. Combining --http-json and
-                            --http-sse is a startup error.
+  --http-json               Never stream: answer with a single JSON body.
+                            Mid-call progress notifications are dropped.
+  --http-sse                Always stream responses as text/event-stream.
+                            Combining --http-json and --http-sse is a
+                            startup error. Without either flag the server
+                            sends JSON and upgrades to SSE only when a
+                            handler emits something before its result.
+
+                            Both flags shape 2026-07-28 exchanges only.
+                            Clients still speaking the 2025 protocol are
+                            always answered with text/event-stream.
   --http-allow-network      Bind to 0.0.0.0 and auto-populate allowed
                             hosts from local interface addresses. Requires
                             an auth token.
@@ -180,13 +182,13 @@ function makeShielded(shield) {
 const SEARCH_DESCRIPTION =
   "Find Fastly API methods by keyword, class name, method name, or HTTP path. Each result includes a ready-to-use `usage` snippet you can pass directly to `execute`. For simple calls, go straight from search to execute. Use `inspect` only when you need full parameter docs.";
 
-const SEARCH_INPUT_SCHEMA = {
+const SEARCH_INPUT_SCHEMA = z.object({
   query: z
     .string()
     .describe(
       "A keyword (e.g. 'purge'), an API class name (e.g. 'PurgeApi'), a method name (e.g. 'createBackend'), or an HTTP path fragment (e.g. '/service/{service_id}/purge')",
     ),
-};
+});
 
 const EXECUTE_DESCRIPTION = `Run JavaScript in a sandbox with the Fastly API client pre-authenticated.
 
@@ -196,24 +198,24 @@ You MUST use \`return\` to produce output. API methods return values directly (a
 
 Example: \`return await serviceApi.listServices();\``;
 
-const EXECUTE_INPUT_SCHEMA = {
+const EXECUTE_INPUT_SCHEMA = z.object({
   code: z
     .string()
     .describe(
       "JavaScript code to execute. `Fastly` is available globally. Auth is pre-configured. Use `return` to get results.",
     ),
-};
+});
 
 const INSPECT_DESCRIPTION =
   "Get full documentation for a specific API method, including parameters, return type, and example code. Use this after search to understand how to call a method and what it returns. Accepts a method name (e.g. 'listServices') or ClassName.methodName (e.g. 'ServiceApi.listServices').";
 
-const INSPECT_INPUT_SCHEMA = {
+const INSPECT_INPUT_SCHEMA = z.object({
   method: z
     .string()
     .describe(
       "Method name (e.g. 'listServices') or ClassName.methodName (e.g. 'ServiceApi.listServices')",
     ),
-};
+});
 
 function jsonResult(result) {
   return {
@@ -225,17 +227,15 @@ function jsonResult(result) {
 export function registerTools(mcp, { shield, index }) {
   const shielded = makeShielded(shield);
 
-  mcp.tool(
+  mcp.registerTool(
     "search",
-    SEARCH_DESCRIPTION,
-    SEARCH_INPUT_SCHEMA,
+    { description: SEARCH_DESCRIPTION, inputSchema: SEARCH_INPUT_SCHEMA },
     shielded(async ({ query }) => jsonResult(search(index, query))),
   );
 
-  mcp.tool(
+  mcp.registerTool(
     "execute",
-    EXECUTE_DESCRIPTION,
-    EXECUTE_INPUT_SCHEMA,
+    { description: EXECUTE_DESCRIPTION, inputSchema: EXECUTE_INPUT_SCHEMA },
     shielded(async ({ code }) => {
       const result = await execute(code);
       const isError = "error" in result && !("result" in result);
@@ -246,19 +246,30 @@ export function registerTools(mcp, { shield, index }) {
     }),
   );
 
-  mcp.tool(
+  mcp.registerTool(
     "inspect",
-    INSPECT_DESCRIPTION,
-    INSPECT_INPUT_SCHEMA,
+    { description: INSPECT_DESCRIPTION, inputSchema: INSPECT_INPUT_SCHEMA },
     shielded(async ({ method }) => jsonResult(inspect(index, method))),
   );
 }
 
+// The tool set never changes while the process lives, and neither result
+// depends on who is asking, which is what makes `public` safe here.
+const LIST_CACHE_HINT = { ttlMs: 3_600_000, cacheScope: "public" };
+
 export function createMcpServer({ shield, index }) {
-  const mcp = new McpServer({
-    name: "@fastly/mcp",
-    version: pkg.version,
-  });
+  const mcp = new McpServer(
+    {
+      name: "@fastly/mcp",
+      version: pkg.version,
+    },
+    {
+      cacheHints: {
+        "tools/list": LIST_CACHE_HINT,
+        "server/discover": LIST_CACHE_HINT,
+      },
+    },
+  );
   registerTools(mcp, { shield, index });
   return mcp;
 }
@@ -284,8 +295,10 @@ if (transportChoice === "http") {
     process.exit(2);
   }
 } else {
-  const mcp = createMcpServer({ shield, index });
-  const transport = new StdioServerTransport();
-  await mcp.connect(transport);
+  serveStdio(() => createMcpServer({ shield, index }), {
+    onerror: (err) => {
+      process.stderr.write(`[fastly-mcp] ${err.message}\n`);
+    },
+  });
   console.error("[fastly-mcp] Server started (stdio)");
 }

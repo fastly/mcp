@@ -115,7 +115,7 @@ By default the server speaks MCP over stdio, which is what every desktop and CLI
 bunx -p @fastly/mcp fastly-mcp --transport http
 ```
 
-That listens on `http://127.0.0.1:8231/mcp`. Loopback-only by default, no auth, SSE responses. An MCP client that accepts a streamable-http URL can be configured like this:
+That listens on `http://127.0.0.1:8231/mcp`. Loopback-only by default, no auth. An MCP client that accepts a streamable-http URL can be configured like this:
 
 ```json
 {
@@ -140,11 +140,15 @@ A few defaults are deliberately conservative:
 - The `Host` header is also validated. Off-loopback binds will reject requests whose `Host` does not match the bound interface, which is a small but useful guard against DNS rebinding.
 - There is no built-in TLS. Run the server behind a reverse proxy (or an ssh tunnel) when you want HTTPS.
 
-### Stateful vs stateless
+### Protocol versions
 
-The default mode is stateful: the first request initializes a session, the response carries an `Mcp-Session-Id` header, and the client sends that header back on every subsequent request. When the client is done it sends `DELETE /mcp` with the same header and the server tears the session down (`204 No Content`).
+The server speaks the current MCP revision, `2026-07-28`, and still answers older clients that have not caught up. You should not have to think about which one your client uses.
 
-Stateless mode (`--http-stateless`) builds a fresh MCP server for every request and closes it when the response ends. There are no session IDs, no `GET` SSE stream, and no `DELETE`. It is the right choice behind a load balancer or for short-lived clients that do not want to manage session state. Stateless mode implies single-shot JSON responses; pass `--http-sse` alongside it if you really want SSE framing.
+One consequence is worth knowing if you were running an older release: sessions are gone. The server no longer hands out a session ID, and nothing is kept between requests, so it sits behind a load balancer without any sticky-session configuration.
+
+### Response framing
+
+By default the server replies with plain JSON and only switches to a streaming response when it has progress to report along the way. If your client cannot handle streaming at all, `--http-json` keeps every reply to a single JSON body; `--http-sse` forces the opposite. Passing both is a startup error.
 
 ### `Authorization: Bearer` on the loopback
 

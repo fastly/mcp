@@ -2,8 +2,14 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { join } from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import {
+  CLIENT_CAPABILITIES_META_KEY,
+  CLIENT_INFO_META_KEY,
+  Client,
+  PROTOCOL_VERSION_META_KEY,
+  SERVER_INFO_META_KEY,
+  StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 import { parseArgs } from "../src/cli.js";
 import {
   buildAllowedHosts,
@@ -14,6 +20,60 @@ import {
 } from "../src/http.js";
 
 const SERVER_PATH = join(import.meta.dir, "../src/index.js");
+
+const MODERN_VERSION = "2026-07-28";
+
+function rpc(url, body, extraHeaders = {}) {
+  return fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      // The legacy leg answers 406 without text/event-stream on offer.
+      Accept: "application/json, text/event-stream",
+      ...extraHeaders,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * POST a 2026-07-28 request. `Mcp-Method` is mandatory rather than a routing
+ * convenience: omit it and the server answers -32020.
+ */
+function modernRpc(url, body) {
+  const { params = {}, ...rest } = body;
+  const headers = { "Mcp-Method": body.method };
+  if (params.name) headers["Mcp-Name"] = params.name;
+
+  return rpc(
+    url,
+    {
+      ...rest,
+      params: {
+        ...params,
+        _meta: {
+          [PROTOCOL_VERSION_META_KEY]: MODERN_VERSION,
+          [CLIENT_INFO_META_KEY]: { name: "wire-test", version: "1.0.0" },
+          [CLIENT_CAPABILITIES_META_KEY]: {},
+        },
+      },
+    },
+    headers,
+  );
+}
+
+/**
+ * Read a JSON-RPC result out of a response body. `--http-json` only shapes the
+ * modern leg, so the legacy leg answers with SSE either way.
+ */
+async function readResult(res) {
+  const text = await res.text();
+  if (!res.headers.get("content-type")?.includes("text/event-stream")) {
+    return JSON.parse(text);
+  }
+  const line = text.split("\n").find((l) => l.startsWith("data:"));
+  return JSON.parse(line.slice(5).trim());
+}
 
 function emptyCliArgs(overrides = {}) {
   return { ...parseArgs(["bun", SERVER_PATH]), ...overrides };
@@ -186,27 +246,26 @@ describe("helpers: buildAllowedHosts", () => {
 });
 
 describe("helpers: resolveHttpOptions", () => {
-  test("defaults to loopback bind, port 8231, stateful SSE", () => {
+  test("defaults to loopback bind, port 8231, auto response mode", () => {
     const opts = resolveHttpOptions({ cliArgs: emptyCliArgs() });
     expect(opts.host).toBe("127.0.0.1");
     expect(opts.port).toBe(8231);
     expect(opts.path).toBe("/mcp");
-    expect(opts.stateless).toBe(false);
-    expect(opts.jsonResponse).toBe(false);
+    expect(opts.responseMode).toBe("auto");
   });
 
-  test("stateless implies json", () => {
+  test("--http-json selects json response mode", () => {
     const opts = resolveHttpOptions({
-      cliArgs: emptyCliArgs({ httpStateless: true }),
+      cliArgs: emptyCliArgs({ httpJson: true }),
     });
-    expect(opts.jsonResponse).toBe(true);
+    expect(opts.responseMode).toBe("json");
   });
 
-  test("--http-sse with stateless forces SSE", () => {
+  test("--http-sse selects sse response mode", () => {
     const opts = resolveHttpOptions({
-      cliArgs: emptyCliArgs({ httpStateless: true, httpSse: true }),
+      cliArgs: emptyCliArgs({ httpSse: true }),
     });
-    expect(opts.jsonResponse).toBe(false);
+    expect(opts.responseMode).toBe("sse");
   });
 
   test("--http-json + --http-sse is a startup error", () => {
@@ -271,7 +330,7 @@ describe("helpers: resolveHttpOptions", () => {
 describe("parseArgs: flag-shaped values", () => {
   test("--http-auth-token followed by another flag throws", () => {
     expect(() =>
-      parseArgs(["bun", "s", "--http-auth-token", "--http-stateless"]),
+      parseArgs(["bun", "s", "--http-auth-token", "--http-json"]),
     ).toThrow();
   });
 
@@ -283,7 +342,7 @@ describe("parseArgs: flag-shaped values", () => {
 
   test("--encrypt-key followed by another flag throws", () => {
     expect(() =>
-      parseArgs(["bun", "s", "--encrypt-key", "--http-stateless"]),
+      parseArgs(["bun", "s", "--encrypt-key", "--http-json"]),
     ).toThrow();
   });
 
@@ -374,62 +433,55 @@ describe("startup guards (spawned)", () => {
   }, 10000);
 });
 
-describe("Streamable HTTP transport — SDK client smoke", () => {
+describe("Streamable HTTP transport — SDK client", () => {
   let server;
-  let client;
+  const clients = {};
 
   beforeAll(async () => {
     server = await spawnHttpServer();
-    const transport = new StreamableHTTPClientTransport(new URL(server.url));
-    client = new Client({ name: "test-client", version: "1.0.0" });
-    await client.connect(transport);
-  }, 15000);
+    for (const [era, options] of [
+      ["legacy", undefined],
+      ["modern", { versionNegotiation: { mode: { pin: MODERN_VERSION } } }],
+    ]) {
+      const client = new Client(
+        { name: `${era}-client`, version: "1.0.0" },
+        options,
+      );
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL(server.url)),
+      );
+      clients[era] = client;
+    }
+  }, 25000);
 
   afterAll(async () => {
-    if (client) await client.close();
+    await Promise.all(Object.values(clients).map((c) => c.close()));
     if (server) await server.close();
   });
 
-  test("lists the three tools", async () => {
-    const { tools } = await client.listTools();
-    const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual(["execute", "inspect", "search"]);
-  }, 10000);
+  for (const era of ["legacy", "modern"]) {
+    test(`${era}: lists the three tools`, async () => {
+      const { tools } = await clients[era].listTools();
+      expect(tools.map((t) => t.name).sort()).toEqual([
+        "execute",
+        "inspect",
+        "search",
+      ]);
+    }, 10000);
 
-  test("search returns results", async () => {
-    const result = await client.callTool({
-      name: "search",
-      arguments: { query: "purge" },
-    });
-    const parsed = JSON.parse(result.content[0].text);
-    expect(parsed.ok).toBe(true);
-    expect(parsed.total).toBeGreaterThan(0);
-  }, 10000);
-
-  test("inspect returns method details", async () => {
-    const result = await client.callTool({
-      name: "inspect",
-      arguments: { method: "listServices" },
-    });
-    const parsed = JSON.parse(result.content[0].text);
-    expect(parsed.ok).toBe(true);
-    expect(parsed.method).toBe("listServices");
-  }, 10000);
-
-  test("execute runs code", async () => {
-    const result = await client.callTool({
-      name: "execute",
-      arguments: { code: "return 1 + 1;" },
-    });
-    expect(result.isError).toBeFalsy();
-    const parsed = JSON.parse(result.content[0].text);
-    expect(parsed.result).toBe(2);
-  }, 15000);
+    test(`${era}: execute runs code`, async () => {
+      const result = await clients[era].callTool({
+        name: "execute",
+        arguments: { code: "return 6 * 7;" },
+      });
+      expect(result.isError).toBeFalsy();
+      expect(JSON.parse(result.content[0].text).result).toBe(42);
+    }, 15000);
+  }
 });
 
-describe("Streamable HTTP transport — hand-rolled stateful (JSON mode)", () => {
+describe("Streamable HTTP transport — 2026-07-28 wire shape", () => {
   let server;
-  let sessionId;
 
   beforeAll(async () => {
     server = await spawnHttpServer({ args: ["--http-json"] });
@@ -439,20 +491,62 @@ describe("Streamable HTTP transport — hand-rolled stateful (JSON mode)", () =>
     if (server) await server.close();
   });
 
-  async function rpc(body, headers = {}) {
-    return fetch(server.url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json, text/event-stream",
-        ...headers,
-      },
-      body: JSON.stringify(body),
+  test("server/discover advertises the revision, caches, and moves serverInfo into _meta", async () => {
+    const res = await modernRpc(server.url, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "server/discover",
     });
-  }
+    expect(res.status).toBe(200);
+    const { result } = await res.json();
+    expect(result.supportedVersions).toContain(MODERN_VERSION);
+    expect(result.resultType).toBe("complete");
+    expect(result.ttlMs).toBe(3600000);
+    expect(result.cacheScope).toBe("public");
+    expect(result.serverInfo).toBeUndefined();
+    expect(result._meta[SERVER_INFO_META_KEY].name).toBe("@fastly/mcp");
+  }, 10000);
 
-  test("initialize returns Mcp-Session-Id", async () => {
-    const res = await rpc({
+  test("tools/list carries cache hints and needs no handshake", async () => {
+    const res = await modernRpc(server.url, {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/list",
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("mcp-session-id")).toBeNull();
+    const { result } = await res.json();
+    expect(result.tools.length).toBe(3);
+    expect(result.ttlMs).toBe(3600000);
+    expect(result.cacheScope).toBe("public");
+  }, 10000);
+
+  test("tools/call works off a bare envelope", async () => {
+    const res = await modernRpc(server.url, {
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: { name: "search", arguments: { query: "purge" } },
+    });
+    expect(res.status).toBe(200);
+    const { result } = await res.json();
+    expect(JSON.parse(result.content[0].text).ok).toBe(true);
+  }, 10000);
+});
+
+describe("Streamable HTTP transport — legacy 2025 fallback", () => {
+  let server;
+
+  beforeAll(async () => {
+    server = await spawnHttpServer();
+  }, 15000);
+
+  afterAll(async () => {
+    if (server) await server.close();
+  });
+
+  test("initialize is answered without minting a session", async () => {
+    const res = await rpc(server.url, {
       jsonrpc: "2.0",
       id: 1,
       method: "initialize",
@@ -463,104 +557,23 @@ describe("Streamable HTTP transport — hand-rolled stateful (JSON mode)", () =>
       },
     });
     expect(res.status).toBe(200);
-    sessionId = res.headers.get("mcp-session-id");
-    expect(sessionId).toBeTruthy();
-    const parsed = await res.json();
+    expect(res.headers.get("mcp-session-id")).toBeNull();
+    const parsed = await readResult(res);
     expect(parsed.result.protocolVersion).toBeDefined();
   }, 10000);
 
-  test("notifications/initialized returns 202", async () => {
-    const res = await rpc(
-      { jsonrpc: "2.0", method: "notifications/initialized" },
-      { "Mcp-Session-Id": sessionId },
-    );
-    expect(res.status).toBe(202);
-  }, 10000);
-
-  test("tools/list returns three tools", async () => {
-    const res = await rpc(
-      { jsonrpc: "2.0", id: 2, method: "tools/list" },
-      { "Mcp-Session-Id": sessionId },
-    );
-    expect(res.status).toBe(200);
-    const parsed = await res.json();
-    expect(parsed.result.tools.length).toBe(3);
-  }, 10000);
-
-  test("tools/call search returns a result", async () => {
-    const res = await rpc(
-      {
-        jsonrpc: "2.0",
-        id: 3,
-        method: "tools/call",
-        params: { name: "search", arguments: { query: "purge" } },
-      },
-      { "Mcp-Session-Id": sessionId },
-    );
-    expect(res.status).toBe(200);
-    const parsed = await res.json();
-    const body = JSON.parse(parsed.result.content[0].text);
-    expect(body.ok).toBe(true);
-  }, 10000);
-
-  test("DELETE closes the session and returns 204", async () => {
-    const res = await fetch(server.url, {
-      method: "DELETE",
-      headers: { "Mcp-Session-Id": sessionId },
-    });
-    expect(res.status).toBe(204);
-
-    const after = await rpc(
-      { jsonrpc: "2.0", id: 4, method: "tools/list" },
-      { "Mcp-Session-Id": sessionId },
-    );
-    expect(after.status).toBe(404);
-  }, 10000);
-
-  test("POST without a session and without initialize body is 400", async () => {
-    const res = await rpc({ jsonrpc: "2.0", id: 99, method: "tools/list" });
-    expect(res.status).toBe(400);
-  }, 10000);
-});
-
-describe("Streamable HTTP transport — stateless mode", () => {
-  let server;
-
-  beforeAll(async () => {
-    server = await spawnHttpServer({ args: ["--http-stateless"] });
-  }, 15000);
-
-  afterAll(async () => {
-    if (server) await server.close();
-  });
-
-  async function rpc(body) {
-    return fetch(server.url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json, text/event-stream",
-      },
-      body: JSON.stringify(body),
-    });
-  }
-
   test("tools/list works without a prior initialize", async () => {
-    const res = await rpc({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+    const res = await rpc(server.url, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/list",
+    });
     expect(res.status).toBe(200);
-    expect(res.headers.get("mcp-session-id")).toBeNull();
-    const parsed = await res.json();
+    const parsed = await readResult(res);
     expect(parsed.result.tools.length).toBe(3);
   }, 10000);
 
-  test("each request is independent", async () => {
-    const a = await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" });
-    const b = await rpc({ jsonrpc: "2.0", id: 3, method: "tools/list" });
-    expect(a.status).toBe(200);
-    expect(b.status).toBe(200);
-  }, 15000);
-
-  test("GET /mcp returns 405", async () => {
+  test("GET /mcp returns 405 (no session streams to resume)", async () => {
     const res = await fetch(server.url, { method: "GET" });
     expect(res.status).toBe(405);
   }, 10000);
@@ -580,6 +593,31 @@ describe("Streamable HTTP transport — stateless mode", () => {
     expect(res.status).toBe(413);
     expect((await res.json()).error.message).toBe("Request body too large");
   }, 10000);
+
+  test("oversized chunked body returns 413 without a Content-Length", async () => {
+    const chunk = "x".repeat(64 * 1024);
+    let sent = 0;
+    const body = new ReadableStream({
+      pull(controller) {
+        if (sent > 8 * 1024 * 1024) {
+          controller.close();
+          return;
+        }
+        sent += chunk.length;
+        controller.enqueue(new TextEncoder().encode(chunk));
+      },
+    });
+
+    const res = await fetch(server.url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+      duplex: "half",
+    });
+
+    expect(res.status).toBe(413);
+    expect((await res.json()).error.message).toBe("Request body too large");
+  }, 15000);
 });
 
 describe("Streamable HTTP transport — auth and CORS", () => {
@@ -587,11 +625,7 @@ describe("Streamable HTTP transport — auth and CORS", () => {
 
   beforeAll(async () => {
     server = await spawnHttpServer({
-      args: [
-        "--http-stateless",
-        "--http-allow-origin",
-        "https://allowed.example",
-      ],
+      args: ["--http-allow-origin", "https://allowed.example"],
       env: { FASTLY_MCP_HTTP_AUTH_TOKEN: "s3cret" },
     });
   }, 15000);
@@ -687,7 +721,7 @@ describe("Streamable HTTP transport — host guard", () => {
   let server;
 
   beforeAll(async () => {
-    server = await spawnHttpServer({ args: ["--http-stateless"] });
+    server = await spawnHttpServer({});
   }, 15000);
 
   afterAll(async () => {
@@ -713,7 +747,6 @@ describe("Streamable HTTP transport — secret encryption", () => {
 
   beforeAll(async () => {
     server = await spawnHttpServer({
-      args: ["--http-stateless"],
       env: {
         FASTLY_MCP_ENCRYPT_SECRETS: "true",
         FASTLY_MCP_ENCRYPT_KEY: "0102030405060708090a0b0c0d0e0f10",

@@ -1,14 +1,11 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { isIP } from "node:net";
 import { networkInterfaces, hostname as osHostname } from "node:os";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import { toNodeHandler } from "@modelcontextprotocol/node";
+import { createMcpHandler } from "@modelcontextprotocol/server";
 
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
-const SESSION_HEADER = "mcp-session-id";
-const STATELESS_ALLOW = "POST, OPTIONS";
-const MAX_SESSIONS = 1000;
 
 export function isLoopbackHost(host) {
   if (!host) return false;
@@ -110,8 +107,6 @@ export function resolveTransport(cliArgs, env = {}) {
 }
 
 export function resolveHttpOptions({ cliArgs, env = {}, defaults = {} }) {
-  const transport = resolveTransport(cliArgs, env);
-
   const allowNetwork = !!cliArgs.httpAllowNetwork;
   const host = cliArgs.httpHost ?? (allowNetwork ? "0.0.0.0" : "127.0.0.1");
   const portRaw = String(
@@ -147,20 +142,14 @@ export function resolveHttpOptions({ cliArgs, env = {}, defaults = {} }) {
     );
   }
 
-  const stateless = !!cliArgs.httpStateless;
   if (cliArgs.httpJson && cliArgs.httpSse) {
     throw new Error(
       "--http-json and --http-sse are mutually exclusive. Pick one.",
     );
   }
-  let jsonResponse;
-  if (cliArgs.httpJson) {
-    jsonResponse = true;
-  } else if (cliArgs.httpSse) {
-    jsonResponse = false;
-  } else {
-    jsonResponse = stateless;
-  }
+  let responseMode = "auto";
+  if (cliArgs.httpJson) responseMode = "json";
+  else if (cliArgs.httpSse) responseMode = "sse";
 
   const originList = [
     ...(cliArgs.httpAllowOrigins ?? []),
@@ -169,13 +158,11 @@ export function resolveHttpOptions({ cliArgs, env = {}, defaults = {} }) {
   const allowedOrigins = new Set(originList.map((o) => o.toLowerCase()));
 
   return {
-    transport,
     host,
     port,
     path,
     authToken,
-    stateless,
-    jsonResponse,
+    responseMode,
     allowedOrigins,
     allowHostsExtras: cliArgs.httpAllowHosts ?? [],
     includeNetworkHosts: allowNetwork || !loopbackBind,
@@ -191,7 +178,7 @@ function writeJson(res, status, body, extraHeaders = {}) {
   res.end(JSON.stringify(body));
 }
 
-export function writeJsonError(res, status, message, id = null) {
+function writeJsonError(res, status, message, id = null) {
   writeJson(res, status, {
     jsonrpc: "2.0",
     error: { code: status, message },
@@ -215,39 +202,44 @@ function checkAuth(req, token) {
   return constantTimeEquals(m[1], token);
 }
 
+const TOO_LARGE = "Request body too large";
+
 async function readBody(req) {
+  const declared = Number(req.headers["content-length"]);
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
+    throw new Error(TOO_LARGE);
+  }
+
   const chunks = [];
   let total = 0;
-  let tooLarge = false;
   return new Promise((resolve, reject) => {
-    req.on("data", (chunk) => {
-      if (tooLarge) return;
+    const onData = (chunk) => {
       total += chunk.length;
       if (total > MAX_BODY_BYTES) {
-        tooLarge = true;
-        reject(new Error("Request body too large"));
+        // Stop consuming rather than draining in the background, or a chunked
+        // client can keep trickling bytes at us long after we answered 413.
+        req.off("data", onData);
+        req.pause();
+        reject(new Error(TOO_LARGE));
         return;
       }
       chunks.push(chunk);
-    });
-    req.on("end", () => {
-      if (!tooLarge) resolve(Buffer.concat(chunks));
-    });
+    };
+    req.on("data", onData);
+    req.on("end", () =>
+      resolve(chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, total)),
+    );
     req.on("error", reject);
   });
 }
 
-function applyCors(res, originHeader, allowedOrigins) {
-  if (!originHeader) return;
-  const origin = String(originHeader).toLowerCase();
-  if (!allowedOrigins.has(origin)) return;
+function applyCors(res, originHeader) {
   res.setHeader("Access-Control-Allow-Origin", originHeader);
   res.setHeader("Vary", "Origin");
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "Content-Type, Accept, Mcp-Session-Id, Authorization, Last-Event-ID",
+    "Content-Type, Accept, Authorization, Last-Event-ID, Mcp-Method, Mcp-Name",
   );
-  res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
 }
 
@@ -258,158 +250,40 @@ export async function startHttp(createMcpServer, { cliArgs, env, version }) {
     port,
     path,
     authToken,
-    stateless,
-    jsonResponse,
+    responseMode,
     allowedOrigins,
     allowHostsExtras,
     includeNetworkHosts,
   } = opts;
 
-  const sessions = new Map();
+  const logError = (err) => {
+    process.stderr.write(`[fastly-mcp] ${err?.message ?? err}\n`);
+  };
+
+  const mcpHandler = createMcpHandler(() => createMcpServer(), {
+    legacy: "stateless",
+    responseMode,
+    onerror: logError,
+  });
+  const handleMcp = toNodeHandler(mcpHandler, { onerror: logError });
+
   let allowedHosts = buildAllowedHosts({
     port,
     extra: allowHostsExtras,
     includeNetwork: includeNetworkHosts,
   });
 
-  function closeSession(sessionId, { skipTransport = false } = {}) {
-    const entry = sessions.get(sessionId);
-    if (!entry) return Promise.resolve();
-    sessions.delete(sessionId);
-    const tasks = [Promise.resolve().then(() => entry.mcp.close())];
-    if (!skipTransport) {
-      tasks.push(Promise.resolve().then(() => entry.transport.close()));
-    }
-    return Promise.allSettled(tasks);
-  }
-
   function safe(handler) {
     return async (req, res, ...rest) => {
       try {
         await handler(req, res, ...rest);
       } catch (err) {
+        logError(err);
         if (!res.headersSent && !res.writableEnded) {
           writeJsonError(res, 500, err.message ?? "Internal error");
         }
       }
     };
-  }
-
-  function requireSession(req, res) {
-    const sessionId = req.headers[SESSION_HEADER];
-    if (typeof sessionId !== "string" || !sessions.has(sessionId)) {
-      writeJsonError(res, 404, "Unknown session");
-      return null;
-    }
-    return { sessionId, entry: sessions.get(sessionId) };
-  }
-
-  async function handleStatefulPost(req, res, parsedBody) {
-    const sessionId = req.headers[SESSION_HEADER];
-
-    if (typeof sessionId === "string" && sessions.has(sessionId)) {
-      const { transport } = sessions.get(sessionId);
-      await transport.handleRequest(req, res, parsedBody);
-      return;
-    }
-
-    if (sessionId) {
-      writeJsonError(res, 404, "Unknown session");
-      return;
-    }
-
-    if (!isInitializeRequest(parsedBody)) {
-      writeJsonError(
-        res,
-        400,
-        "Missing Mcp-Session-Id header. Send an initialize request first.",
-      );
-      return;
-    }
-
-    if (sessions.size >= MAX_SESSIONS) {
-      writeJsonError(res, 503, "Too many sessions");
-      return;
-    }
-
-    const mcp = createMcpServer();
-    let transport;
-    let registered = false;
-    transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => randomUUID(),
-      enableJsonResponse: jsonResponse,
-      onsessioninitialized: (id) => {
-        registered = true;
-        sessions.set(id, { mcp, transport });
-      },
-      onsessionclosed: (id) => {
-        closeSession(id, { skipTransport: true });
-      },
-    });
-
-    try {
-      await mcp.connect(transport);
-      await transport.handleRequest(req, res, parsedBody);
-    } catch (err) {
-      if (!registered) {
-        Promise.allSettled([
-          Promise.resolve().then(() => transport.close()),
-          Promise.resolve().then(() => mcp.close()),
-        ]);
-      }
-      throw err;
-    }
-  }
-
-  async function handleStatefulGet(req, res) {
-    const session = requireSession(req, res);
-    if (!session) return;
-    await session.entry.transport.handleRequest(req, res);
-  }
-
-  async function handleStatefulDelete(req, res) {
-    const session = requireSession(req, res);
-    if (!session) return;
-    await closeSession(session.sessionId);
-    if (!res.headersSent && !res.writableEnded) {
-      res.writeHead(204);
-      res.end();
-    }
-  }
-
-  async function handleStatelessPost(req, res, parsedBody) {
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: jsonResponse,
-    });
-    const mcp = createMcpServer();
-
-    let closed = false;
-    const cleanup = () => {
-      if (closed) return;
-      closed = true;
-      Promise.allSettled([
-        Promise.resolve().then(() => transport.close()),
-        Promise.resolve().then(() => mcp.close()),
-      ]);
-    };
-    res.on("close", cleanup);
-    res.on("finish", cleanup);
-
-    try {
-      await mcp.connect(transport);
-      await transport.handleRequest(req, res, parsedBody);
-    } catch (err) {
-      cleanup();
-      if (!res.headersSent && !res.writableEnded) {
-        writeJsonError(res, 500, err.message ?? "Internal error");
-      }
-    }
-  }
-
-  function methodNotAllowed(res, allow) {
-    res.writeHead(405, { Allow: allow });
-    res.end();
   }
 
   const handle = safe(async (req, res) => {
@@ -418,12 +292,11 @@ export async function startHttp(createMcpServer, { cliArgs, env, version }) {
 
     const originHeader = req.headers.origin;
     if (originHeader) {
-      const origin = String(originHeader).toLowerCase();
-      if (!allowedOrigins.has(origin)) {
+      if (!allowedOrigins.has(String(originHeader).toLowerCase())) {
         writeJsonError(res, 403, "Origin not allowed");
         return;
       }
-      applyCors(res, originHeader, allowedOrigins);
+      applyCors(res, originHeader);
     }
 
     if (method === "OPTIONS") {
@@ -440,14 +313,7 @@ export async function startHttp(createMcpServer, { cliArgs, env, version }) {
       return;
     }
 
-    const hostHeader = req.headers.host;
-    if (hostHeader) {
-      const hostKey = String(hostHeader).toLowerCase();
-      if (!allowedHosts.has(hostKey)) {
-        writeJsonError(res, 421, "Host not allowed");
-        return;
-      }
-    } else {
+    if (!allowedHosts.has(String(req.headers.host).toLowerCase())) {
       writeJsonError(res, 421, "Host not allowed");
       return;
     }
@@ -462,44 +328,30 @@ export async function startHttp(createMcpServer, { cliArgs, env, version }) {
       return;
     }
 
-    if (method === "POST") {
-      let bodyBuf;
+    if (method !== "POST") {
+      await handleMcp(req, res);
+      return;
+    }
+
+    let bodyBuf;
+    try {
+      bodyBuf = await readBody(req);
+    } catch (err) {
+      // Nothing will ever read what the client still has queued.
+      res.once("finish", () => req.destroy());
+      writeJsonError(res, 413, err.message ?? "Body read failed");
+      return;
+    }
+    let parsedBody;
+    if (bodyBuf.length > 0) {
       try {
-        bodyBuf = await readBody(req);
-      } catch (err) {
-        writeJsonError(res, 413, err.message ?? "Body read failed");
+        parsedBody = JSON.parse(bodyBuf.toString("utf8"));
+      } catch {
+        writeJsonError(res, 400, "Invalid JSON body");
         return;
       }
-      let parsedBody;
-      if (bodyBuf.length > 0) {
-        try {
-          parsedBody = JSON.parse(bodyBuf.toString("utf8"));
-        } catch {
-          writeJsonError(res, 400, "Invalid JSON body");
-          return;
-        }
-      }
-      if (stateless) {
-        await handleStatelessPost(req, res, parsedBody);
-      } else {
-        await handleStatefulPost(req, res, parsedBody);
-      }
-      return;
     }
-
-    if (method === "GET") {
-      if (stateless) return methodNotAllowed(res, STATELESS_ALLOW);
-      await handleStatefulGet(req, res);
-      return;
-    }
-
-    if (method === "DELETE") {
-      if (stateless) return methodNotAllowed(res, STATELESS_ALLOW);
-      await handleStatefulDelete(req, res);
-      return;
-    }
-
-    methodNotAllowed(res, "GET, POST, DELETE, OPTIONS");
+    await handleMcp(req, res, parsedBody);
   });
 
   const server = createServer(handle);
@@ -510,11 +362,7 @@ export async function startHttp(createMcpServer, { cliArgs, env, version }) {
     shuttingDown = true;
     process.stderr.write(`[fastly-mcp] Shutting down (${signal})\n`);
     server.close();
-    const closes = [];
-    for (const id of sessions.keys()) {
-      closes.push(closeSession(id));
-    }
-    await Promise.allSettled(closes);
+    await mcpHandler.close().catch(() => {});
     process.exit(0);
   }
   process.on("SIGINT", () => shutdown("SIGINT"));
@@ -540,7 +388,7 @@ export async function startHttp(createMcpServer, { cliArgs, env, version }) {
   const displayHost = reachableDisplayHost(host);
   process.stderr.write(
     `[fastly-mcp] Server started (http) version=${version} listening on http://${displayHost}:${boundPort}${path} ` +
-      `stateless=${stateless} json=${jsonResponse}\n`,
+      `response-mode=${responseMode}\n`,
   );
   if (displayHost !== host) {
     process.stderr.write(
