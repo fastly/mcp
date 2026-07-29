@@ -1,3 +1,10 @@
 [install]
 minimumReleaseAge = 259200
-minimumReleaseAgeExcludes = ["@fastly/mcp", "fastly"]
+minimumReleaseAgeExcludes = [
+  "@fastly/mcp",
+  "fastly",
+  "@modelcontextprotocol/server",
+  "@modelcontextprotocol/node",
+  "@modelcontextprotocol/core",
+  "@modelcontextprotocol/client",
+]
