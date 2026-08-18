@@ -276,8 +276,8 @@ export async function buildIndex(docsDir = DOCS_DIR) {
     );
   }
 
-  if (apiFiles.length !== 138) {
-    warnings.push(`Expected 138 Api.md files, found ${apiFiles.length}`);
+  if (apiFiles.length !== 139) {
+    warnings.push(`Expected 139 Api.md files, found ${apiFiles.length}`);
   }
 
   if (warnings.length > 0) {
