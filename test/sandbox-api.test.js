@@ -24,7 +24,11 @@ afterAll(async () => {
 
 function runSandbox(code, { fastlyApiToken, runtime = process.execPath } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(runtime, [ENTRY], {
+    const args =
+      runtime === process.execPath
+        ? [ENTRY]
+        : ["--experimental-vm-modules", ENTRY];
+    const child = spawn(runtime, args, {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, FASTLY_MCP_TEST_BASE_PATH: basePath },
     });

@@ -6,9 +6,13 @@ import { SANDBOX_PATH } from "../../src/tools/execute.js";
 
 const code = process.argv[2];
 
-const child = spawn(process.execPath, [SANDBOX_PATH], {
-  stdio: ["pipe", "pipe", "ignore"],
-});
+const child = spawn(
+  process.execPath,
+  ["--experimental-vm-modules", SANDBOX_PATH],
+  {
+    stdio: ["pipe", "pipe", "ignore"],
+  },
+);
 let stdout = "";
 child.stdout.on("data", (c) => {
   stdout += c.toString();

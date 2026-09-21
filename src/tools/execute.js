@@ -104,7 +104,10 @@ export async function execute(code) {
       childEnv.NODE_USE_SYSTEM_CA = process.env.NODE_USE_SYSTEM_CA;
     }
 
-    const child = spawn(process.execPath, [SANDBOX_PATH], {
+    const childArgs = process.versions.bun
+      ? [SANDBOX_PATH]
+      : ["--experimental-vm-modules", SANDBOX_PATH];
+    const child = spawn(process.execPath, childArgs, {
       stdio: ["pipe", "pipe", "pipe"],
       env: childEnv,
     });

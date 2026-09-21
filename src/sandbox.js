@@ -140,8 +140,21 @@ const context = vm.createContext(sandboxGlobals, {
 
 const installFacade = vm.runInContext(
   `
-  (bridge, apiClasses) => {
+  (bridge, apiClasses, isBun) => {
     Object.setPrototypeOf(globalThis, null);
+    Object.defineProperty(Error, "prepareStackTrace", {
+      value: undefined,
+      writable: false,
+      configurable: false,
+    });
+    // Bun leaks a host TypeError when redefining an immutable context global.
+    if (!isBun) {
+      Object.defineProperty(globalThis, "Error", {
+        value: Error,
+        writable: false,
+        configurable: false,
+      });
+    }
     const allowedGlobals = new Set([
       "globalThis", "Infinity", "NaN", "undefined",
       "eval", "isFinite", "isNaN", "parseFloat", "parseInt",
@@ -609,6 +622,9 @@ const installFacade = vm.runInContext(
         ).buffer,
       },
     };
+
+    const SandboxTypeError = TypeError;
+    return () => { throw new SandboxTypeError("import() is not available"); };
   }
 `,
   context,
@@ -687,10 +703,18 @@ function writeResultAndExit(out) {
 }
 
 try {
-  installFacade(hostBridge, apiClasses);
+  if (!process.versions.bun && typeof vm.SourceTextModule !== "function") {
+    throw new Error("Node sandbox requires --experimental-vm-modules");
+  }
+  const denyImport = installFacade(
+    hostBridge,
+    apiClasses,
+    Boolean(process.versions.bun),
+  );
   const wrapped = `(async () => {\n${code}\n})()`;
   const result = await vm.runInContext(wrapped, context, {
     filename: "user-code",
+    importModuleDynamically: denyImport,
   });
   writeResultAndExit({ ok: true, result: safeSerialize(result) });
 } catch (err) {

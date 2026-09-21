@@ -337,6 +337,30 @@ describe("execute", () => {
     expectFullLateRejectionResult(proc);
   }, 20000);
 
+  test("Node execution rejects imports with a context-owned error", () => {
+    const proc = runUnderNode(
+      NODE_EXECUTE_HARNESS_PATH,
+      `try {
+        await import("node:fs");
+        return { imported: true };
+      } catch (error) {
+        return {
+          local: error instanceof TypeError,
+          constructor: error.constructor.constructor === Function,
+          message: error.message,
+        };
+      }`,
+    );
+    expect(proc.status).toBe(0);
+    expect(JSON.parse(proc.stdout)).toEqual({
+      result: {
+        local: true,
+        constructor: true,
+        message: "import() is not available",
+      },
+    });
+  }, 20000);
+
   // safeSerialize shrinks a large return value before it can reach the
   // cap; only console text, which crosses the bridge verbatim, can drive
   // the output past it.
