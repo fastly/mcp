@@ -1,7 +1,54 @@
+import dns from "node:dns";
+import { isIP } from "node:net";
 import vm from "node:vm";
 import Fastly from "fastly";
 import { describeThrown } from "./errors.js";
 import { safeSerialize } from "./serializer.js";
+
+// Blocks sandboxed fetch() calls from reaching loopback, link-local (including
+// the 169.254.169.254 cloud metadata endpoint) and private network ranges, so
+// sandboxed code cannot use the host's fetch bridge to probe internal
+// infrastructure (CWE-918 SSRF).
+function isBlockedFetchAddress(address) {
+  const version = isIP(address);
+  if (version === 4) {
+    const [a, b] = address.split(".").map(Number);
+    return (
+      a === 127 ||
+      a === 10 ||
+      a === 0 ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168)
+    );
+  }
+  if (version === 6) {
+    const lower = address.toLowerCase();
+    return (
+      lower === "::1" ||
+      lower === "::" ||
+      lower.startsWith("fe80:") ||
+      lower.startsWith("fc") ||
+      lower.startsWith("fd") ||
+      lower.startsWith("::ffff:127.") ||
+      lower.startsWith("::ffff:169.254.")
+    );
+  }
+  return true;
+}
+
+async function assertSafeFetchUrl(rawUrl) {
+  const parsed = new URL(String(rawUrl));
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`Sandbox fetch protocol not allowed: ${parsed.protocol}`);
+  }
+  const { address } = await dns.promises.lookup(parsed.hostname);
+  if (isBlockedFetchAddress(address)) {
+    throw new Error(
+      `Sandbox fetch to this address is not allowed: ${parsed.hostname}`,
+    );
+  }
+}
 
 const input =
   typeof Bun !== "undefined"
@@ -94,6 +141,7 @@ async function hostBridge(kind, payload) {
         options.signal = controller.signal;
         activeFetches.set(fetchId, controller);
       }
+      await assertSafeFetchUrl(url);
       try {
         const response = await fetch(url, options);
         return JSON.stringify({
