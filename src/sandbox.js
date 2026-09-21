@@ -133,7 +133,7 @@ async function hostBridge(kind, payload) {
   }
 }
 
-const sandboxGlobals = {};
+const sandboxGlobals = Object.create(null);
 const context = vm.createContext(sandboxGlobals, {
   codeGeneration: { strings: false, wasm: false },
 });
@@ -141,6 +141,29 @@ const context = vm.createContext(sandboxGlobals, {
 const installFacade = vm.runInContext(
   `
   (bridge, apiClasses) => {
+    Object.setPrototypeOf(globalThis, null);
+    const allowedGlobals = new Set([
+      "globalThis", "Infinity", "NaN", "undefined",
+      "eval", "isFinite", "isNaN", "parseFloat", "parseInt",
+      "decodeURI", "decodeURIComponent", "encodeURI", "encodeURIComponent",
+      "escape", "unescape", "Object", "Function", "Boolean", "Symbol",
+      "Error", "AggregateError", "EvalError", "RangeError", "ReferenceError",
+      "SuppressedError", "SyntaxError", "TypeError", "URIError",
+      "Number", "BigInt", "Math", "Date", "String", "RegExp", "Array",
+      "Int8Array", "Uint8Array", "Uint8ClampedArray", "Int16Array", "Uint16Array",
+      "Int32Array", "Uint32Array", "Float16Array", "Float32Array", "Float64Array",
+      "BigInt64Array", "BigUint64Array", "Map", "Set", "WeakMap", "WeakSet",
+      "ArrayBuffer", "SharedArrayBuffer", "DataView", "Atomics", "JSON",
+      "Promise", "Proxy", "Reflect", "FinalizationRegistry", "WeakRef", "Iterator",
+      "DisposableStack", "AsyncDisposableStack", "Intl",
+    ]);
+    for (const name of Reflect.ownKeys(globalThis)) {
+      if (allowedGlobals.has(name)) continue;
+      if (!Reflect.deleteProperty(globalThis, name) || Reflect.has(globalThis, name)) {
+        throw new Error("Cannot remove unsupported sandbox global: " + String(name));
+      }
+    }
+
     let nextFetchId = 1;
     const invoke = async (kind, payload) => {
       const reply = JSON.parse(await bridge(kind, JSON.stringify(payload)));
@@ -591,7 +614,6 @@ const installFacade = vm.runInContext(
   context,
   { filename: "sandbox-facade" },
 );
-installFacade(hostBridge, apiClasses);
 
 function rewriteError(err, source) {
   const out = describeThrown(err);
@@ -665,6 +687,7 @@ function writeResultAndExit(out) {
 }
 
 try {
+  installFacade(hostBridge, apiClasses);
   const wrapped = `(async () => {\n${code}\n})()`;
   const result = await vm.runInContext(wrapped, context, {
     filename: "user-code",

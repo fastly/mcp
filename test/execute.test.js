@@ -283,11 +283,13 @@ describe("execute", () => {
     for (const t of result.result) expect(t).toBe("function");
   }, 10000);
 
-  test("WebAssembly is available", async () => {
+  test("ShadowRealm and WebAssembly are unavailable", async () => {
     const result = await execute(
-      "const m = new WebAssembly.Module(new Uint8Array([0,97,115,109,1,0,0,0])); return WebAssembly.Module.imports(m).length;",
+      "return [typeof ShadowRealm, typeof globalThis.ShadowRealm, typeof WebAssembly, typeof globalThis.WebAssembly];",
     );
-    expect(result).toEqual({ result: 0 });
+    expect(result).toEqual({
+      result: ["undefined", "undefined", "undefined", "undefined"],
+    });
   }, 10000);
 
   test("structuredClone deep-copies objects", async () => {
