@@ -5,7 +5,8 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
 import { parseArgs } from "./cli.js";
-import { resolveTransport, startHttp } from "./http.js";
+import { getExecutionRuntime } from "./execution-runtime.js";
+import { resolveHttpOptions, resolveTransport, startHttp } from "./http.js";
 import { buildIndex } from "./indexer.js";
 import { SecretShield } from "./secrets.js";
 import { execute } from "./tools/execute.js";
@@ -298,6 +299,15 @@ if (transportChoice !== "stdio" && transportChoice !== "http") {
   fail(
     `Unknown transport "${transportChoice}". Use --transport stdio or --transport http.`,
   );
+}
+
+try {
+  if (transportChoice === "http") {
+    resolveHttpOptions({ cliArgs, env: process.env });
+  }
+  getExecutionRuntime();
+} catch (err) {
+  fail(err.message);
 }
 
 if (transportChoice === "http") {

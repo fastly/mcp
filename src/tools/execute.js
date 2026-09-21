@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import { getExecutionRuntime } from "../execution-runtime.js";
 import { setKey } from "../serializer.js";
 
 export const SANDBOX_PATH = join(
@@ -95,21 +96,17 @@ export async function execute(code) {
     return { error: "code must be a non-empty string" };
   }
 
-  return new Promise((resolve) => {
-    const childEnv = {};
-    if (process.env.NODE_EXTRA_CA_CERTS) {
-      childEnv.NODE_EXTRA_CA_CERTS = process.env.NODE_EXTRA_CA_CERTS;
-    }
-    if (process.env.NODE_USE_SYSTEM_CA) {
-      childEnv.NODE_USE_SYSTEM_CA = process.env.NODE_USE_SYSTEM_CA;
-    }
+  let runtime;
+  try {
+    runtime = getExecutionRuntime();
+  } catch (error) {
+    return { error: error.message };
+  }
 
-    const childArgs = process.versions.bun
-      ? [SANDBOX_PATH]
-      : ["--experimental-vm-modules", SANDBOX_PATH];
-    const child = spawn(process.execPath, childArgs, {
+  return new Promise((resolve) => {
+    const child = spawn(runtime.executable, [...runtime.args, SANDBOX_PATH], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: childEnv,
+      env: runtime.env,
     });
 
     let stdout = "";

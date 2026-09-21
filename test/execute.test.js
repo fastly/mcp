@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { execute } from "../src/tools/execute.js";
-import { expectNoInternals } from "./helpers.js";
+import { expectNoInternals, startLocalServer } from "./helpers.js";
 
 const NODE_HARNESS_PATH = join(
   import.meta.dir,
@@ -428,8 +428,15 @@ describe("execute", () => {
     expect(result.error).toContain("timed out");
   }, 35000);
 
-  test("hung async (fetch-style) is killed by wall-clock timeout", async () => {
-    const result = await execute("await new Promise(() => {}); return 1;");
-    expect(result.error).toContain("timed out");
+  test("hung fetch is killed by wall-clock timeout", async () => {
+    const server = await startLocalServer(() => {});
+    try {
+      const result = await execute(
+        `await fetch(${JSON.stringify(server.url)}); return 1;`,
+      );
+      expect(result.error).toContain("timed out");
+    } finally {
+      await server.close();
+    }
   }, 40000);
 });
