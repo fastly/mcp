@@ -11,7 +11,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   getExecutionRuntime,
@@ -40,11 +40,11 @@ afterAll(() => {
   if (directory) rmSync(directory, { recursive: true, force: true });
 });
 
-function fromBun(path, extra = {}) {
+function fromBun(path, { env, ...extra } = {}) {
   return resolveExecutionRuntime({
     versions: { bun: Bun.version },
     executable: process.execPath,
-    env: { PATH: path },
+    env: { PATH: path, ...env },
     ...extra,
   });
 }
@@ -92,7 +92,7 @@ describe("execution runtime selection", () => {
 
   test("the default preflight caches its protected profile", () => {
     expect(getExecutionRuntime()).toBe(getExecutionRuntime());
-    expect(getExecutionRuntime({ requireNode: true }).name).toBe("node");
+    expect(getExecutionRuntime().name).toBe("node");
   });
 
   test("only absent Node permits a warned local Bun fallback", () => {
@@ -110,7 +110,7 @@ describe("execution runtime selection", () => {
     ).toThrow("Node.js is required for remote execution");
   });
 
-  test("cached Bun fallback warns once and cannot satisfy remote execution", () => {
+  test("a cached Bun fallback warns once", () => {
     const moduleUrl = pathToFileURL(
       join(ROOT, "src/execution-runtime.js"),
     ).href;
@@ -125,10 +125,7 @@ describe("execution runtime selection", () => {
           import { getExecutionRuntime } from ${JSON.stringify(moduleUrl)};
           const first = getExecutionRuntime();
           const second = getExecutionRuntime();
-          let remoteError;
-          try { getExecutionRuntime({requireNode:true}); }
-          catch (error) { remoteError = error.message; }
-          console.log(JSON.stringify({name:first.name,cached:first===second,remoteError}));
+          console.log(JSON.stringify({name:first.name,cached:first===second}));
         `,
       ],
       {
@@ -145,7 +142,6 @@ describe("execution runtime selection", () => {
     expect(JSON.parse(child.stdout)).toEqual({
       name: "bun",
       cached: true,
-      remoteError: "Node.js is required for remote execution",
     });
     expect(child.stderr.trim().split("\n")).toHaveLength(1);
     expect(child.stderr).toContain("reduced isolation");
@@ -261,15 +257,21 @@ describe("execution runtime selection", () => {
     const certificate = join(directory, "extra-ca.pem");
     writeFileSync(certificate, "");
     const profile = fromBun(nodeDirectory, {
-      env: { PATH: nodeDirectory, NODE_EXTRA_CA_CERTS: certificate },
+      env: { NODE_EXTRA_CA_CERTS: certificate },
     });
     expect(profile.env.NODE_EXTRA_CA_CERTS).toBe(certificate);
     expect(profile.args).toContain(`--allow-fs-read=${certificate}`);
     expect(profile.args).not.toContain(`--allow-fs-read=${directory}`);
+
+    // Children run from the installation directory, so a relative path must
+    // be made absolute before it is handed down.
+    const relativeProfile = fromBun(nodeDirectory, {
+      env: { NODE_EXTRA_CA_CERTS: relative(process.cwd(), certificate) },
+    });
+    expect(relativeProfile.env.NODE_EXTRA_CA_CERTS).toBe(certificate);
+    expect(relativeProfile.args).toContain(`--allow-fs-read=${certificate}`);
     expect(() =>
-      fromBun(nodeDirectory, {
-        env: { PATH: nodeDirectory, NODE_EXTRA_CA_CERTS: directory },
-      }),
+      fromBun(nodeDirectory, { env: { NODE_EXTRA_CA_CERTS: directory } }),
     ).toThrow("NODE_EXTRA_CA_CERTS must name a certificate file");
   });
 

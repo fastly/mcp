@@ -3,7 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { expectNoInternals, startLocalServer } from "./helpers.js";
 
-const ENTRY = join(import.meta.dir, "fixtures/sandbox-with-local-api.mjs");
+const ENTRY = join(import.meta.dir, "fixtures/sandbox-with-mock-fastly.mjs");
 
 let server;
 let basePath;
@@ -30,7 +30,7 @@ function runSandbox(code, { fastlyApiToken, runtime = process.execPath } = {}) {
         : ["--experimental-vm-modules", ENTRY];
     const child = spawn(runtime, args, {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, FASTLY_MCP_TEST_BASE_PATH: basePath },
+      env: { ...process.env, FASTLY_MCP_TEST_API: basePath },
     });
 
     let stdout = "";

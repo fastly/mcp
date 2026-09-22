@@ -1,0 +1,60 @@
+# systemd unit for a native installation on a dedicated Linux VM.
+#
+# Create the service user first:
+#   useradd --system --no-create-home --shell /usr/sbin/nologin fastly-mcp
+# Install the package under /opt/fastly-mcp, owned by root and not writable by the service user.
+[Unit]
+Description=Fastly MCP remote HTTP service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=fastly-mcp
+Group=fastly-mcp
+WorkingDirectory=/opt/fastly-mcp
+ExecStart=/usr/local/bin/bun src/index.js --remote-http \
+    --http-allow-host mcp.example.com \
+    --http-trusted-proxy 127.0.0.1 \
+    --remote-max-executions 4 \
+    --remote-execution-memory 512 \
+    --audit-log /var/log/fastly-mcp/audit.jsonl
+Restart=on-failure
+RestartSec=2
+# Exit status 2 means the server refused to start (Node missing, bad flags).
+# Restarting cannot fix that.
+RestartPreventExitStatus=2
+
+# No Fastly or cloud credentials belong in this environment.
+# Executions run as the same user and can read the server's /proc/<pid>/environ.
+Environment=BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 DO_NOT_TRACK=1
+UnsetEnvironment=FASTLY_API_TOKEN FASTLY_API_KEY NODE_OPTIONS BUN_OPTIONS BUN_INSPECT
+
+# Enough for four executions of 512 MiB plus the server.
+MemoryMax=3G
+MemorySwapMax=0
+CPUQuota=400%
+TasksMax=256
+# When the kernel kills an execution for memory, keep the service running.
+OOMPolicy=continue
+
+LogsDirectory=fastly-mcp
+LogsDirectoryMode=0750
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# Cloud metadata endpoints, denied for this unit whatever the host firewall says.
+IPAddressDeny=169.254.169.254 fd00:ec2::254
+
+[Install]
+WantedBy=multi-user.target

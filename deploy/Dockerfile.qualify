@@ -1,0 +1,17 @@
+# Qualification image: the production image plus what the Linux hardening tests need.
+# Never deploy it.
+#
+# The tests use pgrep, which the slim base image does not ship.
+# The test directory is not copied in.
+# deploy/qualify-docker.sh mounts it read-only, so the code under test is exactly what the production image has.
+ARG BASE=fastly-mcp:prod
+FROM ${BASE}
+
+USER 0
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends procps \
+    && rm -rf /var/lib/apt/lists/*
+USER 10001:10001
+
+ENTRYPOINT ["bun", "test"]
+CMD ["test/linux-hardening.test.js"]

@@ -1,0 +1,3 @@
+# Passed with --config to Bun execution children, so a bunfig.toml found
+# elsewhere cannot add preloads or change how the sandbox loads.
+telemetry = false

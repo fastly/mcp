@@ -1,0 +1,298 @@
+import { McpServer } from "@modelcontextprotocol/server";
+import { z } from "zod";
+import { AdmissionError } from "./admission.js";
+import { MarkerError, RemoteSecretShield } from "./secrets.js";
+import { execute } from "./tools/execute.js";
+import { inspect } from "./tools/inspect.js";
+import { search } from "./tools/search.js";
+
+// Queue wait, the 30 s execution window and teardown all have to fit.
+const REMOTE_REQUEST_DEADLINE_MS = 45_000;
+
+const SEARCH_DESCRIPTION =
+  "Find Fastly API methods by keyword, class name, method name, or HTTP path. Each result includes a ready-to-use `usage` snippet you can pass directly to `execute`. For simple calls, go straight from search to execute. Use `inspect` only when you need full parameter docs.";
+
+const SEARCH_INPUT_SCHEMA = z.object({
+  query: z
+    .string()
+    .describe(
+      "A keyword (e.g. 'purge'), an API class name (e.g. 'PurgeApi'), a method name (e.g. 'createBackend'), or an HTTP path fragment (e.g. '/service/{service_id}/purge')",
+    ),
+});
+
+const EXECUTE_DESCRIPTION = `Run JavaScript in a sandbox with the Fastly API client pre-authenticated.
+
+If you already know the method, call it directly. Otherwise, use \`search\` first and copy its \`usage\` snippet.
+
+You MUST use \`return\` to produce output. API methods return values directly (arrays, objects), not wrapped in \`.result\`. Every Fastly.*Api class is pre-instantiated as a camelCase global: \`serviceApi\`, \`purgeApi\`, \`backendApi\`, etc.
+
+Example: \`return await serviceApi.listServices();\``;
+
+const REMOTE_EXECUTE_NOTE = `
+
+This server is remote: \`fetch\` is not available and nothing can read or write files, so use the Fastly API globals for every request. Uploading a Compute package (\`packageApi.putPackage\`) is not supported here.`;
+
+const EXECUTE_INPUT_SCHEMA = z.object({
+  code: z
+    .string()
+    .describe(
+      "JavaScript code to execute. `Fastly` is available globally. Auth is pre-configured. Use `return` to get results.",
+    ),
+});
+
+const INSPECT_DESCRIPTION =
+  "Get full documentation for a specific API method, including parameters, return type, and example code. Use this after search to understand how to call a method and what it returns. Accepts a method name (e.g. 'listServices') or ClassName.methodName (e.g. 'ServiceApi.listServices').";
+
+const INSPECT_INPUT_SCHEMA = z.object({
+  method: z
+    .string()
+    .describe(
+      "Method name (e.g. 'listServices') or ClassName.methodName (e.g. 'ServiceApi.listServices')",
+    ),
+});
+
+function textResult(result, isError) {
+  return {
+    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    isError,
+  };
+}
+
+const jsonResult = (result) => textResult(result, !result.ok);
+const executionResult = (result) =>
+  textResult(result, "error" in result && !("result" in result));
+
+function walkStrings(value, fn, path = []) {
+  if (typeof value === "string") return fn(value, path);
+  if (Array.isArray(value)) {
+    return value.map((item, i) => walkStrings(item, fn, [...path, i]));
+  }
+  if (value !== null && typeof value === "object") {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = walkStrings(v, fn, [...path, k]);
+    }
+    return out;
+  }
+  return value;
+}
+
+function shieldResponse(response, shield) {
+  if (!response.content) return response;
+  response.content = response.content.map((block) => {
+    if (block.type === "text" && typeof block.text === "string") {
+      return { ...block, text: shield.encrypt(block.text) };
+    }
+    if (block.type === "resource" && block.resource?.text) {
+      return {
+        ...block,
+        resource: {
+          ...block.resource,
+          text: shield.encrypt(block.resource.text),
+        },
+      };
+    }
+    return block;
+  });
+  return response;
+}
+
+/**
+ * Wraps tool handlers so secrets are decrypted on the way in and encrypted
+ * on the way out.
+ * `openShield` returns the shield for one call and how to let go of it.
+ * A local server shares its process-wide shield; a remote one derives a
+ * shield from the caller's token and destroys it afterwards.
+ */
+function makeShielded(openShield) {
+  return function shielded(handler) {
+    return async (params, extra) => {
+      const opened = openShield();
+      if (!opened) return handler(params, extra);
+      const { shield, close } = opened;
+
+      try {
+        const decrypted = walkStrings(params, (text, path) =>
+          shield.decrypt(text, path.join(".")),
+        );
+        const response = await handler(decrypted, extra);
+        try {
+          return shieldResponse(response, shield);
+        } catch {
+          // Never fall back to plaintext: a result whose secrets cannot be
+          // encrypted is withheld as a whole.
+          return executionResult({
+            error:
+              "The result was withheld because a secret in it could not be encrypted. Return less data, or leave the secret out of the result.",
+          });
+        }
+      } catch (error) {
+        if (!(error instanceof MarkerError)) throw error;
+        return executionResult({ error: error.message, hint: error.hint });
+      } finally {
+        close();
+      }
+    };
+  };
+}
+
+function remoteExecutor({ apiToken, identity, requestId, signal }, services) {
+  const { admission, audit, validator, executionProfile } = services;
+
+  return async (code, toolSignal) => {
+    const record = {
+      requestId,
+      tokenId: identity.tokenId,
+      customerId: identity.customerId ?? undefined,
+      executionRuntime: executionProfile?.name ?? "none",
+      executionRuntimeVersion: executionProfile?.version ?? "none",
+    };
+    const finish = (result, fields) => {
+      audit.emit("execution", { ...record, ...fields });
+      return result;
+    };
+
+    if (!identity.customerId) {
+      return finish(
+        {
+          error:
+            "Execution is unavailable for this Fastly API token: it cannot read the customer account it belongs to, which this server needs to apply per-customer limits.",
+          hint: "Use a token that can read /current_customer. search and inspect keep working with this one.",
+        },
+        { decision: "refused", outcome: "identity_unavailable" },
+      );
+    }
+
+    const deadline = AbortSignal.any(
+      [
+        signal,
+        toolSignal,
+        AbortSignal.timeout(REMOTE_REQUEST_DEADLINE_MS),
+      ].filter(Boolean),
+    );
+    const queuedAt = performance.now();
+    let release;
+    try {
+      release = await admission.acquire({
+        customerId: identity.customerId,
+        tokenId: identity.tokenId,
+        signal: deadline,
+      });
+    } catch (error) {
+      if (!(error instanceof AdmissionError)) throw error;
+      return finish(
+        { error: error.message },
+        {
+          decision: "refused",
+          outcome: error.category,
+          queueMs: Math.round(performance.now() - queuedAt),
+        },
+      );
+    }
+
+    const startedAt = performance.now();
+    try {
+      const result = await execute(code, {
+        apiToken,
+        remote: true,
+        signal: deadline,
+        profile: executionProfile,
+      });
+      // Fastly saying 401 to the token itself means our cached admission is
+      // stale; a 403 may only be a scope problem.
+      if (result.status === 401) validator.evict(apiToken);
+      return finish(result, {
+        decision: "admitted",
+        outcome: result.outcome ?? ("result" in result ? "ok" : "error"),
+        queueMs: Math.round(startedAt - queuedAt),
+        executionMs: Math.round(performance.now() - startedAt),
+      });
+    } finally {
+      release();
+    }
+  };
+}
+
+export function registerTools(
+  mcp,
+  { shield, index, apiToken, remote, executionProfile },
+) {
+  const shielded = makeShielded(
+    remote
+      ? () => {
+          const fresh = new RemoteSecretShield(apiToken);
+          return { shield: fresh, close: () => fresh.destroy() };
+        }
+      : () => shield && { shield, close: () => {} },
+  );
+  const runRemotely = remote
+    ? remoteExecutor({ apiToken, ...remote.context }, remote.services)
+    : undefined;
+
+  mcp.registerTool(
+    "search",
+    { description: SEARCH_DESCRIPTION, inputSchema: SEARCH_INPUT_SCHEMA },
+    shielded(async ({ query }) => jsonResult(search(index, query))),
+  );
+
+  mcp.registerTool(
+    "execute",
+    {
+      description: remote
+        ? EXECUTE_DESCRIPTION + REMOTE_EXECUTE_NOTE
+        : EXECUTE_DESCRIPTION,
+      inputSchema: EXECUTE_INPUT_SCHEMA,
+    },
+    shielded(async ({ code }, extra) => {
+      const { outcome: _internal, ...result } = runRemotely
+        ? await runRemotely(code, extra?.mcpReq?.signal)
+        : await execute(code, {
+            apiToken,
+            signal: extra?.mcpReq?.signal,
+            profile: executionProfile,
+          });
+      return executionResult(result);
+    }),
+  );
+
+  mcp.registerTool(
+    "inspect",
+    { description: INSPECT_DESCRIPTION, inputSchema: INSPECT_INPUT_SCHEMA },
+    shielded(async ({ method }) =>
+      jsonResult(inspect(index, method, { remote: !!remote })),
+    ),
+  );
+}
+
+// The tool list never changes and does not depend on who is asking, which is
+// what makes `public` safe.
+const LIST_CACHE_HINT = { ttlMs: 3_600_000, cacheScope: "public" };
+
+/**
+ * Builds the MCP server for one connection or, over HTTP, one request.
+ * Every credential arrives here explicitly: `apiToken` is the process token
+ * for a local server and the caller's Fastly-Key for a remote one.
+ */
+export function createMcpServer({
+  version,
+  index,
+  shield,
+  apiToken,
+  remote,
+  executionProfile,
+}) {
+  if (remote && (!apiToken || !remote.context?.identity)) {
+    throw new Error("Remote servers need a validated caller");
+  }
+  const mcp = new McpServer(
+    { name: "@fastly/mcp", version },
+    {
+      cacheHints: {
+        "tools/list": LIST_CACHE_HINT,
+        "server/discover": LIST_CACHE_HINT,
+      },
+    },
+  );
+  registerTools(mcp, { shield, index, apiToken, remote, executionProfile });
+  return mcp;
+}

@@ -145,7 +145,7 @@ Swival can also read the generic JSON block from `.swival/mcp.json`.
 
 By default the server speaks MCP over stdio, which is what every desktop and CLI client expects.
 
-To share one server across clients or reach it remotely, start it in HTTP mode:
+To share one Fastly API token across trusted clients, start the server in HTTP mode:
 
 ```sh
 bunx -p @fastly/mcp fastly-mcp --transport http
@@ -170,46 +170,6 @@ The exact shape varies by client; check your client's documentation for the stre
 
 Nothing is kept between requests, so the server sits behind a load balancer without any sticky-session configuration.
 
-### Security notes
-
-Code runs in Node when it's installed, even if Bun runs the server.
-
-With Node, file access is limited to the server installation and certificate files.
-
-Without Node, local use falls back to Bun with a warning.
-But if Node is installed and is broken or unsupported, the server won't start.
-
-Even when you run the server locally, malicious text in Fastly API responses can trick an assistant into running harmful code.
-
-If that code escapes the sandbox, it could reach your files or other users' tokens, so only share a server with people you trust.
-
-Bun 1.3.11 has known escapes, so planned remote execution will require Node.
-See [SECURITY.md](SECURITY.md#execution-trust-boundary) for details.
-
-Whoever runs a remote server can also read and use any Fastly token you send it.
-
-The HTTP server also has a few safeguards:
-
-- The server binds to `127.0.0.1` unless you say otherwise.
-
-  Any non-loopback bind (a specific LAN address, `0.0.0.0`, or `--http-allow-network`) refuses to start without an auth token.
-
-- Set the auth token through `FASTLY_MCP_HTTP_AUTH_TOKEN` rather than `--http-auth-token`.
-
-  The CLI flag works, but it lands in shell history and shows up in `ps`.
-
-  With the token set, every request except `OPTIONS` preflights and `GET /healthz` must carry `Authorization: Bearer <token>`.
-
-- Requests with an `Origin` header that is not on the allowlist (set with `--http-allow-origin`, repeatable, or `FASTLY_MCP_HTTP_ALLOW_ORIGIN` as a comma-separated list) get `403`.
-
-  Browser-based clients have to opt in. Native clients and `curl` do not send `Origin` and pass through.
-
-- The `Host` header is also validated.
-
-  Off-loopback binds will reject requests whose `Host` does not match the bound interface, which is a small but useful guard against DNS rebinding.
-
-- There is no built-in TLS. Run the server behind a reverse proxy (or an ssh tunnel) when you want HTTPS.
-
 ### `Authorization: Bearer` on the loopback
 
 You can set `FASTLY_MCP_HTTP_AUTH_TOKEN` even on a loopback bind.
@@ -219,6 +179,11 @@ There is no security harm in doing so, and it makes the configuration portable t
 ### Run `--help` for the full flag list
 
 Every flag described above shows up in `bunx -p @fastly/mcp fastly-mcp --help`.
+
+## Running a remote service for several users
+
+Use `--remote-http` when each caller should supply their own Fastly API token.
+The [remote HTTP deployment guide](REMOTE-HTTP.md) covers credentials, client configuration, HTTPS proxies, Docker, systemd, sizing, logging, and deployment tests.
 
 ## Using the server well
 
@@ -256,7 +221,9 @@ Large Fastly responses are summarized automatically, but targeted calls are easi
 
 Fastly API responses can contain credentials, keys, or other sensitive values.
 
-By default, the server returns API output to the MCP client as it came back from Fastly.
+In local mode, the server returns API output to the MCP client as it came back from Fastly by default.
+
+Remote mode always encrypts recognized secrets with a key derived from the caller's token, as described in the [remote HTTP guide](REMOTE-HTTP.md#remote-mode-and-caller-credentials).
 
 If you want an additional layer of protection before tool output reaches the model, enable secret encryption.
 
@@ -299,7 +266,7 @@ You can also enable it with an environment variable:
 }
 ```
 
-By default, the encryption key is generated when the server starts.
+For local encryption, the key is generated when the server starts by default.
 
 Because decryption uses a table built in memory, only the server session that encrypted a value can recover the original secret.
 
@@ -316,7 +283,7 @@ You should still use least-privilege Fastly tokens and avoid asking the assistan
 
 ## Troubleshooting
 
-If the server starts but Fastly API calls fail, check that `FASTLY_API_TOKEN` is set in the environment seen by the MCP server.
+For a local server, if Fastly API calls fail, check that `FASTLY_API_TOKEN` is set in the environment seen by the MCP server.
 
 Search and inspect still work without a token because they use bundled documentation, but real API calls need one.
 
