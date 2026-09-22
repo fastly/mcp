@@ -91,7 +91,7 @@ function smartSummarize(value) {
   return { value, wasTruncated: false };
 }
 
-export async function execute(code) {
+export async function execute(code, { apiToken } = {}) {
   if (typeof code !== "string" || !code.trim()) {
     return { error: "code must be a non-empty string" };
   }
@@ -197,9 +197,7 @@ export async function execute(code) {
       });
     });
 
-    child.stdin.write(
-      JSON.stringify({ code, fastlyApiToken: process.env.FASTLY_API_TOKEN }),
-    );
+    child.stdin.write(JSON.stringify({ code, fastlyApiToken: apiToken }));
     child.stdin.end();
   });
 }
