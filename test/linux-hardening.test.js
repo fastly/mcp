@@ -167,7 +167,8 @@ describe.skipIf(!LINUX)("remote execution profile", () => {
       { memoryMb: 64, heapMb: 32 },
       { ...resolvePrlimit(OS_LIMITS), dataBytes: 64 * 1024 * 1024 },
     );
-    const result = await executeWith(tiny)("return 1;");
+    // Leave time for the parent to kill and reap a child that stalls at startup.
+    const result = await executeWith(tiny)("return 1;", { timeoutMs: 5_000 });
     expect(result.result).toBeUndefined();
     expect(result.outcome).toBeDefined();
   }, 30000);
