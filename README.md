@@ -195,7 +195,7 @@ Large Fastly responses are summarized automatically, but targeted calls are easi
 
 Fastly API responses can contain credentials, keys, or other sensitive values.
 In local mode, the server returns API output to the MCP client as it came back from Fastly by default.
-Remote mode always encrypts recognized secrets with a key derived from the caller's token, as described in the [remote HTTP guide](REMOTE-HTTP.md#remote-mode-and-caller-credentials).
+Remote mode always encrypts recognized secrets with a key derived from the caller's token, as described in the [remote HTTP guide](REMOTE-HTTP.md#connect-your-client).
 
 If you want an additional layer of protection before tool output reaches the model, enable secret encryption.
 When encryption is enabled, recognized token formats are replaced with encrypted stand-ins before they are returned to the assistant.
