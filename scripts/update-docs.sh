@@ -26,5 +26,6 @@ fi
 echo "Copying $count Api.md files to $DEST..."
 rm -rf "$DEST"
 cp -r docs "$DEST"
+find "$DEST" -type f -name '*.md' -exec perl -pi -e 's/[ \t]+$//' {} +
 
 echo "Done. Run 'bun test' to verify the index still builds."
