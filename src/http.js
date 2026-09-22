@@ -242,7 +242,9 @@ function checkAuth(req, token) {
 
 const TOO_LARGE = "Request body too large";
 
-async function readBody(req) {
+const TOO_SLOW = "Request body took too long to arrive";
+
+async function readBody(req, { timeoutMs } = {}) {
   const declared = Number(req.headers["content-length"]);
   if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
     throw new Error(TOO_LARGE);
@@ -251,23 +253,33 @@ async function readBody(req) {
   const chunks = [];
   let total = 0;
   return new Promise((resolve, reject) => {
+    const stop = (error) => {
+      clearTimeout(timer);
+      // Stop consuming rather than draining in the background, or a chunked
+      // client can keep trickling bytes at us long after we answered.
+      req.off("data", onData);
+      req.pause();
+      reject(error);
+    };
     const onData = (chunk) => {
       total += chunk.length;
       if (total > MAX_BODY_BYTES) {
-        // Stop consuming rather than draining in the background, or a chunked
-        // client can keep trickling bytes at us long after we answered 413.
-        req.off("data", onData);
-        req.pause();
-        reject(new Error(TOO_LARGE));
+        stop(new Error(TOO_LARGE));
         return;
       }
       chunks.push(chunk);
     };
+    // An authenticated caller could otherwise hold a request open for as
+    // long as it likes by sending its body one byte at a time.
+    const timer = timeoutMs
+      ? setTimeout(() => stop(new Error(TOO_SLOW)), timeoutMs)
+      : undefined;
     req.on("data", onData);
-    req.on("end", () =>
-      resolve(chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, total)),
-    );
-    req.on("error", reject);
+    req.on("end", () => {
+      clearTimeout(timer);
+      resolve(chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, total));
+    });
+    req.on("error", stop);
   });
 }
 
@@ -281,7 +293,41 @@ function applyCors(res, originHeader) {
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
 }
 
-export async function startHttp(createMcpServer, { cliArgs, env, version }) {
+const NO_STORE = "no-store, no-transform";
+const REQUEST_BODY_TIMEOUT_MS = 30_000;
+
+// The SDK puts its own `no-cache` on event streams, and the adapter's
+// `writeHead` overrides whatever was set on the Node response before, so
+// `no-store` has to be forced on the handler's own responses.
+function withNoStore(handler) {
+  return {
+    fetch: async (request, options) => {
+      const response = await handler.fetch(request, options);
+      const headers = new Headers(response.headers);
+      headers.set("Cache-Control", NO_STORE);
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      });
+    },
+  };
+}
+
+/** A signal that aborts if the client hangs up before the response is done. */
+export function disconnectSignal(res) {
+  const controller = new AbortController();
+  res.on("close", () => {
+    if (!res.writableFinished)
+      controller.abort(new Error("Client disconnected"));
+  });
+  return controller.signal;
+}
+
+export async function startHttp(
+  createMcpServer,
+  { cliArgs, env, version, onShutdown },
+) {
   const opts = resolveHttpOptions({ cliArgs, env });
   const {
     host,
@@ -303,7 +349,9 @@ export async function startHttp(createMcpServer, { cliArgs, env, version }) {
     responseMode,
     onerror: logError,
   });
-  const handleMcp = toNodeHandler(mcpHandler, { onerror: logError });
+  const handleMcp = toNodeHandler(withNoStore(mcpHandler), {
+    onerror: logError,
+  });
 
   let allowedHosts = buildAllowedHosts({
     host,
@@ -325,9 +373,32 @@ export async function startHttp(createMcpServer, { cliArgs, env, version }) {
     };
   }
 
+  async function readJsonBody(req, res) {
+    let bodyBuf;
+    try {
+      bodyBuf = await readBody(req, { timeoutMs: REQUEST_BODY_TIMEOUT_MS });
+    } catch (err) {
+      // Nothing will ever read what the client still has queued.
+      res.once("finish", () => req.destroy());
+      const slow = err.message === TOO_SLOW;
+      writeJsonError(res, slow ? 408 : 413, err.message ?? "Body read failed", {
+        Connection: "close",
+      });
+      return { failed: true };
+    }
+    if (bodyBuf.length === 0) return {};
+    try {
+      return { body: JSON.parse(bodyBuf.toString("utf8")) };
+    } catch {
+      writeJsonError(res, 400, "Invalid JSON body");
+      return { failed: true };
+    }
+  }
+
   const handle = safe(async (req, res) => {
     const method = req.method ?? "GET";
     const reqPath = new URL(req.url ?? "/", "http://h").pathname;
+    res.setHeader("Cache-Control", NO_STORE);
 
     const originHeader = req.headers.origin;
     if (originHeader) {
@@ -374,28 +445,16 @@ export async function startHttp(createMcpServer, { cliArgs, env, version }) {
       return;
     }
 
-    let bodyBuf;
-    try {
-      bodyBuf = await readBody(req);
-    } catch (err) {
-      // Nothing will ever read what the client still has queued.
-      res.once("finish", () => req.destroy());
-      writeJsonError(res, 413, err.message ?? "Body read failed");
-      return;
-    }
-    let parsedBody;
-    if (bodyBuf.length > 0) {
-      try {
-        parsedBody = JSON.parse(bodyBuf.toString("utf8"));
-      } catch {
-        writeJsonError(res, 400, "Invalid JSON body");
-        return;
-      }
-    }
-    await handleMcp(req, res, parsedBody);
+    const read = await readJsonBody(req, res);
+    if (read.failed) return;
+    await handleMcp(req, res, read.body);
   });
 
   const server = createServer(handle);
+  // Bun ignores these Node timeouts, which is why readBody has its own
+  // deadline too.
+  server.headersTimeout = REQUEST_BODY_TIMEOUT_MS;
+  server.requestTimeout = REQUEST_BODY_TIMEOUT_MS * 2;
 
   let shuttingDown = false;
   async function shutdown(signal) {
@@ -404,6 +463,7 @@ export async function startHttp(createMcpServer, { cliArgs, env, version }) {
     process.stderr.write(`[fastly-mcp] Shutting down (${signal})\n`);
     server.close();
     await mcpHandler.close().catch(() => {});
+    await onShutdown?.();
     process.exit(0);
   }
   process.on("SIGINT", () => shutdown("SIGINT"));
