@@ -1,9 +1,13 @@
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { isIP } from "node:net";
 import { networkInterfaces, hostname as osHostname } from "node:os";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import { createMcpHandler } from "@modelcontextprotocol/server";
+import { methodLabel, toolLabel } from "./audit.js";
+import { rateLimitKey, resolveClientAddress } from "./client-address.js";
+import { RemoteAuthError, readFastlyKey } from "./remote-auth.js";
+import { requestContext } from "./request-context.js";
 
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
@@ -131,12 +135,50 @@ function parseCsv(value) {
     .filter(Boolean);
 }
 
-export function resolveTransport(cliArgs, env = {}) {
-  return (
-    cliArgs.transport ??
-    env.FASTLY_MCP_TRANSPORT ??
-    "stdio"
-  ).toLowerCase();
+const REMOTE_ONLY_FLAGS = [
+  ["httpTrustedProxies", "--http-trusted-proxy"],
+  ["auditLog", "--audit-log"],
+  ["remoteMaxExecutions", "--remote-max-executions"],
+  ["remoteExecutionMemory", "--remote-execution-memory"],
+];
+
+/**
+ * Transport and credential policy are separate choices.
+ * `--transport http` still serves with the process's own token; only
+ * `--remote-http` switches to a Fastly-Key per request.
+ */
+export function resolveMode(cliArgs, env = {}) {
+  const explicit = (
+    cliArgs.transport ?? env.FASTLY_MCP_TRANSPORT
+  )?.toLowerCase();
+
+  if (!cliArgs.remoteHttp) {
+    for (const [name, flag] of REMOTE_ONLY_FLAGS) {
+      const value = cliArgs[name];
+      if (Array.isArray(value) ? value.length > 0 : value !== undefined) {
+        throw new Error(`${flag} only applies to --remote-http.`);
+      }
+    }
+    return { transport: explicit ?? "stdio", remote: false };
+  }
+
+  if (explicit !== undefined && explicit !== "http") {
+    throw new Error(
+      `--remote-http serves HTTP only, but the transport is set to "${explicit}". ` +
+        "Remove --transport and FASTLY_MCP_TRANSPORT, or set them to http.",
+    );
+  }
+  if (
+    cliArgs.encryptKey !== undefined ||
+    env.FASTLY_MCP_ENCRYPT_KEY !== undefined ||
+    env.FASTLY_MCP_ENCRYPT_TWEAK !== undefined
+  ) {
+    throw new Error(
+      "--remote-http derives its encryption key from each caller's Fastly-Key. " +
+        "Remove --encrypt-key, FASTLY_MCP_ENCRYPT_KEY and FASTLY_MCP_ENCRYPT_TWEAK.",
+    );
+  }
+  return { transport: "http", remote: true };
 }
 
 export function resolveHttpOptions({ cliArgs, env = {}, defaults = {} }) {
@@ -161,16 +203,12 @@ export function resolveHttpOptions({ cliArgs, env = {}, defaults = {} }) {
   const authToken =
     cliArgs.httpAuthToken ?? env.FASTLY_MCP_HTTP_AUTH_TOKEN ?? undefined;
 
+  // Remote mode already authenticates every request with the caller's own
+  // Fastly token, so it can listen on the network without one.
   const loopbackBind = isLoopbackHost(host);
-  if (!loopbackBind && !authToken) {
+  if (!loopbackBind && !authToken && !cliArgs.remoteHttp) {
     throw new Error(
       "Binding to a non-loopback address requires an auth token. " +
-        "Set FASTLY_MCP_HTTP_AUTH_TOKEN (preferred) or pass --http-auth-token.",
-    );
-  }
-  if (allowNetwork && !authToken) {
-    throw new Error(
-      "--http-allow-network requires an auth token. " +
         "Set FASTLY_MCP_HTTP_AUTH_TOKEN (preferred) or pass --http-auth-token.",
     );
   }
@@ -288,12 +326,13 @@ function applyCors(res, originHeader) {
   res.setHeader("Vary", "Origin");
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "Content-Type, Accept, Authorization, Last-Event-ID, Mcp-Method, Mcp-Name",
+    "Content-Type, Accept, Authorization, Fastly-Key, Last-Event-ID, Mcp-Method, Mcp-Name, Mcp-Protocol-Version",
   );
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
 }
 
 const NO_STORE = "no-store, no-transform";
+const MAX_IN_FLIGHT_REQUESTS = 512;
 const REQUEST_BODY_TIMEOUT_MS = 30_000;
 
 // The SDK puts its own `no-cache` on event streams, and the adapter's
@@ -324,9 +363,154 @@ export function disconnectSignal(res) {
   return controller.signal;
 }
 
+function describeMcpBody(body) {
+  if (Array.isArray(body)) return { method: "batch" };
+  if (body === null || typeof body !== "object") return {};
+  const method = typeof body.method === "string" ? body.method : undefined;
+  const name = body.params?.name;
+  return {
+    method,
+    tool:
+      method === "tools/call" && typeof name === "string" ? name : undefined,
+  };
+}
+
+function admitLocalRequest(req, res, { authToken, reqPath, path }) {
+  if (!checkAuth(req, authToken)) {
+    writeJsonError(res, 401, "Unauthorized", { "WWW-Authenticate": "Bearer" });
+    return undefined;
+  }
+  if (reqPath !== path) {
+    writeJsonError(res, 404, "Not found");
+    return undefined;
+  }
+  return { trace: {} };
+}
+
+/**
+ * Every check a `--remote-http` request passes before it reaches MCP, with
+ * the cheapest ones first so unauthenticated traffic costs the least.
+ * Resolves with the request context, or undefined once it has answered.
+ */
+async function admitRemoteRequest(
+  req,
+  res,
+  { remote, authToken, reqPath, path },
+) {
+  const { validator, budgets, trustedProxies, audit } = remote;
+  const started = performance.now();
+  const requestId = randomUUID();
+  res.setHeader("X-Request-Id", requestId);
+
+  let sourceIp;
+  const refuse = (status, category, message, headers = {}) => {
+    audit.emit("request_rejected", { requestId, sourceIp, status, category });
+    writeJsonError(res, status, message, { Connection: "close", ...headers });
+  };
+
+  let client;
+  try {
+    client = resolveClientAddress(req, trustedProxies);
+  } catch {
+    refuse(400, "forwarded_chain_malformed", "Malformed X-Forwarded-For");
+    return undefined;
+  }
+  sourceIp = client.address;
+  const source = rateLimitKey(client);
+
+  const requestBudget = budgets.admitRequest(source);
+  if (!requestBudget.ok) {
+    refuse(
+      429,
+      "request_budget_exhausted",
+      "Too many requests. Try again later.",
+      {
+        "Retry-After": String(requestBudget.retryAfter),
+      },
+    );
+    return undefined;
+  }
+
+  if (!checkAuth(req, authToken)) {
+    refuse(401, "deployment_token_rejected", "Unauthorized", {
+      "WWW-Authenticate": "Bearer",
+    });
+    return undefined;
+  }
+
+  if (reqPath !== path) {
+    refuse(404, "not_found", "Not found");
+    return undefined;
+  }
+
+  const signal = disconnectSignal(res);
+  let context;
+  try {
+    const apiToken = readFastlyKey(req.rawHeaders);
+    const { identity, cache } = await validator.validate(apiToken, {
+      signal,
+      admitMiss: () => {
+        const budget = budgets.admitValidation(source);
+        if (!budget.ok) {
+          throw new RemoteAuthError(
+            429,
+            "validation_budget_exhausted",
+            "Too many token validations from this address. Try again later.",
+            { retryAfter: budget.retryAfter },
+          );
+        }
+      },
+    });
+    context = Object.freeze({
+      apiToken,
+      identity,
+      requestId,
+      sourceIp,
+      signal,
+      validationCache: cache,
+      trace: {},
+    });
+  } catch (error) {
+    if (signal.aborted) return undefined;
+    if (!(error instanceof RemoteAuthError)) throw error;
+    if (error.category === "key_rejected" || error.category === "key_expired") {
+      budgets.recordFailure(source);
+    }
+    const headers = {};
+    if (error.status === 401) headers["WWW-Authenticate"] = "FastlyKey";
+    if (error.retryAfter) headers["Retry-After"] = String(error.retryAfter);
+    refuse(error.status, error.category, error.message, headers);
+    return undefined;
+  }
+
+  // Older Bun releases never emit `close`, so `finish` records the normal
+  // case and `close` only adds the callers who hung up first.
+  let recorded = false;
+  const record = (outcome) => {
+    if (recorded) return;
+    recorded = true;
+    audit.emit("mcp_request", {
+      requestId,
+      sourceIp,
+      tokenId: context.identity.tokenId,
+      customerId: context.identity.customerId ?? undefined,
+      era: context.trace.era,
+      method: methodLabel(context.trace.method),
+      tool: toolLabel(context.trace.tool),
+      validationCache: context.validationCache,
+      status: res.statusCode,
+      outcome,
+      durationMs: Math.round(performance.now() - started),
+    });
+  };
+  res.on("finish", () => record("completed"));
+  res.on("close", () => record("disconnected"));
+  return context;
+}
+
 export async function startHttp(
   createMcpServer,
-  { cliArgs, env, version, onShutdown },
+  { cliArgs, env, version, remote, onShutdown },
 ) {
   const opts = resolveHttpOptions({ cliArgs, env });
   const {
@@ -340,15 +524,30 @@ export async function startHttp(
     includeNetworkHosts,
   } = opts;
 
-  const logError = (err) => {
-    process.stderr.write(`[fastly-mcp] ${err?.message ?? err}\n`);
-  };
+  // Exception messages can quote request bodies, so a remote server records
+  // only what kind of error it was.
+  const logError = remote
+    ? (err) =>
+        remote.audit.emit("internal_error", {
+          requestId: requestContext.getStore()?.requestId,
+          name: err?.name,
+          code: err?.code,
+        })
+    : (err) => {
+        process.stderr.write(`[fastly-mcp] ${err?.message ?? err}\n`);
+      };
 
-  const mcpHandler = createMcpHandler(() => createMcpServer(), {
-    legacy: "stateless",
-    responseMode,
-    onerror: logError,
-  });
+  // The local factory ignores the context; the remote one builds its tools
+  // from it.
+  const mcpHandler = createMcpHandler(
+    ({ era }) => {
+      const context = requestContext.getStore();
+      if (!context) throw new Error("Request context is missing");
+      context.trace.era = era;
+      return createMcpServer(context);
+    },
+    { legacy: "stateless", responseMode, onerror: logError },
+  );
   const handleMcp = toNodeHandler(withNoStore(mcpHandler), {
     onerror: logError,
   });
@@ -360,6 +559,16 @@ export async function startHttp(
     includeNetwork: includeNetworkHosts,
   });
 
+  const admit = remote
+    ? (req, res, reqPath) =>
+        admitRemoteRequest(req, res, { remote, authToken, reqPath, path })
+    : (req, res, reqPath) =>
+        admitLocalRequest(req, res, { authToken, reqPath, path });
+  const requestBodyTimeoutMs =
+    remote?.requestBodyTimeoutMs ?? REQUEST_BODY_TIMEOUT_MS;
+  const maxInFlight = remote?.maxInFlightRequests ?? MAX_IN_FLIGHT_REQUESTS;
+  let inFlight = 0;
+
   function safe(handler) {
     return async (req, res, ...rest) => {
       try {
@@ -367,7 +576,11 @@ export async function startHttp(
       } catch (err) {
         logError(err);
         if (!res.headersSent && !res.writableEnded) {
-          writeJsonError(res, 500, err.message ?? "Internal error");
+          writeJsonError(
+            res,
+            500,
+            remote ? "Internal error" : (err.message ?? "Internal error"),
+          );
         }
       }
     };
@@ -376,7 +589,7 @@ export async function startHttp(
   async function readJsonBody(req, res) {
     let bodyBuf;
     try {
-      bodyBuf = await readBody(req, { timeoutMs: REQUEST_BODY_TIMEOUT_MS });
+      bodyBuf = await readBody(req, { timeoutMs: requestBodyTimeoutMs });
     } catch (err) {
       // Nothing will ever read what the client still has queued.
       res.once("finish", () => req.destroy());
@@ -428,33 +641,43 @@ export async function startHttp(
       return;
     }
 
-    if (!checkAuth(req, authToken)) {
-      writeJsonError(res, 401, "Unauthorized", {
-        "WWW-Authenticate": "Bearer",
+    // Rate limits cap how fast requests arrive, not how many are open at once.
+    if (remote && inFlight >= maxInFlight) {
+      remote.audit.emit("request_rejected", {
+        status: 503,
+        category: "server_busy",
+      });
+      writeJsonError(res, 503, "The server is busy. Try again shortly.", {
+        "Retry-After": "1",
+        Connection: "close",
       });
       return;
     }
+    // The adapter only returns once the response is written, so the finally
+    // below runs on every way out, even when a client hung up unnoticed.
+    inFlight++;
+    try {
+      const context = await admit(req, res, reqPath);
+      if (!context) return;
 
-    if (reqPath !== path) {
-      writeJsonError(res, 404, "Not found");
-      return;
+      let body;
+      if (method === "POST") {
+        const read = await readJsonBody(req, res);
+        if (read.failed) return;
+        body = read.body;
+        Object.assign(context.trace, describeMcpBody(body));
+      }
+      await requestContext.run(context, () => handleMcp(req, res, body));
+    } finally {
+      inFlight--;
     }
-
-    if (method !== "POST") {
-      await handleMcp(req, res);
-      return;
-    }
-
-    const read = await readJsonBody(req, res);
-    if (read.failed) return;
-    await handleMcp(req, res, read.body);
   });
 
   const server = createServer(handle);
   // Bun ignores these Node timeouts, which is why readBody has its own
   // deadline too.
-  server.headersTimeout = REQUEST_BODY_TIMEOUT_MS;
-  server.requestTimeout = REQUEST_BODY_TIMEOUT_MS * 2;
+  server.headersTimeout = requestBodyTimeoutMs;
+  server.requestTimeout = requestBodyTimeoutMs * 2;
 
   let shuttingDown = false;
   async function shutdown(signal) {
@@ -489,7 +712,7 @@ export async function startHttp(
   }
   const displayHost = reachableDisplayHost(host);
   process.stderr.write(
-    `[fastly-mcp] Server started (http) version=${version} listening on http://${displayHost}:${boundPort}${path} ` +
+    `[fastly-mcp] Server started (${remote ? "remote http" : "http"}) version=${version} listening on http://${displayHost}:${boundPort}${path} ` +
       `response-mode=${responseMode}\n`,
   );
   if (displayHost !== host) {

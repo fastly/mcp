@@ -1,13 +1,29 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import { admissionLimits, createAdmission } from "./admission.js";
+import { createAuditLog, fileSink, streamSink } from "./audit.js";
+import { createPrevalidationBudgets } from "./budgets.js";
 import { parseArgs } from "./cli.js";
-import { getExecutionRuntime } from "./execution-runtime.js";
-import { resolveHttpOptions, resolveTransport, startHttp } from "./http.js";
+import { parseTrustedProxies } from "./client-address.js";
+import {
+  getExecutionRuntime,
+  resolveRemoteExecutionProfile,
+} from "./execution-runtime.js";
+import {
+  preferAsOomVictim,
+  requireDisconnectDetection,
+  requireNoInspector,
+  requireYama,
+  resolvePrlimit,
+} from "./host-checks.js";
+import { resolveHttpOptions, resolveMode, startHttp } from "./http.js";
 import { buildIndex } from "./indexer.js";
+import { projectRemoteIndex } from "./method-policy.js";
+import { createTokenValidator } from "./remote-auth.js";
 import { SecretShield } from "./secrets.js";
 import { createMcpServer } from "./server.js";
-import { killAllExecutions } from "./tools/execute.js";
+import { execute, killAllExecutions } from "./tools/execute.js";
 
 const pkg = JSON.parse(
   readFileSync(
@@ -15,6 +31,20 @@ const pkg = JSON.parse(
     "utf-8",
   ),
 );
+
+const EXECUTION_CPU_SECONDS = 30;
+const DEFAULT_MAX_EXECUTIONS = 8;
+const DEFAULT_EXECUTION_MEMORY_MB = 1024;
+
+// What remote mode needs from the host and the network.
+// Tests swap parts of it through `main({ overrides })`, which no flag,
+// environment variable or request can reach.
+const REMOTE_DEPENDENCIES = Object.freeze({
+  fetch: globalThis.fetch,
+  resolveExecutionProfile: resolveRemoteExecutionProfile,
+  requestBodyTimeoutMs: undefined,
+  maxInFlightRequests: undefined,
+});
 
 function parseEncryptKey(hex) {
   if (hex === undefined) return undefined;
@@ -24,6 +54,15 @@ function parseEncryptKey(hex) {
     );
   }
   return Buffer.from(hex, "hex");
+}
+
+function positiveInteger(text, flag, fallback, { min = 1, max }) {
+  if (text === undefined) return fallback;
+  const value = Number(text);
+  if (!/^\d+$/.test(text) || value < min || value > max) {
+    throw new Error(`${flag} must be an integer between ${min} and ${max}.`);
+  }
+  return value;
 }
 
 function printHelp(version) {
@@ -79,7 +118,29 @@ HTTP transport (only used when --transport http is set):
                             always answered with text/event-stream.
   --http-allow-network      Bind to 0.0.0.0 and auto-populate allowed
                             hosts from local interface addresses. Requires
-                            an auth token.
+                            an auth token unless --remote-http is set.
+
+Remote service (see REMOTE-HTTP.md before exposing it):
+  --remote-http             Serve many users over HTTP. Each request must
+                            carry its caller's Fastly API token in a
+                            Fastly-Key header; FASTLY_API_TOKEN is ignored.
+                            Secrets are always encrypted with a key derived
+                            from that token, and executions get no fetch
+                            and no file access. Implies --transport http.
+  --http-trusted-proxy <c>  IP or CIDR of a reverse proxy whose
+                            X-Forwarded-For entries are trusted when rate
+                            limiting by source address. May be repeated.
+  --audit-log <path>        Append audit records (JSON lines) to this file
+                            instead of stdout.
+  --remote-max-executions <n>
+                            Executions running at once on this replica.
+                            Defaults to 8. Per-customer and per-token
+                            ceilings scale with it.
+  --remote-execution-memory <MiB>
+                            Memory limit for one execution. Half of it caps
+                            the JavaScript heap; on Linux with prlimit, the
+                            whole of it also limits what the process can
+                            allocate. Defaults to 1024.
 
 Environment:
   FASTLY_API_TOKEN             Fastly API token used for authenticated calls.
@@ -118,6 +179,152 @@ function localShield(cliArgs, env) {
   return shield;
 }
 
+const HOST_CHECKS = { requireYama, resolvePrlimit, requireDisconnectDetection };
+
+/**
+ * Looks for the protections remote mode can use on this host.
+ * Remote mode still runs without them, so a failed check only adds a line
+ * to `missing` for startup to print and record.
+ */
+export async function detectHardening(limits, checks = HOST_CHECKS) {
+  const missing = [];
+  const attempt = async (name, check) => {
+    try {
+      return await check();
+    } catch (error) {
+      missing.push(`${name}: ${error.message}`);
+      return null;
+    }
+  };
+  const [yamaPtraceScope, prlimit, disconnectDetection] = await Promise.all([
+    attempt("Yama", checks.requireYama),
+    attempt("prlimit", () => checks.resolvePrlimit(limits)),
+    attempt("disconnect detection", checks.requireDisconnectDetection),
+  ]);
+  return {
+    hardening: {
+      yamaPtraceScope,
+      prlimit,
+      disconnectDetection: disconnectDetection === true,
+    },
+    missing,
+  };
+}
+
+// One throwaway execution, to check that the sandbox starts within the
+// limits and whether the OOM score handshake works on a real child.
+async function proveLaunch(profile, { memoryMb, heapMb }) {
+  let handshake = null;
+  const record = (pid) => {
+    try {
+      preferAsOomVictim(pid);
+      handshake = true;
+    } catch (error) {
+      handshake = error.message;
+    }
+  };
+  const probe = await execute("return 1;", {
+    remote: true,
+    profile: { ...profile, oomVictim: record },
+  });
+  if (probe.result !== 1) {
+    const limits = profile.prlimit
+      ? `${memoryMb} MiB of data, ${heapMb} MiB of heap`
+      : `${heapMb} MiB of heap`;
+    throw new Error(
+      `The sandbox cannot start within the configured execution limits (${limits}): ${probe.error}. Raise --remote-execution-memory.`,
+    );
+  }
+  return handshake;
+}
+
+async function prepareRemote({ cliArgs, env, deps }) {
+  requireNoInspector();
+  const trustedProxies = parseTrustedProxies(cliArgs.httpTrustedProxies);
+
+  const maxRunning = positiveInteger(
+    cliArgs.remoteMaxExecutions,
+    "--remote-max-executions",
+    DEFAULT_MAX_EXECUTIONS,
+    { max: 256 },
+  );
+  const memoryMb = positiveInteger(
+    cliArgs.remoteExecutionMemory,
+    "--remote-execution-memory",
+    DEFAULT_EXECUTION_MEMORY_MB,
+    { min: 256, max: 65_536 },
+  );
+  const limits = {
+    memoryMb,
+    heapMb: Math.floor(memoryMb / 2),
+    cpuSeconds: EXECUTION_CPU_SECONDS,
+  };
+  const { hardening, missing } = await detectHardening({
+    dataBytes: memoryMb * 1024 * 1024,
+    cpuSeconds: EXECUTION_CPU_SECONDS,
+  });
+  const base = deps.resolveExecutionProfile(limits, hardening);
+  const handshake = await proveLaunch(base, limits);
+  if (handshake !== true) missing.push(`OOM victim preference: ${handshake}`);
+  const executionProfile = Object.freeze({
+    ...base,
+    oomVictim: handshake === true ? preferAsOomVictim : undefined,
+  });
+  for (const item of missing) {
+    process.stderr.write(`[fastly-mcp] Warning: running without ${item}\n`);
+  }
+
+  const sink = cliArgs.auditLog
+    ? fileSink(cliArgs.auditLog)
+    : streamSink(process.stdout);
+  let sinkFailures = 0;
+  const audit = createAuditLog({
+    sink,
+    onSinkFailure: () => {
+      sinkFailures++;
+      process.stderr.write(
+        `[fastly-mcp] Audit sink is failing (${sinkFailures} so far); records are held in a bounded queue and then dropped\n`,
+      );
+    },
+  });
+
+  if (env.FASTLY_API_TOKEN) {
+    process.stderr.write(
+      "[fastly-mcp] Warning: FASTLY_API_TOKEN is set but ignored in remote mode. Unset it: executions run under the same user and could read this process's environment.\n",
+    );
+  }
+
+  audit.emit("startup", {
+    version: pkg.version,
+    serverRuntime: process.versions.bun ? "bun" : "node",
+    serverRuntimeVersion: process.versions.bun ?? process.versions.node,
+    executionRuntime: executionProfile.name,
+    executionRuntimeVersion: executionProfile.version,
+    limits: { ...limits, maxRunning },
+    hardening: {
+      yamaPtraceScope: hardening.yamaPtraceScope,
+      prlimit: Boolean(hardening.prlimit),
+      oomVictim: handshake === true,
+      disconnectDetection: hardening.disconnectDetection,
+    },
+    trustedProxies: cliArgs.httpTrustedProxies.length,
+    deploymentToken: Boolean(
+      cliArgs.httpAuthToken ?? env.FASTLY_MCP_HTTP_AUTH_TOKEN,
+    ),
+  });
+
+  return {
+    trustedProxies,
+    audit,
+    budgets: createPrevalidationBudgets(),
+    validator: createTokenValidator({ fetch: deps.fetch }),
+    admission: createAdmission({ limits: admissionLimits(maxRunning) }),
+    executionProfile,
+    requestBodyTimeoutMs: deps.requestBodyTimeoutMs,
+    maxInFlightRequests: deps.maxInFlightRequests,
+  };
+}
+
 // Any failure in a startup step becomes the clean exit `runCli` prints.
 async function startup(step) {
   try {
@@ -148,17 +355,46 @@ export async function main({
     return;
   }
 
+  const deps = { ...REMOTE_DEPENDENCIES, ...overrides };
+
   return startup(async () => {
-    const shield = localShield(cliArgs, env);
-    const index = await buildIndex();
-    const transport = resolveTransport(cliArgs, env);
-    if (transport !== "stdio" && transport !== "http") {
+    const mode = resolveMode(cliArgs, env);
+    if (mode.transport !== "stdio" && mode.transport !== "http") {
       throw new Error(
-        `Unknown transport "${transport}". Use --transport stdio or --transport http.`,
+        `Unknown transport "${mode.transport}". Use --transport stdio or --transport http.`,
       );
     }
-    if (transport === "http") resolveHttpOptions({ cliArgs, env });
+    const shield = mode.remote ? null : localShield(cliArgs, env);
+    const index = await buildIndex();
+    if (mode.transport === "http") resolveHttpOptions({ cliArgs, env });
+
+    if (mode.remote) {
+      const remote = await prepareRemote({ cliArgs, env, deps });
+      const remoteIndex = projectRemoteIndex(index);
+      return startHttp(
+        (context) =>
+          createMcpServer({
+            version: pkg.version,
+            index: remoteIndex,
+            apiToken: context.apiToken,
+            remote: { context, services: remote },
+          }),
+        {
+          cliArgs,
+          env,
+          version: pkg.version,
+          remote,
+          onShutdown: () => {
+            killAllExecutions();
+            remote.audit.flush();
+            remote.audit.close();
+          },
+        },
+      );
+    }
+
     getExecutionRuntime();
+    // The process token is read once, here, and handed down explicitly.
     const local = {
       version: pkg.version,
       index,
@@ -166,7 +402,7 @@ export async function main({
       apiToken: env.FASTLY_API_TOKEN,
       executionProfile: overrides.resolveExecutionProfile?.({}),
     };
-    if (transport === "http") {
+    if (mode.transport === "http") {
       return startHttp(() => createMcpServer(local), {
         cliArgs,
         env,

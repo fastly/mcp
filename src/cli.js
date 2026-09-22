@@ -15,6 +15,11 @@ export const CLI_OPTIONS = {
   "http-json": { type: "boolean" },
   "http-sse": { type: "boolean" },
   "http-allow-network": { type: "boolean" },
+  "remote-http": { type: "boolean" },
+  "http-trusted-proxy": { type: "string", multiple: true },
+  "audit-log": { type: "string" },
+  "remote-max-executions": { type: "string" },
+  "remote-execution-memory": { type: "string" },
 };
 
 const FLAG_NAMES = new Set([
@@ -68,5 +73,10 @@ export function parseArgs(argv = process.argv) {
     httpJson: !!values["http-json"],
     httpSse: !!values["http-sse"],
     httpAllowNetwork: !!values["http-allow-network"],
+    remoteHttp: !!values["remote-http"],
+    httpTrustedProxies: values["http-trusted-proxy"] ?? [],
+    auditLog: values["audit-log"],
+    remoteMaxExecutions: values["remote-max-executions"],
+    remoteExecutionMemory: values["remote-execution-memory"],
   };
 }
