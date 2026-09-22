@@ -4,9 +4,9 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**field** | **String** | The log field to which this filter should be applied. | [optional] 
+**field** | **String** | The log field to which this filter should be applied. | [optional]
 **operator** | **String** | The comparison operator used for this filter. | [optional]  [one of: "eq", "ends-with", "in", "not_in", "gt", "gte", "lt", "lte"]
-**value** | [**ValueField**](ValueField.md) |  | [optional] 
+**value** | [**ValueField**](ValueField.md) |  | [optional]
 
 
 [[Back to API list]](../../README.md#endpoints) [[Back to README]](../../README.md)

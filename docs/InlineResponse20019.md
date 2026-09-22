@@ -4,8 +4,8 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**meta** | [**AgentKeyMeta**](AgentKeyMeta.md) |  | [optional] 
-**data** | [**[AgentKey]**](AgentKey.md) | The agent keys returned by the request. | [optional] 
+**meta** | [**AgentKeyMeta**](AgentKeyMeta.md) |  | [optional]
+**data** | [**[AgentKey]**](AgentKey.md) | The agent keys returned by the request. | [optional]
 
 
 [[Back to API list]](../../README.md#endpoints) [[Back to README]](../../README.md)

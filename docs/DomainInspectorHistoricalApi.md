@@ -19,7 +19,7 @@ Method | HTTP request | Description
 getDomainInspectorHistorical({ service_id, [start, ][end, ][downsample, ][metric, ][group_by, ][limit, ][cursor, ][region, ][datacenter, ][domain] })
 ```
 
-Fetches historical domain metrics for a given Fastly service, optionally filtering and grouping the results by domain, region, or POP. 
+Fetches historical domain metrics for a given Fastly service, optionally filtering and grouping the results by domain, region, or POP.
 
 ### Example
 

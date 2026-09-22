@@ -4,7 +4,7 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**data** | [**[SignalReport]**](SignalReport.md) |  | [optional] 
+**data** | [**[SignalReport]**](SignalReport.md) |  | [optional]
 
 
 [[Back to API list]](../../README.md#endpoints) [[Back to README]](../../README.md)

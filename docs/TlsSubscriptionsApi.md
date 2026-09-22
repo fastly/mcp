@@ -25,7 +25,7 @@ Method | HTTP request | Description
 createGlobalsignEmailChallenge({ tls_subscription_id, tls_authorization_id, [request_body] })
 ```
 
-Creates an email challenge for a domain on a GlobalSign subscription. An email challenge will generate an email that can be used to validate domain ownership. If this challenge is created, then the domain can only be validated using email for the given subscription. 
+Creates an email challenge for a domain on a GlobalSign subscription. An email challenge will generate an email that can be used to validate domain ownership. If this challenge is created, then the domain can only be validated using email for the given subscription.
 
 ### Example
 

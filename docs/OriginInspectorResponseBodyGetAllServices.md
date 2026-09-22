@@ -4,10 +4,10 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**product** | [**OriginInspectorResponseProductProduct**](OriginInspectorResponseProductProduct.md) |  | [optional] 
-**customer** | [**BotManagementResponseCustomerCustomer**](BotManagementResponseCustomerCustomer.md) |  | [optional] 
-**services** | **[String]** | A list of services with Origin Inspector enabled. | [optional] 
-**_links** | [**OriginInspectorResponseLinksGetAllServicesLinks**](OriginInspectorResponseLinksGetAllServicesLinks.md) |  | [optional] 
+**product** | [**OriginInspectorResponseProductProduct**](OriginInspectorResponseProductProduct.md) |  | [optional]
+**customer** | [**BotManagementResponseCustomerCustomer**](BotManagementResponseCustomerCustomer.md) |  | [optional]
+**services** | **[String]** | A list of services with Origin Inspector enabled. | [optional]
+**_links** | [**OriginInspectorResponseLinksGetAllServicesLinks**](OriginInspectorResponseLinksGetAllServicesLinks.md) |  | [optional]
 
 
 [[Back to API list]](../../README.md#endpoints) [[Back to README]](../../README.md)

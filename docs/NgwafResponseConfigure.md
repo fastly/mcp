@@ -4,10 +4,10 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**product** | [**NgwafResponseProductProduct**](NgwafResponseProductProduct.md) |  | [optional] 
-**service** | [**ApiDiscoveryResponseServiceService**](ApiDiscoveryResponseServiceService.md) |  | [optional] 
-**configuration** | [**NgwafResponseConfigurationConfiguration**](NgwafResponseConfigurationConfiguration.md) |  | [optional] 
-**_links** | [**NgwafResponseLinksLinks**](NgwafResponseLinksLinks.md) |  | [optional] 
+**product** | [**NgwafResponseProductProduct**](NgwafResponseProductProduct.md) |  | [optional]
+**service** | [**ApiDiscoveryResponseServiceService**](ApiDiscoveryResponseServiceService.md) |  | [optional]
+**configuration** | [**NgwafResponseConfigurationConfiguration**](NgwafResponseConfigurationConfiguration.md) |  | [optional]
+**_links** | [**NgwafResponseLinksLinks**](NgwafResponseLinksLinks.md) |  | [optional]
 
 
 [[Back to API list]](../../README.md#endpoints) [[Back to README]](../../README.md)

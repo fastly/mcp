@@ -4,10 +4,10 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **String** | The unique identifier of the operation tag. | [readonly] 
-**count** | **Number** | The number of operations associated with this operation tag. | [optional] [readonly] 
-**created_at** | **Date** | The date and time the operation tag was created. | [optional] [readonly] 
-**updated_at** | **Date** | The date and time the operation tag was last updated. | [optional] [readonly] 
+**id** | **String** | The unique identifier of the operation tag. | [readonly]
+**count** | **Number** | The number of operations associated with this operation tag. | [optional] [readonly]
+**created_at** | **Date** | The date and time the operation tag was created. | [optional] [readonly]
+**updated_at** | **Date** | The date and time the operation tag was last updated. | [optional] [readonly]
 
 
 [[Back to API list]](../../README.md#endpoints) [[Back to README]](../../README.md)

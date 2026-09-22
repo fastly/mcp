@@ -19,7 +19,7 @@ Method | HTTP request | Description
 getOriginInspectorHistorical({ service_id, [start, ][end, ][downsample, ][metric, ][group_by, ][limit, ][cursor, ][region, ][datacenter, ][host] })
 ```
 
-Fetches historical origin metrics for a given Fastly service, optionally filtering and grouping the results by origin host, region, or POP. 
+Fetches historical origin metrics for a given Fastly service, optionally filtering and grouping the results by origin host, region, or POP.
 
 ### Example
 

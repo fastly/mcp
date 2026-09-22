@@ -4,8 +4,8 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **String** |  | [optional] [readonly] 
-**attributes** | [**TlsSubscriptionResponseAttributes**](TlsSubscriptionResponseAttributes.md) |  | [optional] 
+**id** | **String** |  | [optional] [readonly]
+**attributes** | [**TlsSubscriptionResponseAttributes**](TlsSubscriptionResponseAttributes.md) |  | [optional]
 
 
 [[Back to API list]](../../README.md#endpoints) [[Back to README]](../../README.md)

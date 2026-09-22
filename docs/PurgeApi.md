@@ -22,7 +22,7 @@ Method | HTTP request | Description
 bulkPurgeTag({ service_id, [fastly_soft_purge, ][surrogate_key, ][purge_response] })
 ```
 
-Instant Purge a particular service of items tagged with surrogate keys. Up to 256 surrogate keys can be purged in one batch request. As an alternative to sending the keys in a JSON object in the body of the request, this endpoint also supports listing keys in a <code>Surrogate-Key</code> request header, e.g. <code>Surrogate-Key: key_1 key_2 key_3</code>. 
+Instant Purge a particular service of items tagged with surrogate keys. Up to 256 surrogate keys can be purged in one batch request. As an alternative to sending the keys in a JSON object in the body of the request, this endpoint also supports listing keys in a <code>Surrogate-Key</code> request header, e.g. <code>Surrogate-Key: key_1 key_2 key_3</code>.
 
 ### Example
 
@@ -63,7 +63,7 @@ Name | Type | Description  | Notes
 purgeAll({ service_id })
 ```
 
-Instant Purge everything from a service.  Purge-all requests cannot be done in soft mode and will always immediately invalidate all cached content associated with the service. To do a soft-purge-all, consider applying a constant [surrogate key](https://www.fastly.com/documentation/guides/full-site-delivery/purging/working-with-surrogate-keys/) tag (e.g., `\"all\"`) to all objects. 
+Instant Purge everything from a service.  Purge-all requests cannot be done in soft mode and will always immediately invalidate all cached content associated with the service. To do a soft-purge-all, consider applying a constant [surrogate key](https://www.fastly.com/documentation/guides/full-site-delivery/purging/working-with-surrogate-keys/) tag (e.g., `\"all\"`) to all objects.
 
 ### Example
 

@@ -4,7 +4,7 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**data** | [**[RelationshipMemberTlsConfiguration]**](RelationshipMemberTlsConfiguration.md) |  | [optional] 
+**data** | [**[RelationshipMemberTlsConfiguration]**](RelationshipMemberTlsConfiguration.md) |  | [optional]
 
 
 [[Back to API list]](../../README.md#endpoints) [[Back to README]](../../README.md)

@@ -19,7 +19,7 @@ Method | HTTP request | Description
 ngwafSimulateWafRequest({ workspace_id, waf_simulate_request })
 ```
 
-Simulates a request through the workspace's WAF configuration and returns the WAF response code and any signals that would be detected. The operation is stateless — no simulation data is persisted. 
+Simulates a request through the workspace's WAF configuration and returns the WAF response code and any signals that would be detected. The operation is stateless — no simulation data is persisted.
 
 ### Example
 

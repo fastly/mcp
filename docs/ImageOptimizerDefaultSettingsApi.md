@@ -20,7 +20,7 @@ Method | HTTP request | Description
 getDefaultSettings({ service_id, version_id })
 ```
 
-Retrieve the current Image Optimizer default settings. All properties in the response will be populated. 
+Retrieve the current Image Optimizer default settings. All properties in the response will be populated.
 
 ### Example
 
@@ -57,7 +57,7 @@ Name | Type | Description  | Notes
 updateDefaultSettings({ service_id, version_id, [default_settings] })
 ```
 
-Update one or more default settings. A minimum of one property is required. The endpoint will respond with the new Image Optimizer default settings, with all properties populated. 
+Update one or more default settings. A minimum of one property is required. The endpoint will respond with the new Image Optimizer default settings, with all properties populated.
 
 ### Example
 

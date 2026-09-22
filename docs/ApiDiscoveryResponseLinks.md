@@ -4,7 +4,7 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**_links** | [**ApiDiscoveryResponseLinksLinks**](ApiDiscoveryResponseLinksLinks.md) |  | [optional] 
+**_links** | [**ApiDiscoveryResponseLinksLinks**](ApiDiscoveryResponseLinksLinks.md) |  | [optional]
 
 
 [[Back to API list]](../../README.md#endpoints) [[Back to README]](../../README.md)

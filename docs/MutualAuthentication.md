@@ -4,7 +4,7 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**data** | [**MutualAuthenticationData**](MutualAuthenticationData.md) |  | [optional] 
+**data** | [**MutualAuthenticationData**](MutualAuthenticationData.md) |  | [optional]
 
 
 [[Back to API list]](../../README.md#endpoints) [[Back to README]](../../README.md)

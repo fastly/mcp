@@ -4,8 +4,8 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**number** | **Number** |  | [optional] [readonly] 
-**service_id** | **String** |  | [optional] [readonly] 
+**number** | **Number** |  | [optional] [readonly]
+**service_id** | **String** |  | [optional] [readonly]
 
 
 [[Back to API list]](../../README.md#endpoints) [[Back to README]](../../README.md)

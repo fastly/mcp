@@ -4,7 +4,7 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**data** | [**[CustomerAddress]**](CustomerAddress.md) |  | [optional] 
+**data** | [**[CustomerAddress]**](CustomerAddress.md) |  | [optional]
 
 
 [[Back to API list]](../../README.md#endpoints) [[Back to README]](../../README.md)

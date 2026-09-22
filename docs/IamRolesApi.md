@@ -20,7 +20,7 @@ Method | HTTP request | Description
 iamV1RolesGet({ role_id, [include] })
 ```
 
-Retrieve a single IAM role by its unique identifier. 
+Retrieve a single IAM role by its unique identifier.
 
 ### Example
 
@@ -57,7 +57,7 @@ Name | Type | Description  | Notes
 iamV1RolesList({ , [limit, ][cursor] })
 ```
 
-Retrieve a paginated list of IAM roles available in the account. 
+Retrieve a paginated list of IAM roles available in the account.
 
 ### Example
 

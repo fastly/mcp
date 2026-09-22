@@ -4,8 +4,8 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**data** | [**[SuccessfulResponseAsObject]**](SuccessfulResponseAsObject.md) |  | [optional] 
-**meta** | **Object** | Meta for the pagination. | [optional] 
+**data** | [**[SuccessfulResponseAsObject]**](SuccessfulResponseAsObject.md) |  | [optional]
+**meta** | **Object** | Meta for the pagination. | [optional]
 
 
 [[Back to API list]](../../README.md#endpoints) [[Back to README]](../../README.md)

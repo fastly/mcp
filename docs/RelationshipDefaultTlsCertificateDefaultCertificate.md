@@ -4,7 +4,7 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**data** | [**RelationshipDefaultTlsCertificateDefaultCertificateData**](RelationshipDefaultTlsCertificateDefaultCertificateData.md) |  | [optional] 
+**data** | [**RelationshipDefaultTlsCertificateDefaultCertificateData**](RelationshipDefaultTlsCertificateDefaultCertificateData.md) |  | [optional]
 
 
 [[Back to API list]](../../README.md#endpoints) [[Back to README]](../../README.md)

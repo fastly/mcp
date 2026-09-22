@@ -57,7 +57,7 @@ Name | Type | Description  | Notes
 updateServiceSettings({ service_id, version_id, [general_default_host, ][general_default_ttl, ][general_stale_if_error, ][general_stale_if_error_ttl] })
 ```
 
-Update the settings for a particular service and version. NOTE: If you override TTLs with custom VCL, any general.default_ttl value will not be honored and the expected behavior may change. 
+Update the settings for a particular service and version. NOTE: If you override TTLs with custom VCL, any general.default_ttl value will not be honored and the expected behavior may change.
 
 ### Example
 

@@ -4,10 +4,10 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**product** | [**ApiDiscoveryResponseProductProduct**](ApiDiscoveryResponseProductProduct.md) |  | [optional] 
-**customer** | [**ApiDiscoveryResponseCustomerCustomer**](ApiDiscoveryResponseCustomerCustomer.md) |  | [optional] 
-**services** | **[String]** | A list of services for a customer with API Discovery enabled. | [optional] 
-**_links** | [**ApiDiscoveryResponseLinksGetAllServicesLinks**](ApiDiscoveryResponseLinksGetAllServicesLinks.md) |  | [optional] 
+**product** | [**ApiDiscoveryResponseProductProduct**](ApiDiscoveryResponseProductProduct.md) |  | [optional]
+**customer** | [**ApiDiscoveryResponseCustomerCustomer**](ApiDiscoveryResponseCustomerCustomer.md) |  | [optional]
+**services** | **[String]** | A list of services for a customer with API Discovery enabled. | [optional]
+**_links** | [**ApiDiscoveryResponseLinksGetAllServicesLinks**](ApiDiscoveryResponseLinksGetAllServicesLinks.md) |  | [optional]
 
 
 [[Back to API list]](../../README.md#endpoints) [[Back to README]](../../README.md)

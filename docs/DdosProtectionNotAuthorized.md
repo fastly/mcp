@@ -4,7 +4,7 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**title** | **String** |  | [optional] 
+**title** | **String** |  | [optional]
 **status** | **Number** |  | [optional]  [one of: 403]
 
 
