@@ -7,7 +7,7 @@
       "dependencies": {
         "@modelcontextprotocol/node": "^2.0.0",
         "@modelcontextprotocol/server": "^2.0.0",
-        "fast-cipher": "0.1.2",
+        "fast-cipher": "0.2.0",
         "fastly": "^16.1.0",
         "zod": "^4.4.3",
       },
@@ -78,7 +78,7 @@
 
     "eventsource-parser": ["eventsource-parser@3.1.0", "", {}, ""],
 
-    "fast-cipher": ["fast-cipher@0.1.2", "", {}, ""],
+    "fast-cipher": ["fast-cipher@0.2.0", "", {}, "sha512-iXzCCIUFzs3w9S5ggHJ2nCU01fFLB5qyIccB/BWOTLCOxevaiscQa4NaQBN+uCWMgjOJTw4basWdqBD/KYO6zA=="],
 
     "fast-safe-stringify": ["fast-safe-stringify@2.1.1", "", {}, ""],
 

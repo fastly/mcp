@@ -3,6 +3,7 @@ minimumReleaseAge = 259200
 minimumReleaseAgeExcludes = [
   "@fastly/mcp",
   "fastly",
+  "fast-cipher",
   "@modelcontextprotocol/server",
   "@modelcontextprotocol/node",
   "@modelcontextprotocol/core",
