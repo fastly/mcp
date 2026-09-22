@@ -1,0 +1,32 @@
+#!/usr/sbin/nft -f
+# Deny cloud metadata endpoints to the containers of a Docker host.
+#
+# Traffic from a container to an off-host address is forwarded, never "output", so a UID match on the host would not see it.
+# A reject here is final whatever Docker's own chains decide.
+# The priority only makes this chain run first.
+# Every container on this host is covered, which is what a dedicated VM wants.
+#
+# The output chain covers a container switched to host networking, whose traffic then leaves under the UID of the image, 10001.
+#
+# Add the other endpoints of your cloud to the two sets, for example 168.63.129.16 on Azure, 100.100.100.200 on Alibaba Cloud or fd20:ce::254 on Google Cloud.
+#
+# Loading this file again replaces the table instead of duplicating its rules.
+table inet fastly_mcp_metadata_docker
+delete table inet fastly_mcp_metadata_docker
+
+table inet fastly_mcp_metadata_docker {
+  define METADATA_V4 = { 169.254.169.254 }
+  define METADATA_V6 = { fd00:ec2::254 }
+
+  chain forward {
+    type filter hook forward priority filter - 10; policy accept;
+    ip daddr $METADATA_V4 counter reject
+    ip6 daddr $METADATA_V6 counter reject
+  }
+
+  chain output {
+    type filter hook output priority filter; policy accept;
+    meta skuid 10001 ip daddr $METADATA_V4 counter reject
+    meta skuid 10001 ip6 daddr $METADATA_V6 counter reject
+  }
+}

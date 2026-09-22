@@ -1,0 +1,13 @@
+.git
+.github
+.swival
+node_modules
+test
+tmp
+coverage
+deploy
+*.log
+LOG.md
+REMOTE-HTTP-PLAN.md
+REMOTE-HTTP-PROGRESS.md
+api-faq.md

@@ -1,0 +1,23 @@
+#!/usr/sbin/nft -f
+# Deny cloud metadata endpoints to the service user of a native installation.
+#
+# Matching on the user keeps administrators' own access, and also covers anything else that runs as fastly-mcp.
+# nft resolves the name at load time, so create the user first, or loading fails with "User does not exist".
+# IPAddressDeny= in the systemd unit blocks the same addresses for the unit.
+#
+# Add the other endpoints of your cloud to the two sets, and to IPAddressDeny= in the unit, for example 168.63.129.16 on Azure, 100.100.100.200 on Alibaba Cloud or fd20:ce::254 on Google Cloud.
+#
+# Loading this file again replaces the table instead of duplicating its rules.
+table inet fastly_mcp_metadata_native
+delete table inet fastly_mcp_metadata_native
+
+table inet fastly_mcp_metadata_native {
+  define METADATA_V4 = { 169.254.169.254 }
+  define METADATA_V6 = { fd00:ec2::254 }
+
+  chain output {
+    type filter hook output priority filter; policy accept;
+    meta skuid "fastly-mcp" ip daddr $METADATA_V4 counter reject
+    meta skuid "fastly-mcp" ip6 daddr $METADATA_V6 counter reject
+  }
+}

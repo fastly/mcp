@@ -1,0 +1,42 @@
+# Example deployment of the remote HTTP service.
+#
+# The listener speaks cleartext HTTP, so put an HTTPS reverse proxy in front and keep port 8231 off the public network.
+# Do not add Fastly credentials, cloud credentials or volumes to this service.
+# kernel.yama.ptrace_scope is shared with the host, so set it there, not here (see REMOTE-HTTP.md).
+services:
+  fastly-mcp:
+    build: .
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    init: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    # Four executions of at most 512 MiB each, plus the server itself.
+    # Keep these three numbers in step with the command below.
+    mem_limit: 3g
+    memswap_limit: 3g
+    cpus: 4
+    pids_limit: 256
+    ports:
+      - "127.0.0.1:8231:8231"
+    command:
+      - --http-allow-host
+      - mcp.example.com
+      # Set this to the address the reverse proxy connects from, otherwise every caller is rate limited as one source.
+      - --http-trusted-proxy
+      - 172.16.0.0/12
+      - --remote-max-executions
+      - "4"
+      - --remote-execution-memory
+      - "512"
+    # Audit records go to stdout, and the default json-file driver never rotates.
+    # Ship them somewhere else if you need to keep more than this.
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "10"
+    restart: unless-stopped
+    stop_grace_period: 10s

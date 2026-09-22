@@ -1,0 +1,16 @@
+# logrotate rules for the audit log of the native service.
+# Install as /etc/logrotate.d/fastly-mcp.
+#
+# The server never reopens the file, so it has to be copytruncate, which can lose a record written between the copy and the truncation.
+# If that matters, leave out --audit-log and collect stdout with journald.
+/var/log/fastly-mcp/audit.jsonl {
+    su fastly-mcp fastly-mcp
+    daily
+    rotate 30
+    maxsize 100M
+    copytruncate
+    compress
+    delaycompress
+    missingok
+    notifempty
+}

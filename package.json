@@ -20,6 +20,8 @@
     "src/",
     "docs/",
     "README.md",
+    "REMOTE-HTTP.md",
+    "SECURITY.md",
     "LICENSE"
   ],
   "keywords": [
