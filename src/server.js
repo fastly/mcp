@@ -92,7 +92,10 @@ function jsonResult(result) {
   };
 }
 
-export function registerTools(mcp, { shield, index, apiToken }) {
+export function registerTools(
+  mcp,
+  { shield, index, apiToken, executionProfile },
+) {
   const shielded = makeShielded(shield);
 
   mcp.registerTool(
@@ -104,8 +107,12 @@ export function registerTools(mcp, { shield, index, apiToken }) {
   mcp.registerTool(
     "execute",
     { description: EXECUTE_DESCRIPTION, inputSchema: EXECUTE_INPUT_SCHEMA },
-    shielded(async ({ code }) => {
-      const result = await execute(code, { apiToken });
+    shielded(async ({ code }, extra) => {
+      const { outcome: _internal, ...result } = await execute(code, {
+        apiToken,
+        signal: extra?.mcpReq?.signal,
+        profile: executionProfile,
+      });
       const isError = "error" in result && !("result" in result);
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -125,7 +132,13 @@ export function registerTools(mcp, { shield, index, apiToken }) {
 // depends on who is asking, which is what makes `public` safe here.
 const LIST_CACHE_HINT = { ttlMs: 3_600_000, cacheScope: "public" };
 
-export function createMcpServer({ version, shield, index, apiToken }) {
+export function createMcpServer({
+  version,
+  shield,
+  index,
+  apiToken,
+  executionProfile,
+}) {
   const mcp = new McpServer(
     {
       name: "@fastly/mcp",
@@ -138,6 +151,6 @@ export function createMcpServer({ version, shield, index, apiToken }) {
       },
     },
   );
-  registerTools(mcp, { shield, index, apiToken });
+  registerTools(mcp, { shield, index, apiToken, executionProfile });
   return mcp;
 }

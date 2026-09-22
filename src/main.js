@@ -7,6 +7,7 @@ import { resolveHttpOptions, resolveTransport, startHttp } from "./http.js";
 import { buildIndex } from "./indexer.js";
 import { SecretShield } from "./secrets.js";
 import { createMcpServer } from "./server.js";
+import { killAllExecutions } from "./tools/execute.js";
 
 const pkg = JSON.parse(
   readFileSync(
@@ -126,7 +127,11 @@ async function startup(step) {
   }
 }
 
-export async function main({ argv = process.argv, env = process.env } = {}) {
+export async function main({
+  argv = process.argv,
+  env = process.env,
+  overrides = {},
+} = {}) {
   let cliArgs;
   try {
     cliArgs = parseArgs(argv);
@@ -159,13 +164,22 @@ export async function main({ argv = process.argv, env = process.env } = {}) {
       index,
       shield,
       apiToken: env.FASTLY_API_TOKEN,
+      executionProfile: overrides.resolveExecutionProfile?.({}),
     };
     if (transport === "http") {
       return startHttp(() => createMcpServer(local), {
         cliArgs,
         env,
         version: pkg.version,
+        onShutdown: killAllExecutions,
       });
+    }
+
+    // Executions lead their own process groups, so a signal to this process
+    // does not reach them by itself.
+    process.on("exit", killAllExecutions);
+    for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+      process.on(signal, () => process.exit(0));
     }
 
     serveStdio(() => createMcpServer(local), {

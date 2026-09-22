@@ -1,14 +1,19 @@
 import { spawn } from "node:child_process";
-import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { getExecutionRuntime } from "../execution-runtime.js";
+import {
+  getExecutionRuntime,
+  launchCommand,
+  SANDBOX_PATH,
+} from "../execution-runtime.js";
+
+export { SANDBOX_PATH };
+
 import { setKey } from "../serializer.js";
 
-export const SANDBOX_PATH = join(
-  import.meta.dirname ?? import.meta.dir,
-  "../sandbox.js",
-);
 const TIMEOUT_MS = 30_000;
+// Extra time a child gives itself past the parent's deadline, in case the
+// parent is no longer there to kill it.
+const CHILD_GRACE_MS = 5_000;
 const MAX_STDOUT = 100_000;
 const MAX_STDERR = 100_000;
 
@@ -91,49 +96,116 @@ function smartSummarize(value) {
   return { value, wasTruncated: false };
 }
 
-export async function execute(code, { apiToken } = {}) {
+const activeChildren = new Set();
+
+function killTree(child) {
+  // The child leads its own process group, so this also reaches anything a
+  // launcher such as prlimit left behind.
+  try {
+    process.kill(-child.pid, "SIGKILL");
+  } catch {
+    child.kill("SIGKILL");
+  }
+}
+
+export function killAllExecutions() {
+  for (const child of activeChildren) killTree(child);
+}
+
+const OUT_OF_MEMORY = /out of memory|allocation failed|cannot allocate/i;
+
+/**
+ * Runs a snippet in a fresh child process.
+ *
+ * The token and the policy come from the caller; nothing here reads the
+ * environment, and nothing in `code` can change either of them.
+ * A failed result carries an `outcome` label for the audit log, not for the
+ * model.
+ */
+export async function execute(
+  code,
+  { apiToken, remote = false, signal, profile } = {},
+) {
   if (typeof code !== "string" || !code.trim()) {
     return { error: "code must be a non-empty string" };
   }
+  if (signal?.aborted) {
+    return { error: "Execution cancelled", outcome: "cancelled" };
+  }
 
-  let runtime;
+  if (remote && !profile) {
+    return {
+      error: "Remote executions need a launch profile",
+      outcome: "launch_failed",
+    };
+  }
+  let runtime = profile;
   try {
-    runtime = getExecutionRuntime();
+    runtime ??= getExecutionRuntime();
   } catch (error) {
-    return { error: error.message };
+    return { error: error.message, outcome: "launch_failed" };
   }
 
   return new Promise((resolve) => {
-    const child = spawn(runtime.executable, [...runtime.args, SANDBOX_PATH], {
+    const [command, args] = launchCommand(runtime);
+    const timeoutMs = runtime.timeoutMs ?? TIMEOUT_MS;
+    const child = spawn(command, args, {
       stdio: ["pipe", "pipe", "pipe"],
       env: runtime.env,
+      cwd: runtime.cwd,
+      detached: process.platform !== "win32",
     });
+    activeChildren.add(child);
 
     let stdout = "";
     let stdoutBytes = 0;
     let stderr = "";
-    let killed = false;
+    let killed = null;
 
     // Pipe chunks can split a multibyte character; the decoders carry the
     // partial sequence across chunks.
     const stdoutDecoder = new StringDecoder("utf8");
     const stderrDecoder = new StringDecoder("utf8");
 
-    const timer = setTimeout(() => {
-      killed = true;
-      child.kill("SIGKILL");
-    }, TIMEOUT_MS);
+    const kill = (result) => {
+      if (killed) return;
+      killed = result;
+      killTree(child);
+    };
+    const onAbort = () =>
+      kill({ error: "Execution cancelled", outcome: "cancelled" });
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const timer = setTimeout(
+      () =>
+        kill({
+          error: `Execution timed out after ${timeoutMs / 1000}s`,
+          outcome: "timeout",
+        }),
+      timeoutMs,
+    );
+
+    let settled = false;
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      activeChildren.delete(child);
+      resolve(result);
+    };
 
     child.stdout.on("data", (chunk) => {
       // The cap is a byte budget, so count raw chunk bytes, not decoded
       // string length.
       stdoutBytes += chunk.length;
-      // Both kill paths discard stdout, so decoding after one is wasted work.
+      // Every kill path discards stdout, so decoding after one is wasted work.
       if (killed) return;
       stdout += stdoutDecoder.write(chunk);
       if (stdoutBytes > MAX_STDOUT) {
-        killed = true;
-        child.kill("SIGKILL");
+        kill({
+          error: `Output too large (${stdoutBytes} bytes, max ${MAX_STDOUT}). Reduce scope of your query.`,
+          outcome: "output_too_large",
+        });
       }
     });
 
@@ -142,30 +214,35 @@ export async function execute(code, { apiToken } = {}) {
       stderr += stderrDecoder.write(chunk).slice(0, MAX_STDERR - stderr.length);
     });
 
-    child.on("close", (exitCode) => {
-      clearTimeout(timer);
+    child.on("close", (exitCode, exitSignal) => {
       stdout += stdoutDecoder.end();
       if (stderr.length < MAX_STDERR) {
         stderr += stderrDecoder.end().slice(0, MAX_STDERR - stderr.length);
       }
 
-      if (killed && stdoutBytes > MAX_STDOUT) {
-        return resolve({
-          error: `Output too large (${stdoutBytes} bytes, max ${MAX_STDOUT}). Reduce scope of your query.`,
-        });
-      }
-
-      if (killed) {
-        return resolve({
-          error: `Execution timed out after ${TIMEOUT_MS / 1000}s`,
-        });
-      }
+      if (killed) return settle(killed);
 
       if (!stdout) {
-        return resolve({
+        // A SIGKILL we did not send is the kernel's OOM killer; the runtime
+        // aborts on its own when its heap or an allocation limit runs out.
+        if (exitSignal === "SIGKILL" || OUT_OF_MEMORY.test(stderr)) {
+          return settle({
+            error:
+              "Execution ran out of memory. Process less data at a time, for example by filtering or paginating API results.",
+            outcome: "oom",
+          });
+        }
+        if (exitSignal === "SIGXCPU") {
+          return settle({
+            error: "Execution used too much CPU time",
+            outcome: "cpu_limit",
+          });
+        }
+        return settle({
           error: stderr
             ? `Subprocess error: ${stderr.slice(0, 2000)}`
             : `Subprocess exited with code ${exitCode} and no output`,
+          outcome: "crashed",
         });
       }
 
@@ -177,27 +254,49 @@ export async function execute(code, { apiToken } = {}) {
           const out = { result: value };
           if (wasTruncated) out.truncated = true;
           if (raw.console?.length) out.console = raw.console;
-          return resolve(out);
+          return settle(out);
         }
         const { ok, console: logs, error, ...failure } = raw;
         const out = { error: error ?? "Unknown error", ...failure };
         if (logs?.length) out.console = logs;
-        return resolve(out);
+        return settle(out);
       } catch (e) {
-        return resolve({
+        return settle({
           error: `Failed to parse subprocess output: ${e.message}`,
+          outcome: "crashed",
         });
       }
     });
 
     child.on("error", (err) => {
-      clearTimeout(timer);
-      resolve({
+      settle({
         error: `Failed to spawn subprocess: ${err.message}`,
+        outcome: "launch_failed",
       });
     });
 
-    child.stdin.write(JSON.stringify({ code, fastlyApiToken: apiToken }));
-    child.stdin.end();
+    // The code and the token only go to a child that was first marked as the
+    // preferred OOM victim.
+    if (runtime.oomVictim && child.pid !== undefined) {
+      try {
+        runtime.oomVictim(child.pid);
+      } catch {
+        kill({
+          error: "Failed to prepare the execution process",
+          outcome: "launch_failed",
+        });
+        return;
+      }
+    }
+
+    // A child that dies early closes its stdin under us.
+    child.stdin.on("error", () => {});
+    child.stdin.end(
+      JSON.stringify({
+        code,
+        fastlyApiToken: apiToken,
+        policy: { remote, deadlineMs: timeoutMs + CHILD_GRACE_MS },
+      }),
+    );
   });
 }
