@@ -1,7 +1,14 @@
+import { mkdtempSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // Ephemeral loopback HTTP server for tests. The returned url has no
 // trailing slash; close() resolves once the socket is gone.
+export function tempDir(prefix) {
+  return mkdtempSync(join(tmpdir(), `fastly-mcp-${prefix}-`));
+}
+
 export async function startLocalServer(handler) {
   const server = createServer(handler);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));

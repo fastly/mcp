@@ -41,7 +41,22 @@ function readProp(obj, key) {
   }
 }
 
-export function safeSerialize(value, { maxDepth = 6, maxSize = 100_000 } = {}) {
+/**
+ * Turns a value into plain JSON data that fits in `maxSize` bytes, making it shallower level by level if it has to.
+ * A shallower value has to fit in `reducedMaxSize`, which lets a caller that would refuse a large cut-down value anyway skip the work of producing one.
+ * With `shrink` off, an oversized value is not cut down at all.
+ *
+ * `reduced` says whether cutting happened, because a value cut down to fit is not what the snippet returned and the host must not pass it off as such.
+ */
+export function serializeResult(
+  value,
+  {
+    maxDepth = 6,
+    maxSize = 100_000,
+    reducedMaxSize = maxSize,
+    shrink = true,
+  } = {},
+) {
   function walkProp(obj, key, depth, seen, depthLimit) {
     const read = readProp(obj, key);
     return read.ok
@@ -155,6 +170,7 @@ export function safeSerialize(value, { maxDepth = 6, maxSize = 100_000 } = {}) {
     return val;
   }
 
+  let fullBytes;
   for (let depthLimit = maxDepth; depthLimit >= 1; depthLimit--) {
     // Hostile proxies can still throw from traps no guarded read covers
     // (ownKeys, getPrototypeOf, ...); a value that refuses to be read
@@ -169,27 +185,45 @@ export function safeSerialize(value, { maxDepth = 6, maxSize = 100_000 } = {}) {
       } catch {
         msg = "unknown error";
       }
-      return `[unserializable: ${msg}]`;
+      return { value: `[unserializable: ${msg}]` };
     }
     const json = JSON.stringify(normalized);
-    if (json === undefined) return null; // undefined, functions, symbols at top level
+    if (json === undefined) return { value: null };
     const jsonBytes = Buffer.byteLength(json);
-    if (jsonBytes <= maxSize) return normalized;
+    if (depthLimit === maxDepth) {
+      if (jsonBytes <= maxSize) return { value: normalized };
+      fullBytes = jsonBytes;
+    } else if (jsonBytes <= reducedMaxSize) {
+      return {
+        value: normalized,
+        reduced: { bytes: fullBytes, depth: depthLimit },
+      };
+    }
 
-    if (depthLimit === 1) {
+    if (depthLimit === 1 || !shrink) {
       // This re-enumerates the value, and a proxy that tolerated the first
       // enumeration may still throw on this one.
       let previewKeys;
       if (typeof value === "object" && value !== null) {
         try {
-          previewKeys = Object.keys(value).slice(0, 20);
+          // Key names can be as long as anything else, and this stand-in has to stay small.
+          previewKeys = Object.keys(value)
+            .slice(0, 20)
+            .map((k) => (k.length > 100 ? `${k.slice(0, 100)}...` : k));
         } catch {}
       }
       return {
-        _truncated: true,
-        _message: `Result too large (${jsonBytes} bytes). Reduce scope of your query.`,
-        _previewKeys: previewKeys,
+        value: {
+          _truncated: true,
+          _message: `Result too large to serialize (${fullBytes} bytes). Return fewer fields, or page through the data and process it inside your code.`,
+          _previewKeys: previewKeys,
+        },
+        reduced: { bytes: fullBytes, depth: 0 },
       };
     }
   }
+}
+
+export function safeSerialize(value, options) {
+  return serializeResult(value, options).value;
 }

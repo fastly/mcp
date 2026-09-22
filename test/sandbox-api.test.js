@@ -22,7 +22,10 @@ afterAll(async () => {
   if (server) await server.close();
 });
 
-function runSandbox(code, { fastlyApiToken, runtime = process.execPath } = {}) {
+function runSandbox(
+  code,
+  { fastlyApiToken, runtime = process.execPath, policy } = {},
+) {
   return new Promise((resolve, reject) => {
     const args =
       runtime === process.execPath
@@ -50,9 +53,72 @@ function runSandbox(code, { fastlyApiToken, runtime = process.execPath } = {}) {
       }
     });
 
-    child.stdin.end(JSON.stringify({ code, fastlyApiToken }));
+    child.stdin.end(JSON.stringify({ code, fastlyApiToken, policy }));
   });
 }
+
+describe("large Fastly API responses through the sandbox bridge", () => {
+  const services = (count, padding) =>
+    JSON.stringify(
+      Array.from({ length: count }, (_, i) => ({
+        id: `srv${i}`,
+        name: `service ${i}`,
+        comment: "x".repeat(padding),
+      })),
+    );
+
+  // The bridge used to hand over placeholders instead of nested values, with nothing to say so.
+  test("a response too large to hand over is an error the snippet can read", async () => {
+    nextResponse = {
+      status: 200,
+      contentType: "application/json",
+      body: services(20_000, 200),
+    };
+
+    const out = await runSandbox("return await serviceApi.listServices();", {
+      fastlyApiToken: "token",
+    });
+
+    expect(out.ok).toBe(false);
+    expect(out.error).toContain("ServiceApi.listServices");
+    expect(out.error).toContain("paging or filtering");
+    expect(JSON.stringify(out)).not.toContain("[truncated: max depth]");
+  }, 30000);
+
+  test("a snippet can catch it and return something smaller", async () => {
+    nextResponse = {
+      status: 200,
+      contentType: "application/json",
+      body: services(20_000, 200),
+    };
+
+    const out = await runSandbox(
+      `try { await serviceApi.listServices(); return "unexpected"; }
+       catch (e) { return e.message.includes("bytes") ? "too large" : e.message; }`,
+      { fastlyApiToken: "token" },
+    );
+
+    expect(out.ok).toBe(true);
+    expect(out.result).toBe("too large");
+  }, 30000);
+
+  // What a snippet may receive is separate from what it may return.
+  test("a remote snippet receives a response larger than its result budget intact", async () => {
+    nextResponse = {
+      status: 200,
+      contentType: "application/json",
+      body: services(3_000, 40),
+    };
+
+    const out = await runSandbox(
+      "const all = await serviceApi.listServices(); return [all.length, all[2999].id, all[2999].comment.length];",
+      { fastlyApiToken: "token", policy: { remote: true }, runtime: "node" },
+    );
+
+    expect(out.ok).toBe(true);
+    expect(out.result).toEqual([3000, "srv2999", 40]);
+  }, 30000);
+});
 
 describe("Fastly API errors through the sandbox bridge", () => {
   test("a rejected token reads as HTTP 401 with the API's own explanation", async () => {

@@ -189,7 +189,24 @@ Clone the active version of service ABC123, add a backend named origin-api, and 
 ```
 
 If an answer looks too broad, ask the assistant to narrow the result in code before returning it.
-Large Fastly responses are summarized automatically, but targeted calls are easier to review and less likely to leak irrelevant information.
+Targeted calls are easier to review and less likely to leak irrelevant information.
+
+### Large results
+
+A result is returned in full whenever it fits in one response, no matter how many records it holds: a list of several hundred users comes back complete.
+
+A result too large for one response is still not thrown away.
+The server writes all of it to a JSON file, and the response carries the path in `resultFile` together with a short preview in `result`.
+Ask the assistant to read that file when you want every record, instead of running the query again.
+
+Files are written to `fastly-mcp-results` under the system temporary directory, one result per file, readable only by the account running the server.
+A single file holds at most 4 MB; a result larger than that is described in the response and the assistant is asked to return less.
+The same ceiling applies to what one Fastly API call may hand to the code: a larger response fails that call with an error asking for paging or filtering, rather than arriving with pieces silently missing.
+The newest twenty files are kept, and every file is removed after six hours whether or not the server has been busy since.
+When secret encryption is enabled, the stored copy gets the same treatment as the response, so reading the file cannot reveal a value the response would have hidden.
+Use `--result-dir <path>` to put them somewhere else, or `--result-dir off` to turn the feature off and have oversized results described rather than stored.
+
+A remote server never writes result files, because its callers could not read them.
 
 ## Secret encryption
 
@@ -270,8 +287,9 @@ If the assistant cannot find the right method, ask it to use broader search term
 If a result is unexpectedly empty, ask the assistant to return the raw API response first.
 Fastly client methods return values directly, not inside a `.result` wrapper.
 
-If a response is shortened, ask the assistant to filter, page, or select fields in the JavaScript code it runs.
-This happens because the server summarizes large arrays and objects to keep tool responses manageable.
+If a response contains a preview instead of the data, look for a `resultFile` path in the same response: the complete result was written there because it did not fit in one response.
+Ask the assistant to read that file, or to filter, page, or select fields in the JavaScript code it runs.
+If `resultFile` is missing, result files are either disabled (`--result-dir off`) or the server could not write one, and the `hint` field says which.
 
 Since each `execute` call has a 30-second limit, split the work into smaller calls if it times out.
 

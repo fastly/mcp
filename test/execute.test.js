@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { getExecutionRuntime } from "../src/execution-runtime.js";
+import { PREVIEW_BYTES } from "../src/limits.js";
+import { createResultStore } from "../src/result-files.js";
 import { execute } from "../src/tools/execute.js";
-import { expectNoInternals, startLocalServer } from "./helpers.js";
+import { expectNoInternals, startLocalServer, tempDir } from "./helpers.js";
 
 const NODE_HARNESS_PATH = join(
   import.meta.dir,
@@ -16,6 +20,18 @@ const NODE_EXECUTE_HARNESS_PATH = join(
 
 const LATE_REJECTION_CODE =
   'Promise.reject(new Error("late")); console.log("x".repeat(90000)); return 7;';
+
+function tempStore(options) {
+  return createResultStore({ dir: tempDir("execute-results"), ...options });
+}
+
+// The bound is measured on the JSON the model receives, give or take the truncation notes.
+function expectPreviewBounded(result) {
+  expect(result.truncated).toBe(true);
+  expect(Buffer.byteLength(JSON.stringify(result.result))).toBeLessThan(
+    PREVIEW_BYTES * 1.25,
+  );
+}
 
 function runUnderNode(harnessPath, code, env) {
   return spawnSync("node", [harnessPath, code], {
@@ -143,32 +159,37 @@ describe("execute", () => {
     expect(result).toEqual({ result: 42 });
   }, 10000);
 
-  test("large array is auto-summarized", async () => {
+  // Fifty small items is a small result; the count alone hides nothing.
+  test("an array of fifty records is returned whole", async () => {
     const result = await execute(
       'return Array.from({length: 50}, (_, i) => ({id: i, name: "item" + i}));',
     );
-    expect(result.result._type).toBe("array");
-    expect(result.result._total).toBe(50);
-    expect(result.result._showing).toBe(10);
-    expect(result.result.items).toHaveLength(10);
-    expect(result.truncated).toBe(true);
+    expect(result.result).toHaveLength(50);
+    expect(result.result[49]).toEqual({ id: 49, name: "item49" });
+    expect(result.truncated).toBeUndefined();
   }, 10000);
 
-  test("a __proto__ key survives object auto-summarization", async () => {
-    const result = await execute(`
+  test("a __proto__ key survives the oversized-result preview", async () => {
+    const store = tempStore();
+    const result = await execute(
+      `
       const obj = {};
       Object.defineProperty(obj, "__proto__", {
         value: 1, enumerable: true, writable: true, configurable: true,
       });
-      for (let i = 0; i < 40; i++) obj["key" + i] = i;
+      for (let i = 0; i < 40; i++) obj["key" + i] = "x".repeat(4000) + i;
       return obj;
-    `);
+    `,
+      { resultStore: store },
+    );
     expect(result.result._type).toBe("object");
     expect(result.truncated).toBe(true);
     const preview = result.result.preview;
     expect(Object.getPrototypeOf(preview)).toBe(Object.prototype);
     expect(Object.getOwnPropertyDescriptor(preview, "__proto__").value).toBe(1);
-    expect(preview.key0).toBe(0);
+    expect(preview.key0).toStartWith("x");
+    const stored = JSON.parse(readFileSync(result.resultFile, "utf8"));
+    expect(Object.getOwnPropertyDescriptor(stored, "__proto__").value).toBe(1);
   }, 10000);
 
   test("small array is NOT summarized", async () => {
@@ -361,17 +382,15 @@ describe("execute", () => {
     });
   }, 20000);
 
-  // safeSerialize shrinks a large return value before it can reach the
-  // cap; only console text, which crosses the bridge verbatim, can drive
-  // the output past it.
-  test("parent-side stdout cap kills subprocess on oversize output", async () => {
+  // Return values get stored; console output never is, so it keeps a cap.
+  test("oversize console output is refused", async () => {
     const result = await execute('console.log("x".repeat(120000)); return 1;');
     expect(result.error).toContain("Output too large");
   }, 15000);
 
   // "€" is one code unit but three UTF-8 bytes, so counting string length
   // instead of chunk bytes would let this 120 KB payload through.
-  test("the cap counts bytes, not string length", async () => {
+  test("the console cap counts bytes, not string length", async () => {
     const result = await execute(
       'console.log("\\u20ac".repeat(40000)); return 1;',
     );
@@ -401,24 +420,258 @@ describe("execute", () => {
     expect(result.error).toContain("Output too large");
   }, 20000);
 
-  // 40,000 euro signs are 40,002 code units but 120,002 UTF-8 bytes; a
-  // code-unit budget would let them through to die at the parent cap.
-  test("serializer truncation triggers on bytes, not code units", async () => {
-    const result = await execute('return "\\u20ac".repeat(40000);');
+  // 40,000 euro signs are 40,002 code units but 120,002 UTF-8 bytes.
+  // A code-unit budget would call this small enough to return inline.
+  test("the inline budget counts bytes, not code units", async () => {
+    const store = tempStore();
+    const result = await execute('return "\\u20ac".repeat(40000);', {
+      resultStore: store,
+    });
     expect(result.error).toBeUndefined();
-    expect(result.result._truncated).toBe(true);
-    expect(result.result._message).toContain("Result too large (120002 bytes");
+    expect(result.truncated).toBe(true);
+    expect(result.resultBytes).toBe(120002);
+    expect(JSON.parse(readFileSync(result.resultFile, "utf8"))).toBe(
+      "\u20ac".repeat(40000),
+    );
   }, 15000);
 
-  // Same unit bug, auto-summary flavor: five 3,000-euro strings are under
-  // the 20 KB summary threshold in code units but 45 KB serialized.
-  test("auto-summary size threshold counts bytes, not code units", async () => {
+  test("a result inside the inline budget is returned whole", async () => {
     const result = await execute(
       'return Array.from({length: 5}, () => "\\u20ac".repeat(3000));',
     );
+    expect(result.truncated).toBeUndefined();
+    expect(result.result).toHaveLength(5);
+    expect(result.result[0]).toBe("\u20ac".repeat(3000));
+  }, 15000);
+
+  // The original bug: a user list came back as its first ten entries just because it was long.
+  test("a long list of small records is not summarized", async () => {
+    const result = await execute(
+      'return Array.from({length: 400}, (_, i) => ({ id: "u" + i, login: "user" + i + "@example.com" }));',
+    );
+    expect(result.truncated).toBeUndefined();
+    expect(result.result).toHaveLength(400);
+    expect(result.result[399].login).toBe("user399@example.com");
+  }, 15000);
+
+  test("an object with many small keys is not summarized", async () => {
+    const result = await execute(
+      'return Object.fromEntries(Array.from({length: 200}, (_, i) => ["key" + i, i]));',
+    );
+    expect(result.truncated).toBeUndefined();
+    expect(Object.keys(result.result)).toHaveLength(200);
+  }, 15000);
+
+  test("an oversized result is written to a file and answered by path", async () => {
+    const store = tempStore();
+    const result = await execute(
+      'return Array.from({length: 4000}, (_, i) => ({ id: i, pad: "x".repeat(60) }));',
+      { resultStore: store },
+    );
+    expect(result.error).toBeUndefined();
     expect(result.truncated).toBe(true);
+    expect(result.resultBytes).toBeGreaterThan(100_000);
+    expect(result.resultFile).toStartWith(store.directory);
+    expect(result.hint).toContain(result.resultFile);
     expect(result.result._type).toBe("array");
-    expect(result.result._hint).toContain("bytes serialized");
+    expect(result.result._total).toBe(4000);
+    expect(result.result.items).toHaveLength(10);
+    const stored = JSON.parse(readFileSync(result.resultFile, "utf8"));
+    expect(stored).toHaveLength(4000);
+    expect(stored[3999].id).toBe(3999);
+  }, 15000);
+
+  test("without a store an oversized result is described, not stored", async () => {
+    const result = await execute(
+      'return Array.from({length: 4000}, (_, i) => ({ id: i, pad: "x".repeat(60) }));',
+    );
+    expect(result.truncated).toBe(true);
+    expect(result.resultFile).toBeUndefined();
+    expect(result.hint).toContain("result files are disabled");
+  }, 15000);
+
+  test("a failing store does not fail the execution", async () => {
+    const store = {
+      directory: "/nonexistent",
+      lastError: "EACCES",
+      write: () => null,
+    };
+    const result = await execute(
+      'return Array.from({length: 4000}, (_, i) => ({ id: i, pad: "x".repeat(60) }));',
+      { resultStore: store },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.truncated).toBe(true);
+    expect(result.result._total).toBe(4000);
+    expect(result.hint).toContain("EACCES");
+  }, 15000);
+
+  test("a result over the file limit is described, not stored", async () => {
+    const store = tempStore({ maxBytes: 150_000 });
+    const result = await execute(
+      'return Array.from({length: 4000}, (_, i) => ({ id: i, pad: "x".repeat(60) }));',
+      { resultStore: store },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.truncated).toBe(true);
+    expect(result.resultFile).toBeUndefined();
+    expect(result.hint).toContain("150000-byte limit");
+  }, 15000);
+
+  // One huge item must not turn a ten-item preview into a 2 MB response.
+  test("a preview is bounded by bytes, not only by item count", async () => {
+    const store = tempStore();
+    const result = await execute('return ["x".repeat(2000000), "short"];', {
+      resultStore: store,
+    });
+    expectPreviewBounded(result);
+    expect(result.resultFile).toBeDefined();
+    expect(result.result.items[0]).toEndWith("[2000000 chars, truncated]");
+    expect(result.result.items[1]).toBe("short");
+    expect(JSON.parse(readFileSync(result.resultFile, "utf8"))[0]).toHaveLength(
+      2000000,
+    );
+  }, 15000);
+
+  test("an object preview clips what it opens and names what it does not", async () => {
+    const store = tempStore();
+    const result = await execute(
+      `return {
+        small: { note: "y".repeat(300000) },
+        wide: Object.fromEntries(Array.from({length: 8}, (_, i) => ["k" + i, "z".repeat(50000)])),
+        list: Array.from({length: 3}, () => "w".repeat(100000)),
+        text: "v".repeat(400000),
+        n: 1,
+      };`,
+      { resultStore: store },
+    );
+    expectPreviewBounded(result);
+    const { preview } = result.result;
+    expect(preview.small.note).toEndWith("[300000 chars, truncated]");
+    expect(preview.wide).toStartWith("{Object: keys=k0, k1");
+    expect(preview.list).toHaveLength(3);
+    expect(preview.list[0]).toEndWith("[100000 chars, truncated]");
+    expect(preview.text).toEndWith("[400000 chars, truncated]");
+    expect(preview.n).toBe(1);
+    expect(result.result._showing).toBe(5);
+  }, 15000);
+
+  // Property names and escaping count too, since the bound is on the JSON the model receives.
+  test("a preview budget covers property names and escaping", async () => {
+    const store = tempStore();
+    const named = await execute(
+      'return { ["k".repeat(150000)]: 1, other: "x".repeat(100000) };',
+      { resultStore: store },
+    );
+    expectPreviewBounded(named);
+    expect(named.result._showing).toBe(2);
+    const escaped = await execute('return ["\\0".repeat(200000)];', {
+      resultStore: store,
+    });
+    expectPreviewBounded(escaped);
+    expect(escaped.result.items[0]).toEndWith("[200000 chars, truncated]");
+  }, 15000);
+
+  // Deep nesting with long names drives an entry's share down to nothing.
+  // Clipping used to loop forever there.
+  test("a preview of deeply nested long names terminates and stays small", async () => {
+    const store = tempStore();
+    const result = await execute(
+      `
+      const wide = () => Object.fromEntries(Array.from({length: 5}, (_, i) => ["name".repeat(100) + i, "x".repeat(4000)]));
+      const nest = (depth) => depth === 0 ? wide() : Object.fromEntries(Array.from({length: 5}, (_, i) => ["level".repeat(80) + i, nest(depth - 1)]));
+      return { deep: nest(3) };
+      `,
+      { resultStore: store },
+    );
+    expectPreviewBounded(result);
+  }, 15000);
+
+  // The first item always gets in, so a tree that keeps opening as its budget runs out has to be stopped some other way.
+  test("a five-way tree as the first item stays inside the preview budget", async () => {
+    const store = tempStore();
+    const result = await execute(
+      `
+      const nest = (depth) => depth === 0 ? "leaf".repeat(20) : Object.fromEntries(Array.from({length: 5}, (_, i) => ["branch" + i, nest(depth - 1)]));
+      return [nest(5), "x".repeat(200000)];
+      `,
+      { resultStore: store },
+    );
+    expectPreviewBounded(result);
+    expect(result.resultFile).toBeDefined();
+  }, 15000);
+
+  // A result the sandbox had to cut down is not the result, and must not be stored as if it were.
+  test("a result that cannot be cut down to fit is described, not stored", async () => {
+    const store = tempStore();
+    const result = await execute(
+      'return Array.from({length: 20000}, (_, i) => ({ id: i, pad: "x".repeat(200) }));',
+      { resultStore: store },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.truncated).toBe(true);
+    expect(result.result._truncated).toBe(true);
+    expect(result.hint).toContain("only a description");
+    expect(result.hint).toContain("above the 4000000-byte limit");
+    expect(result.resultFile).toBeUndefined();
+    expect(readdirSync(store.directory)).toEqual([]);
+  }, 20000);
+
+  test("a shallower result that fits inline is flagged as incomplete", async () => {
+    const store = tempStore();
+    const result = await execute(
+      'return { data: Object.fromEntries(Array.from({length: 40}, (_, i) => ["k" + i, "x".repeat(110000)])), count: 40 };',
+      { resultStore: store },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.truncated).toBe(true);
+    expect(result.resultFile).toBeUndefined();
+    expect(result.result.count).toBe(40);
+    expect(result.result.data.k0).toBe("[truncated: max depth]");
+    expect(result.hint).toContain("nested deeper than 1 level were");
+    expect(result.hint).toContain("not written to a file");
+    expect(readdirSync(store.directory)).toEqual([]);
+  }, 20000);
+
+  // The hint has to name the remote budget, not the local one.
+  test("a remote hint names the remote limit", async () => {
+    const result = await execute('return "x".repeat(150000);', {
+      apiToken: "synthetic-token",
+      remote: true,
+      profile: getExecutionRuntime(),
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.truncated).toBe(true);
+    expect(result.resultBytes).toBe(150002);
+    expect(result.hint).toContain("above the 100000-byte limit");
+    expect(result.hint).not.toContain("4000000");
+    expect(result.result._truncated).toBe(true);
+  }, 15000);
+
+  // Empty entries still cost their framing, and control characters grow when escaped.
+  test("the console cap counts serialized bytes, not text length", async () => {
+    const empties = await execute(
+      'for (let i = 0; i < 10000; i++) console.log(""); return 1;',
+    );
+    expect(empties.error).toContain("Output too large");
+    const nuls = await execute('console.log("\\0".repeat(90000)); return 1;');
+    expect(nuls.error).toContain("Output too large");
+  }, 20000);
+
+  // Throwing must not be a way to smuggle a large log through.
+  test("oversize console output is refused on a failed execution too", async () => {
+    const result = await execute(
+      'console.log("x".repeat(120000)); throw new Error("after logging");',
+    );
+    expect(result.error).toContain("Output too large");
+    expect(result.console).toBeUndefined();
+  }, 15000);
+
+  test("an oversize error is refused rather than returned whole", async () => {
+    const result = await execute('throw new Error("e".repeat(600000));');
+    expect(result.error).toContain("Output too large");
+    expect(result.error).toContain("error details");
+    expect(result.error.length).toBeLessThan(1000);
   }, 15000);
 
   // Skipped: takes ~30s to trigger the timeout. Run manually with:

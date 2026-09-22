@@ -26,11 +26,13 @@ If you already know the method, call it directly. Otherwise, use \`search\` firs
 
 You MUST use \`return\` to produce output. API methods return values directly (arrays, objects), not wrapped in \`.result\`. Every Fastly.*Api class is pre-instantiated as a camelCase global: \`serviceApi\`, \`purgeApi\`, \`backendApi\`, etc.
 
-Example: \`return await serviceApi.listServices();\``;
+Example: \`return await serviceApi.listServices();\`
+
+Results are returned in full whenever they fit, however many records they contain. A result too large for one response is written to a JSON file on the machine running this server and the response carries its path in \`resultFile\`, with only a short preview in \`result\`; read that file to get every record instead of re-running the query.`;
 
 const REMOTE_EXECUTE_NOTE = `
 
-This server is remote: \`fetch\` is not available and nothing can read or write files, so use the Fastly API globals for every request. Uploading a Compute package (\`packageApi.putPackage\`) is not supported here.`;
+This server is remote: \`fetch\` is not available, nothing can read or write files, and oversized results cannot be written to a file you could read, so ask for less data per call. Use the Fastly API globals for every request. Uploading a Compute package (\`packageApi.putPackage\`) is not supported here.`;
 
 const EXECUTE_INPUT_SCHEMA = z.object({
   code: z
@@ -215,7 +217,7 @@ function remoteExecutor({ apiToken, identity, requestId, signal }, services) {
 
 export function registerTools(
   mcp,
-  { shield, index, apiToken, remote, executionProfile },
+  { shield, index, apiToken, remote, executionProfile, resultStore },
 ) {
   const shielded = makeShielded(
     remote
@@ -250,6 +252,7 @@ export function registerTools(
             apiToken,
             signal: extra?.mcpReq?.signal,
             profile: executionProfile,
+            resultStore,
           });
       return executionResult(result);
     }),
@@ -280,6 +283,7 @@ export function createMcpServer({
   apiToken,
   remote,
   executionProfile,
+  resultStore,
 }) {
   if (remote && (!apiToken || !remote.context?.identity)) {
     throw new Error("Remote servers need a validated caller");
@@ -293,6 +297,14 @@ export function createMcpServer({
       },
     },
   );
-  registerTools(mcp, { shield, index, apiToken, remote, executionProfile });
+  registerTools(mcp, {
+    shield,
+    index,
+    apiToken,
+    remote,
+    executionProfile,
+    // Remote callers can't read our files.
+    resultStore: remote ? undefined : resultStore,
+  });
   return mcp;
 }

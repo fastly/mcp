@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { tempDir } from "./helpers.js";
 
 const SERVER_PATH = join(import.meta.dir, "../src/index.js");
 const GITHUB_PAT = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij";
@@ -28,6 +30,89 @@ afterAll(async () => {
   if (client) {
     await client.close();
   }
+});
+
+// The original bug was seen end to end, so these go through a real client and a real server process.
+describe("large results over MCP", () => {
+  let dir;
+  let bigClient;
+  let bigTransport;
+
+  beforeAll(async () => {
+    dir = tempDir("integration-results");
+    ({ client: bigClient, transport: bigTransport } = connectClient({
+      extraArgs: ["--result-dir", dir],
+    }));
+    await bigClient.connect(bigTransport);
+  }, 20000);
+
+  afterAll(async () => {
+    if (bigClient) await bigClient.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const run = async (code) => {
+    const result = await bigClient.callTool({
+      name: "execute",
+      arguments: { code },
+    });
+    return JSON.parse(result.content[0].text);
+  };
+
+  test("a list of 500 records arrives complete", async () => {
+    const parsed = await run(
+      'return Array.from({length: 500}, (_, i) => ({ id: "u" + i, login: "user" + i + "@example.com" }));',
+    );
+    expect(parsed.truncated).toBeUndefined();
+    expect(parsed.result).toHaveLength(500);
+    expect(parsed.result[499].id).toBe("u499");
+  }, 20000);
+
+  test("an oversized list arrives as a path to the whole result", async () => {
+    const parsed = await run(
+      'return Array.from({length: 5000}, (_, i) => ({ id: "u" + i, login: "user" + i + "@example.com", note: "x".repeat(40) }));',
+    );
+    expect(parsed.truncated).toBe(true);
+    expect(parsed.resultFile).toStartWith(dir);
+    const stored = JSON.parse(readFileSync(parsed.resultFile, "utf8"));
+    expect(stored).toHaveLength(5000);
+    expect(stored[4999].login).toBe("user4999@example.com");
+  }, 20000);
+
+  // The model is told to read the file, so it must hide what the response hides.
+  test("a stored result is encrypted like the response", async () => {
+    const { client: sealed, transport: sealedTransport } = connectClient({
+      extraArgs: ["--result-dir", dir, "--encrypt-secrets"],
+    });
+    await sealed.connect(sealedTransport);
+    try {
+      const token = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij";
+      const response = await sealed.callTool({
+        name: "execute",
+        arguments: {
+          code: `return Array.from({length: 2000}, (_, i) => ({ id: i, token: "${token}", note: "x".repeat(40) }));`,
+        },
+      });
+      const text = response.content[0].text;
+      expect(text).not.toContain(token);
+      const parsed = JSON.parse(text);
+      expect(parsed.truncated).toBe(true);
+      const stored = readFileSync(parsed.resultFile, "utf8");
+      expect(stored).not.toContain(token);
+      const records = JSON.parse(stored);
+      expect(records).toHaveLength(2000);
+      expect(records[1999].token).toStartWith("ghp_");
+      expect(parsed.result.items[0].token).toBe(records[0].token);
+    } finally {
+      await sealed.close();
+    }
+  }, 20000);
+
+  test("the execute tool tells the model that result files exist", async () => {
+    const { tools } = await bigClient.listTools();
+    const execute = tools.find((t) => t.name === "execute");
+    expect(execute.description).toContain("resultFile");
+  }, 10000);
 });
 
 describe("MCP integration", () => {

@@ -21,6 +21,7 @@ import { resolveHttpOptions, resolveMode, startHttp } from "./http.js";
 import { buildIndex } from "./indexer.js";
 import { projectRemoteIndex } from "./method-policy.js";
 import { createTokenValidator } from "./remote-auth.js";
+import { resolveResultStore } from "./result-files.js";
 import { SecretShield } from "./secrets.js";
 import { createMcpServer } from "./server.js";
 import { execute, killAllExecutions } from "./tools/execute.js";
@@ -86,6 +87,11 @@ Options:
   --encrypt-key <hex>       32 hex characters (16 bytes) used as the
                             encryption key. Defaults to a per-session key.
                             Also reads FASTLY_MCP_ENCRYPT_KEY.
+  --result-dir <path>       Directory for results too large to return in
+                            one response. Defaults to a fastly-mcp-results
+                            directory under the system temporary directory.
+                            Pass "off" to disable result files. Also reads
+                            FASTLY_MCP_RESULT_DIR.
   -h, --help                Show this help and exit.
   -V, --version             Print the version and exit.
 
@@ -148,6 +154,7 @@ Environment:
                                without passing --encrypt-secrets.
   FASTLY_MCP_ENCRYPT_KEY       Same as --encrypt-key.
   FASTLY_MCP_ENCRYPT_TWEAK     Optional tweak string for domain separation.
+  FASTLY_MCP_RESULT_DIR        Same as --result-dir.
   FASTLY_MCP_TRANSPORT         Same as --transport.
   FASTLY_MCP_HTTP_PORT         Same as --http-port.
   FASTLY_MCP_HTTP_ALLOW_ORIGIN Comma-separated list of allowed origins.
@@ -401,6 +408,12 @@ export async function main({
       shield,
       apiToken: env.FASTLY_API_TOKEN,
       executionProfile: overrides.resolveExecutionProfile?.({}),
+      // Stored results get the same secret encryption as a response, since the model is told to read them.
+      resultStore: resolveResultStore({
+        env,
+        dir: cliArgs.resultDir,
+        seal: shield ? (text) => shield.encrypt(text) : undefined,
+      }),
     };
     if (mode.transport === "http") {
       return startHttp(() => createMcpServer(local), {

@@ -18,6 +18,7 @@ export const CLI_OPTIONS = {
   "remote-http": { type: "boolean" },
   "http-trusted-proxy": { type: "string", multiple: true },
   "audit-log": { type: "string" },
+  "result-dir": { type: "string" },
   "remote-max-executions": { type: "string" },
   "remote-execution-memory": { type: "string" },
 };
@@ -76,6 +77,7 @@ export function parseArgs(argv = process.argv) {
     remoteHttp: !!values["remote-http"],
     httpTrustedProxies: values["http-trusted-proxy"] ?? [],
     auditLog: values["audit-log"],
+    resultDir: values["result-dir"],
     remoteMaxExecutions: values["remote-max-executions"],
     remoteExecutionMemory: values["remote-execution-memory"],
   };

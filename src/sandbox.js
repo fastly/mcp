@@ -1,8 +1,9 @@
 import vm from "node:vm";
 import Fastly from "fastly";
 import { describeThrown } from "./errors.js";
+import { API_RESPONSE_BYTES, INLINE_RESULT_BYTES } from "./limits.js";
 import { operationsOf, remoteDenial } from "./method-policy.js";
-import { safeSerialize } from "./serializer.js";
+import { serializeResult } from "./serializer.js";
 
 const input =
   typeof Bun !== "undefined"
@@ -18,6 +19,16 @@ const { code, fastlyApiToken, policy } = JSON.parse(input);
 
 // Only the host decides this; it arrives next to the code, never inside it.
 const remote = policy?.remote === true;
+
+// The host says how large a result it can take, since it knows whether it can park one in a file.
+// A result cut down to fit is only ever shown inline, so a cut-down one has to fit that smaller budget.
+const resultBytes = Number.isFinite(policy?.resultBytes)
+  ? policy.resultBytes
+  : INLINE_RESULT_BYTES;
+const serializeOptions = {
+  maxSize: resultBytes,
+  reducedMaxSize: Math.min(resultBytes, INLINE_RESULT_BYTES),
+};
 
 // The parent normally kills us at its deadline; if it died first, nothing
 // else would stop a snippet parked on a hung request.
@@ -97,7 +108,19 @@ async function callFastly(payload) {
   const { instance } = api;
   try {
     const result = await instance[method](...args);
-    return JSON.stringify({ ok: true, value: safeSerialize(result) });
+    const { value, reduced } = serializeResult(result, {
+      maxSize: API_RESPONSE_BYTES,
+      shrink: false,
+    });
+    // Better an error the snippet can read than a response full of placeholders with nothing to say so.
+    if (reduced) {
+      throw new Error(
+        `The response from ${apiClass}.${method} is ${reduced.bytes} bytes, more than the ` +
+          `${API_RESPONSE_BYTES} bytes a snippet can receive from one call. ` +
+          "Use the method's paging or filtering parameters to fetch less at a time.",
+      );
+    }
+    return JSON.stringify({ ok: true, value });
   } catch (err) {
     const failure = describeThrown(err);
     const hint = authHint(failure.status);
@@ -759,7 +782,9 @@ try {
     filename: "user-code",
     importModuleDynamically: denyImport,
   });
-  writeResultAndExit({ ok: true, result: safeSerialize(result) });
+  const { value, reduced } = serializeResult(result, serializeOptions);
+  // The host decides what to do with a result that had to be cut down.
+  writeResultAndExit({ ok: true, result: value, reduced });
 } catch (err) {
   writeResultAndExit({ ok: false, ...rewriteError(err, code) });
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { runInNewContext } from "node:vm";
-import { safeSerialize } from "../src/serializer.js";
+import { safeSerialize, serializeResult } from "../src/serializer.js";
 
 describe("safeSerialize", () => {
   test("circular reference produces '[circular]'", () => {
@@ -62,6 +62,51 @@ describe("safeSerialize", () => {
     const result = safeSerialize(big, { maxSize });
     const json = JSON.stringify(result);
     expect(json.length).toBeLessThanOrEqual(maxSize);
+  });
+
+  test("serializeResult says when depth had to be cut to fit", () => {
+    const value = { a: { b: { c: "x".repeat(500) } }, n: 1 };
+    const whole = serializeResult(value, { maxSize: 10_000 });
+    expect(whole.reduced).toBeUndefined();
+    expect(whole.value).toEqual(value);
+
+    const shallower = serializeResult(value, { maxSize: 200 });
+    expect(shallower.reduced.depth).toBeLessThan(6);
+    expect(shallower.reduced.bytes).toBe(
+      Buffer.byteLength(JSON.stringify(value)),
+    );
+    expect(JSON.stringify(shallower.value)).toContain("[truncated: max depth]");
+
+    const hopeless = serializeResult("y".repeat(500), { maxSize: 200 });
+    expect(hopeless.reduced.depth).toBe(0);
+    expect(hopeless.value._truncated).toBe(true);
+  });
+
+  test("a cut-down value has to fit its own, smaller budget", () => {
+    const value = { a: { b: "x".repeat(500) }, c: { d: "y".repeat(500) } };
+    const fits = serializeResult(value, { maxSize: 800, reducedMaxSize: 800 });
+    expect(fits.reduced.depth).toBe(1);
+    const refused = serializeResult(value, {
+      maxSize: 800,
+      reducedMaxSize: 20,
+    });
+    expect(refused.reduced.depth).toBe(0);
+    expect(refused.value._truncated).toBe(true);
+  });
+
+  test("the description of an oversized value keeps its own key names short", () => {
+    const value = { [`k${"x".repeat(5000)}`]: "y".repeat(500) };
+    const out = serializeResult(value, { maxSize: 100, shrink: false });
+    expect(out.value._previewKeys[0]).toHaveLength(103);
+    expect(Buffer.byteLength(JSON.stringify(out.value))).toBeLessThan(500);
+  });
+
+  test("with shrink off an oversized value is described, never cut down", () => {
+    const value = { a: { b: "x".repeat(500) } };
+    const out = serializeResult(value, { maxSize: 100, shrink: false });
+    expect(out.reduced.depth).toBe(0);
+    expect(out.value._truncated).toBe(true);
+    expect(out.value._previewKeys).toEqual(["a"]);
   });
 
   test("truncated result includes _truncated flag and _previewKeys", () => {

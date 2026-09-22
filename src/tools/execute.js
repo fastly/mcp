@@ -8,92 +8,216 @@ import {
 
 export { SANDBOX_PATH };
 
+import {
+  INLINE_RESULT_BYTES,
+  PREVIEW_BYTES,
+  RESULT_FILE_BYTES,
+} from "../limits.js";
 import { setKey } from "../serializer.js";
 
 const TIMEOUT_MS = 30_000;
 // Extra time a child gives itself past the parent's deadline, in case the
 // parent is no longer there to kill it.
 const CHILD_GRACE_MS = 5_000;
-const MAX_STDOUT = 100_000;
+// The child may serialize up to a file's worth of result, so its whole stdout payload gets room above that.
+const MAX_STDOUT = 8_000_000;
 const MAX_STDERR = 100_000;
+const MAX_CONSOLE = 100_000;
 
-const ARRAY_SUMMARY_THRESHOLD = 10;
-const OBJECT_KEY_THRESHOLD = 30;
-const AUTO_SUMMARY_SIZE = 20_000;
+const ARRAY_PREVIEW_ITEMS = 10;
+const OBJECT_PREVIEW_KEYS = 30;
+const SMALL_CONTAINER_ENTRIES = 5;
+const KEY_PREVIEW_BYTES = 200;
+// With less room than this, opening a container just produces a tree of truncation notes, so it gets named instead.
+const MIN_CONTAINER_BYTES = 128;
 
-function jsonByteSize(value) {
-  return Buffer.byteLength(JSON.stringify(value));
+function jsonBytes(value) {
+  return Buffer.byteLength(JSON.stringify(value) ?? "null");
 }
 
-function smartSummarize(value) {
-  if (value === null || value === undefined || typeof value !== "object") {
-    return { value, wasTruncated: false };
+// Cuts a string down to about `budget` bytes of JSON, note included.
+// Measured on the escaped form, since that's what the response carries and a control character costs six bytes there.
+function clipString(text, budget) {
+  if (text.length + 2 <= budget && jsonBytes(text) <= budget) return text;
+  const note = ` [${text.length} chars, truncated]`;
+  const room = Math.max(0, budget - note.length);
+  let head = text.slice(0, room);
+  while (head.length) {
+    const size = jsonBytes(head);
+    const excess = size - room;
+    if (excess <= 0) break;
+    const perUnit = Math.max(1, size / head.length);
+    head = head.slice(0, head.length - Math.ceil(excess / perUnit));
   }
+  const last = head.charCodeAt(head.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) head = head.slice(0, -1);
+  return head + note;
+}
 
-  if (Array.isArray(value)) {
-    // Measuring costs a full serialization pass, so skip it when the
-    // count alone already forces a summary.
-    const tooMany = value.length > ARRAY_SUMMARY_THRESHOLD;
-    const jsonBytes = tooMany ? null : jsonByteSize(value);
-    if (tooMany || jsonBytes > AUTO_SUMMARY_SIZE) {
-      const preview = value.slice(0, ARRAY_SUMMARY_THRESHOLD);
-      return {
-        value: {
-          _type: "array",
-          _total: value.length,
-          _showing: Math.min(ARRAY_SUMMARY_THRESHOLD, value.length),
-          _hint: tooMany
-            ? `Showing first ${ARRAY_SUMMARY_THRESHOLD} of ${value.length} items. Filter in your code to reduce output.`
-            : `Array items are large (${jsonBytes} bytes serialized). Showing all ${value.length} items but nested values may be truncated.`,
-          items: preview,
-        },
-        wasTruncated: true,
-      };
-    }
-    return { value, wasTruncated: false };
-  }
-
+function describe(value, budget) {
+  if (Array.isArray(value)) return `[Array: ${value.length} items]`;
   const keys = Object.keys(value);
-  const tooManyKeys = keys.length > OBJECT_KEY_THRESHOLD;
-  const jsonBytes = tooManyKeys ? null : jsonByteSize(value);
-  if (tooManyKeys || jsonBytes > AUTO_SUMMARY_SIZE) {
-    const previewKeys = keys.slice(0, OBJECT_KEY_THRESHOLD);
-    const preview = {};
-    for (const k of previewKeys) {
-      const v = value[k];
-      if (typeof v === "object" && v !== null) {
-        if (Array.isArray(v)) {
-          setKey(preview, k, `[Array: ${v.length} items]`);
-        } else {
-          const subKeys = Object.keys(v);
-          setKey(
-            preview,
-            k,
-            subKeys.length <= 5
-              ? v
-              : `{Object: keys=${subKeys.slice(0, 5).join(", ")}... (${subKeys.length} total)}`,
-          );
-        }
-      } else {
-        setKey(preview, k, v);
-      }
-    }
+  if (budget < MIN_CONTAINER_BYTES * 3) return `{Object: ${keys.length} keys}`;
+  const shown = keys
+    .slice(0, SMALL_CONTAINER_ENTRIES)
+    .map((k) => clipString(k, 64));
+  return `{Object: keys=${shown.join(", ")}... (${keys.length} total)}`;
+}
 
+// A property name can be as long as a value, so it comes out of the same share.
+// Returns the name to show and what's left for the value.
+function previewKey(key, share) {
+  const name = clipString(key, Math.min(share, KEY_PREVIEW_BYTES));
+  return [name, Math.max(0, share - jsonBytes(name) - 1)];
+}
+
+// Fills a copy of `value` with up to `limit` clipped entries, keeping an exact count of the bytes used.
+// The first entry always gets in, clipped to its share; after that, an entry that would go over the budget ends the copy.
+function clipEntries(value, budget, limit) {
+  const isArray = Array.isArray(value);
+  const keys = isArray ? null : Object.keys(value);
+  const count = Math.min(isArray ? value.length : keys.length, limit);
+  // Brackets and separators are paid for up front, so the shares are exact.
+  const share = Math.floor(
+    (budget - 2 - Math.max(0, count - 1)) / Math.max(1, count),
+  );
+  const out = isArray ? [] : {};
+  let used = 2;
+  for (let i = 0; i < count; i++) {
+    const key = isArray ? i : keys[i];
+    const [name, room] = isArray ? [null, share] : previewKey(key, share);
+    const clipped = clip(value[key], room);
+    let cost = jsonBytes(clipped) + (i ? 1 : 0);
+    if (!isArray) cost += jsonBytes(name) + 1;
+    if (used + cost > budget && i) break;
+    used += cost;
+    if (isArray) out.push(clipped);
+    else setKey(out, name, clipped);
+  }
+  return out;
+}
+
+// Shrinks a value to about `budget` bytes of JSON.
+// Strings get cut, small containers get opened and clipped inside, anything else too big gets named.
+function clip(value, budget) {
+  if (typeof value === "string") return clipString(value, budget);
+  if (value === null || typeof value !== "object") return value;
+  if (jsonBytes(value) <= budget) return value;
+  const entries = Array.isArray(value)
+    ? value.length
+    : Object.keys(value).length;
+  if (budget < MIN_CONTAINER_BYTES || entries > SMALL_CONTAINER_ENTRIES) {
+    return describe(value, budget);
+  }
+  return clipEntries(value, budget, entries);
+}
+
+/**
+ * A small stand-in for a result that is delivered some other way.
+ * It is bounded in bytes, not just in entries: ten items of two megabytes each are not a preview of anything.
+ */
+function previewOf(value, hint) {
+  if (value === null || value === undefined || typeof value !== "object") {
+    const text = typeof value === "string" ? value : String(value);
     return {
-      value: {
-        _type: "object",
-        _totalKeys: keys.length,
-        _showing: previewKeys.length,
-        _hint: tooManyKeys
-          ? `Large object with ${keys.length} keys. Showing first ${OBJECT_KEY_THRESHOLD}. Access specific keys in your code.`
-          : `Object serializes to ${jsonBytes} bytes. Nested values summarized. Access specific keys in your code.`,
-        preview,
-      },
-      wasTruncated: true,
+      _type: typeof value,
+      _length: text.length,
+      _hint: hint,
+      head: clipString(text, PREVIEW_BYTES),
     };
   }
 
-  return { value, wasTruncated: false };
+  if (Array.isArray(value)) {
+    const items = clipEntries(value, PREVIEW_BYTES, ARRAY_PREVIEW_ITEMS);
+    return {
+      _type: "array",
+      _total: value.length,
+      _showing: items.length,
+      _hint: hint,
+      items,
+    };
+  }
+
+  const preview = clipEntries(value, PREVIEW_BYTES, OBJECT_PREVIEW_KEYS);
+  return {
+    _type: "object",
+    _totalKeys: Object.keys(value).length,
+    _showing: Object.keys(preview).length,
+    _hint: hint,
+    preview,
+  };
+}
+
+function tooLarge(what, bytes, max, advice) {
+  return {
+    error: `Output too large (${bytes} bytes of ${what}, max ${max}). ${advice}`,
+    outcome: "output_too_large",
+  };
+}
+
+/**
+ * Decides how a successful result goes out.
+ *
+ * Whatever fits goes out whole, no matter how many records it holds.
+ * Only size can hold a result back, never item count: a list of 400 users is not a large result, and quietly returning 10 of them is worse than returning all 400.
+ * What doesn't fit is written to a file and answered with its path.
+ */
+function deliver(value, { resultStore, resultBytes, reduced } = {}) {
+  const json = JSON.stringify(value);
+  if (json === undefined) return { result: value };
+  const bytes = Buffer.byteLength(json);
+
+  if (reduced) {
+    // The sandbox had to cut nested values out to make this fit, so it is not the real result and must not be stored as if it were.
+    const cut =
+      reduced.depth > 0
+        ? `values nested deeper than ${reduced.depth} level${reduced.depth === 1 ? "" : "s"} were replaced by "[truncated: max depth]"`
+        : "only a description of it could be returned";
+    return {
+      result: value,
+      truncated: true,
+      resultBytes: reduced.bytes,
+      hint:
+        `The result is ${reduced.bytes} bytes at full depth, above the ${resultBytes}-byte limit, ` +
+        `so ${cut}. It was not written to a file because the file would be incomplete. ` +
+        "Return fewer fields, or page through the data and process it inside your code.",
+    };
+  }
+
+  if (bytes <= INLINE_RESULT_BYTES) return { result: value };
+
+  const stored = resultStore?.write(json);
+  if (stored) {
+    const hint =
+      "Preview only. The complete result is in the file named by `resultFile`.";
+    return {
+      result: previewOf(value, hint),
+      truncated: true,
+      resultBytes: bytes,
+      resultFile: stored.path,
+      hint:
+        `The result is ${bytes} bytes, above the ${INLINE_RESULT_BYTES}-byte inline limit, ` +
+        `so all of it was written to ${stored.path} as JSON. Read that file to get every ` +
+        "record; the preview in `result` is the first few entries only. The file is " +
+        "temporary and is removed automatically after a few hours.",
+    };
+  }
+
+  const reason = resultStore
+    ? ` and could not be written to a file (${resultStore.lastError ?? "unknown error"})`
+    : " and result files are disabled on this server";
+  return {
+    result: previewOf(
+      value,
+      "Preview only. The rest of the result was not kept.",
+    ),
+    truncated: true,
+    resultBytes: bytes,
+    hint:
+      `The result is ${bytes} bytes, above the ${INLINE_RESULT_BYTES}-byte inline limit${reason}. ` +
+      "Return less data from your code, for example by selecting only the fields you need " +
+      "or by paginating.",
+  };
 }
 
 const activeChildren = new Set();
@@ -124,7 +248,7 @@ const OUT_OF_MEMORY = /out of memory|allocation failed|cannot allocate/i;
  */
 export async function execute(
   code,
-  { apiToken, remote = false, signal, profile } = {},
+  { apiToken, remote = false, signal, profile, resultStore } = {},
 ) {
   if (typeof code !== "string" || !code.trim()) {
     return { error: "code must be a non-empty string" };
@@ -145,6 +269,10 @@ export async function execute(
   } catch (error) {
     return { error: error.message, outcome: "launch_failed" };
   }
+
+  // A local result may be as large as a file, whether or not one gets written: the parent can still preview it.
+  // A remote caller only ever sees what fits inline.
+  const resultBytes = remote ? INLINE_RESULT_BYTES : RESULT_FILE_BYTES;
 
   return new Promise((resolve) => {
     const [command, args] = launchCommand(runtime);
@@ -202,10 +330,14 @@ export async function execute(
       if (killed) return;
       stdout += stdoutDecoder.write(chunk);
       if (stdoutBytes > MAX_STDOUT) {
-        kill({
-          error: `Output too large (${stdoutBytes} bytes, max ${MAX_STDOUT}). Reduce scope of your query.`,
-          outcome: "output_too_large",
-        });
+        kill(
+          tooLarge(
+            "output",
+            stdoutBytes,
+            MAX_STDOUT,
+            "Reduce scope of your query.",
+          ),
+        );
       }
     });
 
@@ -248,17 +380,46 @@ export async function execute(
 
       try {
         const raw = JSON.parse(stdout);
+        const logs = raw.console ?? [];
+        // Console output is never stored, so it keeps its own small budget whether or not the snippet succeeded.
+        // Measured on the serialized form, which is what the model receives: ten thousand empty entries cost real bytes even though their text is nothing.
+        const logBytes = jsonBytes(logs);
+        if (logBytes > MAX_CONSOLE) {
+          return settle(
+            tooLarge(
+              "console output",
+              logBytes,
+              MAX_CONSOLE,
+              "Log less, or return the data instead.",
+            ),
+          );
+        }
 
         if (raw.ok) {
-          const { value, wasTruncated } = smartSummarize(raw.result);
-          const out = { result: value };
-          if (wasTruncated) out.truncated = true;
-          if (raw.console?.length) out.console = raw.console;
+          const out = deliver(raw.result, {
+            resultStore,
+            resultBytes,
+            reduced: raw.reduced,
+          });
+          if (logs.length) out.console = logs;
           return settle(out);
         }
-        const { ok, console: logs, error, ...failure } = raw;
+
+        const { ok, console: _logs, error, ...failure } = raw;
         const out = { error: error ?? "Unknown error", ...failure };
-        if (logs?.length) out.console = logs;
+        // Failures are never stored either, so the error has to fit inline.
+        const failureBytes = jsonBytes(out);
+        if (failureBytes > INLINE_RESULT_BYTES) {
+          return settle(
+            tooLarge(
+              "error details",
+              failureBytes,
+              INLINE_RESULT_BYTES,
+              "The snippet threw, and the error was too large to return. Catch the error and return a shorter description of it.",
+            ),
+          );
+        }
+        if (logs.length) out.console = logs;
         return settle(out);
       } catch (e) {
         return settle({
@@ -295,7 +456,11 @@ export async function execute(
       JSON.stringify({
         code,
         fastlyApiToken: apiToken,
-        policy: { remote, deadlineMs: timeoutMs + CHILD_GRACE_MS },
+        policy: {
+          remote,
+          resultBytes,
+          deadlineMs: timeoutMs + CHILD_GRACE_MS,
+        },
       }),
     );
   });
