@@ -1,12 +1,31 @@
 import { enrichMethod } from "../indexer.js";
+import { remoteUnavailableOperations } from "../method-policy.js";
 
-export function inspect(index, method) {
+// The remote index leaves these operations out, so without this the model
+// would be told the method does not exist.
+function remoteExplanation(queryLower) {
+  const [first, second] = queryLower.split(".", 2);
+  const denied = remoteUnavailableOperations().find((operation) => {
+    const methodLower = operation.method.toLowerCase();
+    if (second === undefined) return methodLower === first;
+    return methodLower === second && operation.apiClass.toLowerCase() === first;
+  });
+  if (!denied) return undefined;
+  return `${denied.apiClass}.${denied.method} is unavailable on this remote server. ${denied.reason}`;
+}
+
+export function inspect(index, method, { remote = false } = {}) {
   if (typeof method !== "string" || !method.trim()) {
     return { ok: false, error: "method must be a non-empty string" };
   }
 
   const query = method.trim();
   const queryLower = query.toLowerCase();
+
+  if (remote) {
+    const explanation = remoteExplanation(queryLower);
+    if (explanation) return { ok: false, error: explanation };
+  }
 
   for (const m of index) enrichMethod(m);
 

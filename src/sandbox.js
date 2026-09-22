@@ -1,6 +1,7 @@
 import vm from "node:vm";
 import Fastly from "fastly";
 import { describeThrown } from "./errors.js";
+import { operationsOf, remoteDenial } from "./method-policy.js";
 import { safeSerialize } from "./serializer.js";
 
 const input =
@@ -13,37 +14,67 @@ const input =
           resolve(Buffer.concat(chunks).toString()),
         );
       });
-const { code, fastlyApiToken } = JSON.parse(input);
+const { code, fastlyApiToken, policy } = JSON.parse(input);
+
+// Only the host decides this; it arrives next to the code, never inside it.
+const remote = policy?.remote === true;
+
+// The parent normally kills us at its deadline; if it died first, nothing
+// else would stop a snippet parked on a hung request.
+if (Number.isFinite(policy?.deadlineMs)) {
+  setTimeout(() => process.exit(1), policy.deadlineMs).unref();
+}
 
 if (fastlyApiToken) {
   Fastly.ApiClient.instance.authenticate(fastlyApiToken);
 }
 
-function lowerFirst(name) {
-  return name.charAt(0).toLowerCase() + name.slice(1);
+const FASTLY_ORIGINS = new Set([
+  "https://api.fastly.com",
+  "https://rt.fastly.com",
+]);
+
+if (remote) {
+  // Generated methods already pin their origin; this second lock also keeps
+  // a redirect from carrying the caller's token elsewhere.
+  Fastly.ApiClient.instance.plugins = [
+    (request) => {
+      if (!FASTLY_ORIGINS.has(new URL(request.url).origin)) {
+        throw new Error("Remote executions can only reach the Fastly API");
+      }
+      request.redirects(0);
+    },
+  ];
 }
 
-const apiInstances = {};
-const apiClasses = [];
+const apiInstances = new Map();
 for (const name of Object.keys(Fastly)) {
   if (!/Api$/.test(name)) continue;
   const Ctor = Fastly[name];
   if (typeof Ctor !== "function") continue;
   try {
-    apiInstances[lowerFirst(name)] = new Ctor();
-    apiClasses.push(name);
+    apiInstances.set(name, {
+      instance: new Ctor(),
+      operations: operationsOf(Ctor),
+    });
   } catch {
-    // Construction failed — skip it from the sandbox facade.
+    // Construction failed, so it stays out of the sandbox facade.
   }
 }
+const apiClasses = [...apiInstances.keys()];
+
+const REMOTE_FETCH_MESSAGE =
+  "fetch is not available on a remote server. Use the Fastly API globals such as serviceApi instead.";
 
 const consoleLogs = [];
 const activeFetches = new Map();
 
-const NO_TOKEN_HINT =
-  "No Fastly API token is configured. Set FASTLY_API_TOKEN in the environment of the MCP server and restart it.";
-const BAD_TOKEN_HINT =
-  "Fastly rejected the API token. Check that FASTLY_API_TOKEN is current and has not been revoked.";
+const NO_TOKEN_HINT = remote
+  ? "No Fastly API token reached this execution. Set the Fastly-Key header in your MCP client configuration."
+  : "No Fastly API token is configured. Set FASTLY_API_TOKEN in the environment of the MCP server and restart it.";
+const BAD_TOKEN_HINT = remote
+  ? "Fastly rejected the API token. Update the Fastly-Key header in your MCP client configuration with a current token."
+  : "Fastly rejected the API token. Check that FASTLY_API_TOKEN is current and has not been revoked.";
 const FORBIDDEN_HINT =
   "The API token was accepted but is not allowed to perform this operation. Check its scope and whether it can reach this service or customer account.";
 
@@ -55,10 +86,15 @@ function authHint(status) {
 
 async function callFastly(payload) {
   const { apiClass, method, args } = JSON.parse(payload);
-  const instance = apiInstances[lowerFirst(apiClass)];
-  if (!instance || typeof instance[method] !== "function") {
+  const api = apiInstances.get(apiClass);
+  if (!api?.operations.has(method)) {
     throw new Error(`Unknown Fastly API method: ${apiClass}.${method}`);
   }
+  const denial = remote ? remoteDenial(apiClass, method) : undefined;
+  if (denial) {
+    throw new Error(`${apiClass}.${method} is unavailable here. ${denial}`);
+  }
+  const { instance } = api;
   try {
     const result = await instance[method](...args);
     return JSON.stringify({ ok: true, value: safeSerialize(result) });
@@ -78,6 +114,10 @@ async function hostBridge(kind, payload) {
       const { level, text } = JSON.parse(payload);
       consoleLogs.push({ level, text });
       return JSON.stringify({ ok: true, value: null });
+    }
+
+    if (remote && (kind === "fetch" || kind === "fetch-abort")) {
+      throw new Error(REMOTE_FETCH_MESSAGE);
     }
 
     if (kind === "fetch") {
@@ -705,6 +745,9 @@ function writeResultAndExit(out) {
 try {
   if (!process.versions.bun && typeof vm.SourceTextModule !== "function") {
     throw new Error("Node sandbox requires --experimental-vm-modules");
+  }
+  if (remote && process.versions.bun) {
+    throw new Error("Remote executions require Node.js");
   }
   const denyImport = installFacade(
     hostBridge,
