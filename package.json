@@ -46,10 +46,10 @@
     "@modelcontextprotocol/server": "^2.0.0",
     "fast-cipher": "0.2.0",
     "fastly": "^16.1.0",
-    "zod": "^4.4.3"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.9",
+    "@biomejs/biome": "^2.5.14",
     "@modelcontextprotocol/client": "^2.0.0"
   }
 }
