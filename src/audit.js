@@ -144,14 +144,24 @@ export function createAuditLog({
  * Writes are synchronous so a record is on its way to disk before the request
  * it describes is answered.
  */
-export function fileSink(path) {
+export function fileSink(path, { write = writeSync } = {}) {
   const fd = openSync(path, "a", 0o600);
   // The open mode only applies to a file created here; a log rotated back in
   // by another tool may be world-readable.
   fchmodSync(fd, 0o600);
   return {
     write: (line) => {
-      writeSync(fd, line);
+      const buffer = Buffer.from(line);
+      let offset = 0;
+      while (offset < buffer.length) {
+        const written = write(fd, buffer, offset, buffer.length - offset);
+        if (written <= 0) {
+          throw new Error(
+            `short write: ${offset} of ${buffer.length} audit bytes were stored`,
+          );
+        }
+        offset += written;
+      }
     },
     close: () => closeSync(fd),
   };

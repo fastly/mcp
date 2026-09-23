@@ -114,6 +114,12 @@ async function callFastly(payload) {
       shrink: false,
     });
     // Better an error the snippet can read than a response full of placeholders with nothing to say so.
+    if (reduced?.cappedDepth !== undefined) {
+      throw new Error(
+        `The response from ${apiClass}.${method} nested deeper than ${reduced.cappedDepth} levels and cannot be represented completely. ` +
+          "Use the method's paging or filtering parameters to fetch less at a time.",
+      );
+    }
     if (reduced) {
       throw new Error(
         `The response from ${apiClass}.${method} is ${reduced.bytes} bytes, more than the ` +

@@ -58,6 +58,8 @@ export function serializeResult(
     shrink = true,
   } = {},
 ) {
+  let cappedDepth;
+
   function walkProp(obj, key, depth, seen, depthLimit) {
     const read = readProp(obj, key);
     return read.ok
@@ -66,7 +68,10 @@ export function serializeResult(
   }
 
   function walk(val, depth, seen, depthLimit) {
-    if (depth > depthLimit) return "[truncated: max depth]";
+    if (depth > depthLimit) {
+      if (depthLimit === maxDepth) cappedDepth = maxDepth;
+      return "[truncated: max depth]";
+    }
     if (val === null || val === undefined) return val;
 
     const type = typeof val;
@@ -195,12 +200,23 @@ export function serializeResult(
     if (json === undefined) return { value: null };
     const jsonBytes = Buffer.byteLength(json);
     if (depthLimit === maxDepth) {
-      if (jsonBytes <= maxSize) return { value: normalized };
+      if (jsonBytes <= maxSize) {
+        return cappedDepth
+          ? {
+              value: normalized,
+              reduced: { bytes: jsonBytes, depth: maxDepth, cappedDepth },
+            }
+          : { value: normalized };
+      }
       fullBytes = jsonBytes;
     } else if (jsonBytes <= reducedMaxSize) {
       return {
         value: normalized,
-        reduced: { bytes: fullBytes, depth: depthLimit },
+        reduced: {
+          bytes: fullBytes,
+          depth: depthLimit,
+          ...(cappedDepth === undefined ? {} : { cappedDepth }),
+        },
       };
     }
 
@@ -222,7 +238,11 @@ export function serializeResult(
           _message: `Result too large to serialize (${fullBytes} bytes). Return fewer fields, or page through the data and process it inside your code.`,
           _previewKeys: previewKeys,
         },
-        reduced: { bytes: fullBytes, depth: 0 },
+        reduced: {
+          bytes: fullBytes,
+          depth: 0,
+          ...(cappedDepth === undefined ? {} : { cappedDepth }),
+        },
       };
     }
   }

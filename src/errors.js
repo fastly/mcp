@@ -26,6 +26,15 @@ function dump(value) {
   return JSON.stringify(safeSerialize(value)) ?? "";
 }
 
+function read(value, key) {
+  if (value === null || value === undefined) return undefined;
+  try {
+    return value[key];
+  } catch {
+    return undefined;
+  }
+}
+
 // Raw payloads are reported as they arrived, even a literal "{}".
 function rawBody(value) {
   if (typeof value !== "string") return undefined;
@@ -47,10 +56,11 @@ function parsedBody(value) {
 // `{ status, statusText, body, response, error }`, where `body` is `{}` unless the
 // response was JSON and `response.text` holds what the API actually said.
 function pickBody(err) {
+  const response = read(err, "response");
   return (
-    parsedBody(err.body) ??
-    rawBody(err.response?.text) ??
-    parsedBody(err.response?.body)
+    parsedBody(read(err, "body")) ??
+    rawBody(read(response, "text")) ??
+    parsedBody(read(response, "body"))
   );
 }
 
@@ -73,12 +83,21 @@ export function describeThrown(err) {
   if (typeof err !== "object") return { error: String(err) };
 
   const out = {};
-  const status = firstNumber(err.status, err.statusCode, err.response?.status);
-  const statusText = firstString(err.statusText, err.response?.statusText);
+  const response = read(err, "response");
+  const status = firstNumber(
+    read(err, "status"),
+    read(err, "statusCode"),
+    read(response, "status"),
+  );
+  const statusText = firstString(
+    read(err, "statusText"),
+    read(response, "statusText"),
+  );
   // Superagent sets the callback error's message to the reason phrase, which is
   // the only place a Fastly failure spells out "Unauthorized" or "Not Found".
-  const reason = statusText ?? firstString(err.error?.message);
-  const message = firstString(err.message);
+  const reason = statusText ?? firstString(read(read(err, "error"), "message"));
+  const message = firstString(read(err, "message"));
+  const constructorName = read(read(err, "constructor"), "name");
 
   if (message) {
     out.error = message;
@@ -86,20 +105,20 @@ export function describeThrown(err) {
     out.error = reason ? `HTTP ${status} ${reason}` : `HTTP ${status}`;
   } else if (reason) {
     out.error = reason;
-  } else if (err.constructor && err.constructor.name !== "Object") {
-    out.error = `${err.constructor.name} (no message)`;
+  } else if (constructorName && constructorName !== "Object") {
+    out.error = `${constructorName} (no message)`;
   } else {
     out.error = describeOpaque(err);
   }
 
-  const cause = firstString(err.cause?.message);
+  const cause = firstString(read(read(err, "cause"), "message"));
   if (cause && !out.error.includes(cause)) out.error = `${out.error}: ${cause}`;
 
   if (status !== undefined) out.status = status;
   if (statusText) out.statusText = statusText;
   const body = pickBody(err);
   if (body !== undefined) out.body = body;
-  const hint = firstString(err.hint);
+  const hint = firstString(read(err, "hint"));
   if (hint) out.hint = hint;
 
   return out;

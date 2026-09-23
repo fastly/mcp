@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { getExecutionRuntime } from "../src/execution-runtime.js";
 import { PREVIEW_BYTES } from "../src/limits.js";
@@ -62,9 +62,23 @@ function executeScripted(script, options) {
 const LATE_REJECTION_CODE =
   'Promise.reject(new Error("late")); console.log("x".repeat(90000)); return 7;';
 
+const temporaryStores = new Set();
+
 function tempStore(options) {
-  return createResultStore({ dir: tempDir("execute-results"), ...options });
+  const store = createResultStore({
+    dir: tempDir("execute-results"),
+    ...options,
+  });
+  temporaryStores.add(store);
+  return store;
 }
+
+afterAll(() => {
+  for (const store of temporaryStores) {
+    store.close();
+    rmSync(store.directory, { recursive: true, force: true });
+  }
+});
 
 // The bound is measured on the JSON the model receives, give or take the truncation notes.
 function expectPreviewBounded(result) {
@@ -104,6 +118,16 @@ describe("execute", () => {
     expect(result.stack).toBeDefined();
     expect(typeof result.stack).toBe("string");
     expect(result.result).toBeUndefined();
+  }, 10000);
+
+  test("an error with a throwing metadata getter stays a user error", async () => {
+    const result = await execute(`
+      const error = new Error("user failure");
+      Object.defineProperty(error, "status", { get() { throw new Error("getter trap"); } });
+      throw error;
+    `);
+    expect(result.error).toBe("user failure");
+    expect(result.error).not.toContain("Subprocess error");
   }, 10000);
 
   test("stack points at the offending user line and hides sandbox internals", async () => {
@@ -307,16 +331,14 @@ describe("execute", () => {
     expect(result).toEqual({ result: "function" });
   }, 10000);
 
-  test("process.env in subprocess is scrubbed except FASTLY_API_TOKEN", async () => {
-    const sentinel = `FASTLY_MCP_TEST_SENTINEL_${Date.now()}`;
-    process.env[sentinel] = "leaked";
+  test("the subprocess does not inherit parent NODE_OPTIONS", async () => {
+    const previous = process.env.NODE_OPTIONS;
+    process.env.NODE_OPTIONS = "--not-a-real-node-option";
     try {
-      const result = await execute(
-        `const fs = await import("node:fs"); return fs.readFileSync("/etc/passwd","utf8");`,
-      );
-      expect(result.error).toBeDefined();
+      expect(await execute("return 42;")).toEqual({ result: 42 });
     } finally {
-      delete process.env[sentinel];
+      if (previous === undefined) delete process.env.NODE_OPTIONS;
+      else process.env.NODE_OPTIONS = previous;
     }
   }, 10000);
 
@@ -722,6 +744,17 @@ describe("execute", () => {
     expect(result.hint).toContain("not written to a file");
     expect(readdirSync(store.directory)).toEqual([]);
   }, 20000);
+
+  test("a small result beyond the depth cap is flagged as incomplete", async () => {
+    const result = await execute(
+      "let value = { leaf: 42 }; for (let i = 0; i < 7; i++) value = { next: value }; return value;",
+    );
+    expect(result.truncated).toBe(true);
+    expect(result.resultBytes).toBeUndefined();
+    expect(result.resultFile).toBeUndefined();
+    expect(JSON.stringify(result.result)).toContain("[truncated: max depth]");
+    expect(result.hint).toContain("complete size is unknown");
+  }, 10000);
 
   // The hint has to name the remote budget, not the local one.
   test("a remote hint names the remote limit", async () => {

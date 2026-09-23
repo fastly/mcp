@@ -129,7 +129,9 @@ describe("readFastlyKey", () => {
       "Fastly-Key",
       TOKEN_A,
     ];
-    for (const rawHeaders of [conflicting, repeated]) {
+    const emptyFirst = ["Fastly-Key", "", "Fastly-Key", TOKEN_A];
+    const emptyLast = ["Fastly-Key", TOKEN_A, "Fastly-Key", ""];
+    for (const rawHeaders of [conflicting, repeated, emptyFirst, emptyLast]) {
       expectAuthError(
         thrownBy(() => readFastlyKey(rawHeaders)),
         400,
@@ -346,6 +348,23 @@ describe("token validation against Fastly", () => {
       expect(calls).toHaveLength(1);
       expect(validator.cacheSize).toBe(0);
     }
+  });
+
+  test("a token that expires during the customer fallback is refused", async () => {
+    const expiresAt = new Date(WALL_START + 1000).toISOString();
+    let fastly;
+    fastly = harness((url) => {
+      if (url === TOKEN_SELF_URL) {
+        return json({ id: "tokenA1", expires_at: expiresAt });
+      }
+      fastly.advanceWallOnly(1000);
+      return json({ id: "customerA1" });
+    });
+
+    const error = await rejection(fastly.validator.validate(TOKEN_A));
+    expectAuthError(error, 401, "key_expired");
+    expect(fastly.calls).toHaveLength(2);
+    expect(fastly.validator.cacheSize).toBe(0);
   });
 
   test("a future expiration is reported on the identity", async () => {

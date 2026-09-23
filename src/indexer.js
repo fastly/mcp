@@ -67,6 +67,7 @@ function cleanDocText(text) {
     .replace(/&amp;/g, "&")
     .replace(/&#39;/g, "'")
     .replace(/&quot;/g, '"')
+    .replace(/&#x3d;/gi, "=")
     .replace(/\\/g, "")
     .trim();
 }

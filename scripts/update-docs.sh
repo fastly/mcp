@@ -17,7 +17,7 @@ git clone --depth 1 --branch "$BRANCH" --filter=blob:none --sparse "$REPO" "$TMP
 cd "$TMP/fastly-js"
 git sparse-checkout set docs
 
-count=$(ls docs/*Api.md 2>/dev/null | wc -l | tr -d ' ')
+count=$(find docs -maxdepth 1 -type f -name '*Api.md' -print | wc -l | tr -d ' ')
 if [ "$count" -eq 0 ]; then
   echo "Error: no *Api.md files found in upstream docs/" >&2
   exit 1

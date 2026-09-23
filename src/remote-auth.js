@@ -31,18 +31,18 @@ export class RemoteAuthError extends Error {
 
 export function readFastlyKey(rawHeaders) {
   const values = rawHeaderValues(rawHeaders, "fastly-key");
-  if (values.length === 0 || values[0] === "") {
-    throw new RemoteAuthError(
-      401,
-      "key_missing",
-      `A Fastly-Key header is required. ${KEY_HINT}`,
-    );
-  }
   if (values.length > 1) {
     throw new RemoteAuthError(
       400,
       "key_duplicated",
       "Send exactly one Fastly-Key header.",
+    );
+  }
+  if (values.length === 0 || values[0] === "") {
+    throw new RemoteAuthError(
+      401,
+      "key_missing",
+      `A Fastly-Key header is required. ${KEY_HINT}`,
     );
   }
   const [key] = values;
@@ -131,6 +131,14 @@ function expirationOf(value) {
   return parsed;
 }
 
+function expiredKey() {
+  return new RemoteAuthError(
+    401,
+    "key_expired",
+    `The Fastly API token has expired. ${KEY_HINT}`,
+  );
+}
+
 async function lookUpIdentity(fetchImpl, token, wallClock) {
   const self = await fetchJson(fetchImpl, TOKEN_SELF_URL, token);
   if (self.status !== 200) {
@@ -144,11 +152,7 @@ async function lookUpIdentity(fetchImpl, token, wallClock) {
   if (typeof id !== "string" || !IDENTIFIER.test(id)) throw unavailable();
   const expiresAt = expirationOf(expiry);
   if (expiresAt <= wallClock()) {
-    throw new RemoteAuthError(
-      401,
-      "key_expired",
-      `The Fastly API token has expired. ${KEY_HINT}`,
-    );
+    throw expiredKey();
   }
 
   const identity = { tokenId: id, customerId: null, expiresAt };
@@ -160,6 +164,7 @@ async function lookUpIdentity(fetchImpl, token, wallClock) {
   // They stay valid for discovery; execution is refused later for lack of a
   // customer to charge.
   const customer = await fetchJson(fetchImpl, CURRENT_CUSTOMER_URL, token);
+  if (expiresAt <= wallClock()) throw expiredKey();
   const fallbackId = customer.body?.id;
   if (typeof fallbackId === "string" && IDENTIFIER.test(fallbackId)) {
     identity.customerId = fallbackId;

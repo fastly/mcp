@@ -102,6 +102,24 @@ describe("large Fastly API responses through the sandbox bridge", () => {
     expect(out.result).toBe("too large");
   }, 30000);
 
+  test("a deeply nested response is refused instead of returned incomplete", async () => {
+    let body = { leaf: 42 };
+    for (let i = 0; i < 7; i++) body = { next: body };
+    nextResponse = {
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(body),
+    };
+
+    const out = await runSandbox(
+      "return await iamPermissionsApi.listPermissions();",
+      { fastlyApiToken: "token" },
+    );
+    expect(out.ok).toBe(false);
+    expect(out.error).toContain("nested deeper than 6 levels");
+    expect(JSON.stringify(out)).not.toContain("[truncated: max depth]");
+  }, 15000);
+
   // What a snippet may receive is separate from what it may return.
   test("a remote snippet receives a response larger than its result budget intact", async () => {
     nextResponse = {

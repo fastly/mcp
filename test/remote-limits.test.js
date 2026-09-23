@@ -209,10 +209,11 @@ describe("execution fairness and cleanup (Node parent)", () => {
     const children = childrenOf(server.child.pid);
     expect(children.length).toBeGreaterThan(0);
 
-    server.child.kill("SIGTERM");
+    server.child.kill("SIGHUP");
     await once(server.child, "exit");
     await hung;
     await until(() => children.every((pid) => !isAlive(pid)));
+    expect(server.getStderr()).toContain("Shutting down (SIGHUP)");
     // The interrupted call must not be replayed against Fastly.
     expect(hangs().length).toBe(before + 1);
   }, 30000);

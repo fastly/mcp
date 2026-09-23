@@ -53,6 +53,17 @@ describe("safeSerialize", () => {
     expect(result.l1.l2.l3).toBe("[truncated: max depth]");
   });
 
+  test("serializeResult reports a depth cap even when the preview fits", () => {
+    const value = { a: { b: { c: { leaf: 42 } } } };
+    const result = serializeResult(value, { maxDepth: 2 });
+    expect(result.value.a.b.c).toBe("[truncated: max depth]");
+    expect(result.reduced).toEqual({
+      bytes: Buffer.byteLength(JSON.stringify(result.value)),
+      depth: 2,
+      cappedDepth: 2,
+    });
+  });
+
   test("oversized output triggers depth reduction to fit within maxSize", () => {
     // Build a wide object with enough nested data to exceed a tiny maxSize
     const big = {};

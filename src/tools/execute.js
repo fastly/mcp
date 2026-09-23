@@ -195,6 +195,19 @@ function deliver(value, { resultStore, resultBytes, reduced, shield } = {}) {
       reduced.depth > 0
         ? `values nested deeper than ${reduced.depth} level${reduced.depth === 1 ? "" : "s"} were replaced by "[truncated: max depth]"`
         : "only a description of it could be returned";
+    if (reduced.cappedDepth !== undefined) {
+      const reason =
+        reduced.depth === reduced.cappedDepth
+          ? `The result nested deeper than ${reduced.cappedDepth} levels, so ${cut}.`
+          : `The result was ${reduced.bytes} bytes after values deeper than ${reduced.cappedDepth} levels were omitted, still above the ${resultBytes}-byte limit, so ${cut}.`;
+      return {
+        result: value,
+        truncated: true,
+        hint:
+          `${reason} Its complete size is unknown, and it was not written to a file because the file would be incomplete. ` +
+          "Return fewer fields, or page through the data and process it inside your code.",
+      };
+    }
     return {
       result: value,
       truncated: true,

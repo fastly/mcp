@@ -689,8 +689,9 @@ export async function startHttp(
     await onShutdown?.();
     process.exit(0);
   }
-  process.on("SIGINT", () => shutdown("SIGINT"));
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+    process.on(signal, () => shutdown(signal));
+  }
 
   await new Promise((resolve, reject) => {
     server.once("error", reject);

@@ -82,6 +82,7 @@ export function createResultStore({
   maxAgeMs = DEFAULT_MAX_AGE_MS,
   sweepIntervalMs = DEFAULT_SWEEP_INTERVAL_MS,
   now = Date.now,
+  random = randomBytes,
 } = {}) {
   const directory = resolve(dir);
   let lastError;
@@ -130,6 +131,7 @@ export function createResultStore({
     /** Returns `{ path, bytes }`, or null when the result could not be stored. */
     write(text) {
       let path;
+      let created = false;
       try {
         const buffer = Buffer.from(text);
         if (buffer.length > maxBytes) {
@@ -140,10 +142,11 @@ export function createResultStore({
         // Every time, since the directory may have been removed or replaced since the last write.
         prepareDirectory(directory);
         const stamp = String(now()).padStart(14, "0");
-        const name = `${PREFIX}${stamp}-${randomBytes(6).toString("hex")}.json`;
+        const name = `${PREFIX}${stamp}-${random(6).toString("hex")}.json`;
         path = join(directory, name);
         // "wx" refuses to follow a symlink or overwrite anything.
         const fd = openSync(path, "wx", 0o600);
+        created = true;
         try {
           writeFully(fd, buffer);
         } finally {
@@ -154,7 +157,7 @@ export function createResultStore({
         return { path, bytes: buffer.length };
       } catch (error) {
         lastError = describeThrown(error).error;
-        if (path) {
+        if (created) {
           try {
             rmSync(path, { force: true });
           } catch {

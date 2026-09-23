@@ -55,6 +55,19 @@ describe("result files", () => {
     expect(readFileSync(first.path, "utf8")).toBe('{"n":1}');
   });
 
+  test("a name collision does not delete the existing result", () => {
+    const dir = join(base, "results");
+    const store = createResultStore({
+      dir,
+      now: () => 1_000_000,
+      random: () => Buffer.alloc(6, 0xab),
+    });
+    const first = store.write('{"n":1}');
+    expect(store.write('{"n":2}')).toBeNull();
+    expect(store.lastError).toContain("EEXIST");
+    expect(readFileSync(first.path, "utf8")).toBe('{"n":1}');
+  });
+
   test("keeps only the newest files", () => {
     let clock = 1_000_000;
     const store = createResultStore({
@@ -257,8 +270,7 @@ describe("result files", () => {
     },
   );
 
-  test("refuses a directory this user does not own", () => {
-    // A symlink would aim a private write at a path somebody else chose.
+  test("refuses a symlink where the result directory should be", () => {
     const target = join(base, "elsewhere");
     const link = join(base, "link");
     symlinkSync(target, link);

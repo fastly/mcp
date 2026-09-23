@@ -153,4 +153,29 @@ describe("describeThrown", () => {
       "WeirdFailure (no message)",
     );
   });
+
+  test("throwing metadata getters do not hide a usable message", () => {
+    const failure = { message: "useful failure" };
+    Object.defineProperty(failure, "status", {
+      get() {
+        throw new Error("getter trap");
+      },
+    });
+    expect(describeThrown(failure)).toEqual({ error: "useful failure" });
+  });
+
+  test("a proxy that refuses every property read is still described", () => {
+    const failure = new Proxy(
+      {},
+      {
+        get() {
+          throw new Error("getter trap");
+        },
+      },
+    );
+    expect(() => describeThrown(failure)).not.toThrow();
+    expect(describeThrown(failure).error).toBe(
+      "Unknown error (empty object thrown)",
+    );
+  });
 });

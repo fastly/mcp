@@ -114,6 +114,15 @@ describe("buildIndex – parse correctness", () => {
     );
     expect(getHistStats.description).toContain("for each of your");
   });
+
+  test("parameter descriptions decode the entities used by the generated docs", () => {
+    const header = index.find(
+      (m) => m.apiClass === "HeaderApi" && m.method === "createHeaderObject",
+    );
+    const ignoreIfSet = header.params.find((p) => p.name === "ignore_if_set");
+    expect(ignoreIfSet.description).toContain('0" = false');
+    expect(ignoreIfSet.description).not.toContain("&#x3D;");
+  });
 });
 
 describe("buildIndex – golden test", () => {

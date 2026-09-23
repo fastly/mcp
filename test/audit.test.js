@@ -6,6 +6,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  writeSync as writeFileChunk,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -550,6 +551,21 @@ describe("fileSink", () => {
       "startup",
     ]);
     expect(records[2].run).toBe(2);
+  });
+
+  test("finishes a short write before accepting the record", () => {
+    const path = join(directory, "short-write.log");
+    let writes = 0;
+    const sink = fileSink(path, {
+      write(fd, buffer, offset, length) {
+        writes++;
+        return writeFileChunk(fd, buffer, offset, Math.min(length, 3));
+      },
+    });
+    sink.write('{"event":"startup"}\n');
+    sink.close();
+    expect(writes).toBeGreaterThan(1);
+    expect(readFileSync(path, "utf8")).toBe('{"event":"startup"}\n');
   });
 
   test("a path that cannot be opened fails at startup, not at the first record", () => {

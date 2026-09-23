@@ -135,10 +135,21 @@ describe("inspect", () => {
   });
 
   test("usage snippet has empty parens when no params", () => {
-    // Need a method with no params for this - getService has params
-    // bulkPurgeTag has params too. Let's just test the general structure.
-    const result = inspect(mockIndex, "listServices");
-    expect(result.usage).toContain("return await");
+    const result = inspect(
+      [
+        {
+          apiClass: "StatusApi",
+          method: "ping",
+          httpMethod: "GET",
+          httpPath: "/status",
+          description: "Check API status",
+          params: [],
+          returnType: "String",
+        },
+      ],
+      "ping",
+    );
+    expect(result.usage).toBe("return await statusApi.ping();");
   });
 
   test("inspect surfaces constraints when present", () => {
