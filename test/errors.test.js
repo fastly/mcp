@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { describeThrown } from "../src/errors.js";
+import { GITHUB_PAT } from "./helpers.js";
 
 // The exact shape the Fastly client rejects with on a 401: a bare object, no
 // `message`, an empty `body` because the response was text/plain, and the real
@@ -96,6 +97,29 @@ describe("describeThrown", () => {
     const out = describeThrown({ status: 500, body: "x".repeat(5000) });
     expect(out.body.length).toBe(2001);
     expect(out.body.endsWith("…")).toBe(true);
+  });
+
+  // The body is cut in the sandbox, before any shield runs, and an API failure gets described twice on its way out.
+  test("a body cut never goes through a secret, however many times it is cut", () => {
+    const token = GITHUB_PAT;
+    const across = describeThrown({
+      status: 500,
+      body: `${" ".repeat(1970)}${token} tail`,
+    });
+    expect(across.body).toBe(`${" ".repeat(1970)}…`);
+    expect(describeThrown({ status: 500, body: across.body }).body).toBe(
+      across.body,
+    );
+
+    // Kept whole when it ends right at the cut, and kept again when the result is cut a second time.
+    const ending = describeThrown({
+      status: 500,
+      body: `${" ".repeat(1960)}${token} tail`,
+    });
+    expect(ending.body).toBe(`${" ".repeat(1960)}${token}…`);
+    expect(describeThrown({ status: 500, body: ending.body }).body).toBe(
+      ending.body,
+    );
   });
 
   test("thrown non-objects are described, never stringified to [object Object]", () => {

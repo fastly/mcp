@@ -6,20 +6,20 @@ import {
   TokenEncryptor,
 } from "fast-cipher/tokens";
 
+/** What a caller gets instead of a result that could not be encrypted. */
+export const WITHHELD =
+  "The result was withheld because a secret in it could not be encrypted. Return less data, or leave the secret out of the result.";
+
 export class SecretShield {
   #encryptor;
   #registry = new Map();
   #tweak;
   #destroyed = false;
 
-  constructor({ key, tweak, extraPatterns } = {}) {
+  // No custom patterns: text cut before the shield runs is only checked against the built-in ones.
+  constructor({ key, tweak } = {}) {
     this.#encryptor = new TokenEncryptor(key ?? randomBytes(16));
     this.#tweak = tweak;
-    if (extraPatterns) {
-      for (const p of extraPatterns) {
-        this.#encryptor.register(p);
-      }
-    }
   }
 
   encrypt(text) {

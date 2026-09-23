@@ -2,6 +2,17 @@ import { mkdtempSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PREVIEW_BYTES } from "../src/limits.js";
+
+// A token in GitHub's format, for tests that check a secret never gets out in plaintext.
+export const GITHUB_PAT = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij";
+
+// Code returning a `length`-character string whose preview is cut right before the token's last character.
+// It follows clipString: the preview budget, minus the truncation note and the string's two quotes.
+export function tokenAtPreviewCut(token, length = 100_001) {
+  const kept = PREVIEW_BYTES - ` [${length} chars, truncated]`.length - 2;
+  return `return " ".repeat(${kept - token.length + 1}) + "${token}" + " ".repeat(${length - kept - 1});`;
+}
 
 // Ephemeral loopback HTTP server for tests. The returned url has no
 // trailing slash; close() resolves once the socket is gone.

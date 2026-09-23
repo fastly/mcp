@@ -4,6 +4,7 @@ import { describeThrown } from "./errors.js";
 import { API_RESPONSE_BYTES, INLINE_RESULT_BYTES } from "./limits.js";
 import { operationsOf, remoteDenial } from "./method-policy.js";
 import { serializeResult } from "./serializer.js";
+import { truncateOutsideSecrets } from "./truncate.js";
 
 const input =
   typeof Bun !== "undefined"
@@ -739,7 +740,8 @@ function rewriteError(err, source) {
     const srcLines = source.split("\n");
     const raw = srcLines[firstUserFrame.number - 1];
     if (raw !== undefined) {
-      const trimmed = raw.length > 200 ? `${raw.slice(0, 200)}…` : raw;
+      // Arguments are decrypted before the code runs, so this line can hold a secret the model only saw encrypted.
+      const trimmed = truncateOutsideSecrets(raw, 200, "…");
       out.line = {
         number: firstUserFrame.number,
         column: firstUserFrame.column,

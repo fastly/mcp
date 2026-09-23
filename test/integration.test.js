@@ -3,10 +3,9 @@ import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
-import { tempDir } from "./helpers.js";
+import { GITHUB_PAT, tempDir, tokenAtPreviewCut } from "./helpers.js";
 
 const SERVER_PATH = join(import.meta.dir, "../src/index.js");
-const GITHUB_PAT = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij";
 
 function connectClient({ env = {}, extraArgs = [] } = {}) {
   const transport = new StdioClientTransport({
@@ -86,7 +85,7 @@ describe("large results over MCP", () => {
     });
     await sealed.connect(sealedTransport);
     try {
-      const token = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij";
+      const token = GITHUB_PAT;
       const response = await sealed.callTool({
         name: "execute",
         arguments: {
@@ -103,6 +102,12 @@ describe("large results over MCP", () => {
       expect(records).toHaveLength(2000);
       expect(records[1999].token).toStartWith("ghp_");
       expect(parsed.result.items[0].token).toBe(records[0].token);
+
+      const cut = await sealed.callTool({
+        name: "execute",
+        arguments: { code: tokenAtPreviewCut(token) },
+      });
+      expect(cut.content[0].text).not.toContain(token.slice(0, -1));
     } finally {
       await sealed.close();
     }

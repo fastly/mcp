@@ -184,61 +184,6 @@ describe("SecretShield", () => {
     shield.destroy();
   });
 
-  test("custom pattern round-trip", () => {
-    const { ALPHANUMERIC } = require("fast-cipher/tokens");
-    const shield = new SecretShield({
-      key: TEST_KEY,
-      extraPatterns: [
-        {
-          kind: "simple",
-          name: "custom-test",
-          prefix: "cust_",
-          bodyRegex: "[A-Za-z0-9]{20}",
-          bodyAlphabet: ALPHANUMERIC,
-          minBodyLength: 20,
-        },
-      ],
-    });
-
-    const token = "cust_ABCDEFGHIJKLMNOPQRST";
-    const original = `custom: ${token}`;
-    const encrypted = shield.encrypt(original);
-
-    expect(encrypted).not.toBe(original);
-    expect(encrypted).toContain("cust_");
-    expect(encrypted).not.toContain(token);
-
-    const decrypted = shield.decrypt(encrypted);
-    expect(decrypted).toBe(original);
-    shield.destroy();
-  });
-
-  test("custom pattern: isolated ciphertext decrypts", () => {
-    const { ALPHANUMERIC } = require("fast-cipher/tokens");
-    const shield = new SecretShield({
-      key: TEST_KEY,
-      extraPatterns: [
-        {
-          kind: "simple",
-          name: "custom-test",
-          prefix: "cust_",
-          bodyRegex: "[A-Za-z0-9]{20}",
-          bodyAlphabet: ALPHANUMERIC,
-          minBodyLength: 20,
-        },
-      ],
-    });
-
-    const token = "cust_ABCDEFGHIJKLMNOPQRST";
-    const encrypted = shield.encrypt(`custom: ${token}`);
-    const encToken = encrypted.slice("custom: ".length);
-
-    // Agent copies isolated encrypted token into new context
-    const decrypted = shield.decrypt(`use ${encToken} here`);
-    expect(decrypted).toBe(`use ${token} here`);
-    shield.destroy();
-  });
-
   test("adjacent context: token preceded by alphanumeric chars", () => {
     const shield = new SecretShield({ key: TEST_KEY });
     // Token preceded by alphanumeric 'X', followed by space (scanner still matches)

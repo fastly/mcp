@@ -1,4 +1,5 @@
 import { safeSerialize } from "./serializer.js";
+import { truncateOutsideSecrets } from "./truncate.js";
 
 const MAX_BODY = 2000;
 
@@ -18,7 +19,7 @@ function firstNumber(...values) {
 
 function truncate(text) {
   if (!/\S/.test(text)) return undefined;
-  return text.length > MAX_BODY ? `${text.slice(0, MAX_BODY)}…` : text;
+  return truncateOutsideSecrets(text, MAX_BODY, "…");
 }
 
 function dump(value) {

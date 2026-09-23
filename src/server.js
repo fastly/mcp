@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { AdmissionError } from "./admission.js";
-import { MarkerError, RemoteSecretShield } from "./secrets.js";
+import { MarkerError, RemoteSecretShield, WITHHELD } from "./secrets.js";
 import { execute } from "./tools/execute.js";
 import { inspect } from "./tools/inspect.js";
 import { search } from "./tools/search.js";
@@ -123,10 +123,7 @@ function makeShielded(openShield) {
         } catch {
           // Never fall back to plaintext: a result whose secrets cannot be
           // encrypted is withheld as a whole.
-          return executionResult({
-            error:
-              "The result was withheld because a secret in it could not be encrypted. Return less data, or leave the secret out of the result.",
-          });
+          return executionResult({ error: WITHHELD });
         }
       } catch (error) {
         if (!(error instanceof MarkerError)) throw error;
@@ -253,6 +250,7 @@ export function registerTools(
             signal: extra?.mcpReq?.signal,
             profile: executionProfile,
             resultStore,
+            shield,
           });
       return executionResult(result);
     }),

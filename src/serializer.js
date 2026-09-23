@@ -1,4 +1,5 @@
 import { types } from "node:util";
+import { truncateOutsideSecrets } from "./truncate.js";
 
 const mapEntries = Map.prototype.entries;
 const setValues = Set.prototype.values;
@@ -185,7 +186,10 @@ export function serializeResult(
       } catch {
         msg = "unknown error";
       }
-      return { value: `[unserializable: ${msg}]` };
+      // The snippet picks the message and so its size, which would otherwise bypass every budget here.
+      return {
+        value: `[unserializable: ${truncateOutsideSecrets(msg, 1000, "…")}]`,
+      };
     }
     const json = JSON.stringify(normalized);
     if (json === undefined) return { value: null };
@@ -209,7 +213,7 @@ export function serializeResult(
           // Key names can be as long as anything else, and this stand-in has to stay small.
           previewKeys = Object.keys(value)
             .slice(0, 20)
-            .map((k) => (k.length > 100 ? `${k.slice(0, 100)}...` : k));
+            .map((k) => truncateOutsideSecrets(k, 100, "..."));
         } catch {}
       }
       return {

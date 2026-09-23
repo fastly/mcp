@@ -203,7 +203,8 @@ Files are written to `fastly-mcp-results` under the system temporary directory, 
 A single file holds at most 4 MB; a result larger than that is described in the response and the assistant is asked to return less.
 The same ceiling applies to what one Fastly API call may hand to the code: a larger response fails that call with an error asking for paging or filtering, rather than arriving with pieces silently missing.
 The newest twenty files are kept, and every file is removed after six hours whether or not the server has been busy since.
-When secret encryption is enabled, the stored copy gets the same treatment as the response, so reading the file cannot reveal a value the response would have hidden.
+When secret encryption is enabled, secrets are encrypted in the whole result before it is stored or cut down to a preview.
+Reading the file cannot reveal a value the response would have hidden, and neither can a preview that happens to stop in the middle of a token.
 Use `--result-dir <path>` to put them somewhere else, or `--result-dir off` to turn the feature off and have oversized results described rather than stored.
 
 A remote server never writes result files, because its callers could not read them.

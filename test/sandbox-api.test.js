@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
-import { expectNoInternals, startLocalServer } from "./helpers.js";
+import { expectNoInternals, GITHUB_PAT, startLocalServer } from "./helpers.js";
 
 const ENTRY = join(import.meta.dir, "fixtures/sandbox-with-mock-fastly.mjs");
 
@@ -169,6 +169,24 @@ describe("Fastly API errors through the sandbox bridge", () => {
     expect(out.status).toBe(404);
     expect(out.body).toBe('{"msg":"Record not found"}');
     expect(out.hint).toBeUndefined();
+  }, 15000);
+
+  // The bridge describes the failure, then the uncaught error is described again, and each time the body gets cut.
+  test("an API error body never shows part of a secret, caught or not", async () => {
+    const token = GITHUB_PAT;
+    nextResponse = {
+      status: 404,
+      contentType: "text/plain",
+      body: `${" ".repeat(1970)}${token} tail`,
+    };
+    const uncaught = await runSandbox(
+      'return await serviceApi.getServiceDetail({service_id: "nope"});',
+    );
+    expect(uncaught.body).toBe(`${" ".repeat(1970)}…`);
+    const caught = await runSandbox(
+      'try { await serviceApi.getServiceDetail({service_id: "nope"}); } catch (e) { return e.body; }',
+    );
+    expect(caught.result).toBe(`${" ".repeat(1970)}…`);
   }, 15000);
 
   test("user code can catch the failure and read status, body and message", async () => {

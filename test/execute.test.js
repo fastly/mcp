@@ -5,8 +5,15 @@ import { join } from "node:path";
 import { getExecutionRuntime } from "../src/execution-runtime.js";
 import { PREVIEW_BYTES } from "../src/limits.js";
 import { createResultStore } from "../src/result-files.js";
+import { RemoteSecretShield, SecretShield } from "../src/secrets.js";
 import { execute } from "../src/tools/execute.js";
-import { expectNoInternals, startLocalServer, tempDir } from "./helpers.js";
+import {
+  expectNoInternals,
+  GITHUB_PAT,
+  startLocalServer,
+  tempDir,
+  tokenAtPreviewCut,
+} from "./helpers.js";
 
 const NODE_HARNESS_PATH = join(
   import.meta.dir,
@@ -17,6 +24,40 @@ const NODE_EXECUTE_HARNESS_PATH = join(
   import.meta.dir,
   "fixtures/run-execute-under-node.mjs",
 );
+
+const SCRIPTED_CHILD_PATH = join(
+  import.meta.dir,
+  "fixtures/scripted-child.mjs",
+);
+
+function executeRemotely(code) {
+  return execute(code, {
+    apiToken: "synthetic-token",
+    remote: true,
+    profile: getExecutionRuntime(),
+  });
+}
+
+// What the model would see of a remote result, once the shield has run over the response.
+function remoteResponse(result) {
+  return new RemoteSecretShield("synthetic-token").encrypt(
+    JSON.stringify(result, null, 2),
+  );
+}
+
+// Runs a stand-in child that writes the given stderr pieces and stdout instead of running code.
+function executeScripted(script, options) {
+  return execute(JSON.stringify(script), {
+    ...options,
+    profile: {
+      executable: process.execPath,
+      args: [],
+      entry: SCRIPTED_CHILD_PATH,
+      env: {},
+      cwd: import.meta.dir,
+    },
+  });
+}
 
 const LATE_REJECTION_CODE =
   'Promise.reject(new Error("late")); console.log("x".repeat(90000)); return 7;';
@@ -601,6 +642,55 @@ describe("execute", () => {
     expect(result.resultFile).toBeDefined();
   }, 15000);
 
+  // A token cut in half no longer looks like one, so encrypting the preview after clipping it let 39 of 40 characters through.
+  test("a secret cut by the preview is encrypted before it is cut", async () => {
+    const token = GITHUB_PAT;
+    const code = tokenAtPreviewCut(token);
+    const partial = token.slice(0, -1);
+
+    // Without a shield the cut lands inside the token, which is what makes this a test of the ordering.
+    const plain = await execute(code, { resultStore: tempStore() });
+    expect(plain.result.head).toContain(partial);
+    expect(plain.result.head).not.toContain(token);
+
+    for (const resultStore of [tempStore(), null]) {
+      const shield = new SecretShield();
+      const result = await execute(code, { resultStore, shield });
+      expect(result.truncated).toBe(true);
+      const response = shield.encrypt(JSON.stringify(result));
+      expect(response).not.toContain(partial);
+      if (resultStore) {
+        const stored = readFileSync(result.resultFile, "utf8");
+        expect(stored).not.toContain(token);
+        expect(result.result.head).toStartWith(
+          JSON.parse(stored).slice(0, 1000),
+        );
+      }
+    }
+  }, 15000);
+
+  // A heuristic match can swallow the "n" of an escaped newline, and the encrypted JSON then no longer parses.
+  test("a result whose secrets cannot be encrypted is withheld, not previewed", async () => {
+    const shields = [
+      {
+        encrypt: () => {
+          throw new Error("cycle walk did not converge");
+        },
+      },
+      { encrypt: (text) => text.replace("\\n", "\\[ENCRYPTED:fastly]") },
+    ];
+    for (const shield of shields) {
+      const store = tempStore();
+      const result = await execute('return "a\\n" + "x".repeat(200000);', {
+        resultStore: store,
+        shield,
+      });
+      expect(result.error).toContain("withheld");
+      expect(result.result).toBeUndefined();
+      expect(readdirSync(store.directory)).toEqual([]);
+    }
+  }, 15000);
+
   // A result the sandbox had to cut down is not the result, and must not be stored as if it were.
   test("a result that cannot be cut down to fit is described, not stored", async () => {
     const store = tempStore();
@@ -635,17 +725,82 @@ describe("execute", () => {
 
   // The hint has to name the remote budget, not the local one.
   test("a remote hint names the remote limit", async () => {
-    const result = await execute('return "x".repeat(150000);', {
-      apiToken: "synthetic-token",
-      remote: true,
-      profile: getExecutionRuntime(),
-    });
+    const result = await executeRemotely('return "x".repeat(150000);');
     expect(result.error).toBeUndefined();
     expect(result.truncated).toBe(true);
     expect(result.resultBytes).toBe(150002);
     expect(result.hint).toContain("above the 100000-byte limit");
     expect(result.hint).not.toContain("4000000");
     expect(result.result._truncated).toBe(true);
+  }, 15000);
+
+  // A proxy that throws a huge error used to get past the sandbox's budget, and the message then reached a preview clipped before the remote shield ran.
+  test("a remote result that throws a huge error while being read never shows part of a secret", async () => {
+    const before = 1000 - (GITHUB_PAT.length - 1);
+    const result = await executeRemotely(
+      `const message = " ".repeat(${before}) + "${GITHUB_PAT}" + " ".repeat(150000);
+      return new Proxy({}, { ownKeys() { throw new Error(message); } });`,
+    );
+    expect(result.result).toBe(`[unserializable: ${" ".repeat(before)}…]`);
+    expect(remoteResponse(result)).not.toContain(GITHUB_PAT.slice(4, 14));
+  }, 15000);
+
+  // The sandbox is supposed to keep remote results under the limit; one that doesn't must not be trusted, whatever it claims.
+  test("a remote result over the inline limit is refused, not previewed", async () => {
+    const result = "x".repeat(150_000);
+    for (const reduced of [undefined, { bytes: 150_002, depth: 0 }]) {
+      const out = await executeScripted(
+        { stdout: JSON.stringify({ ok: true, result, reduced }) },
+        { apiToken: "synthetic-token", remote: true },
+      );
+      expect(out.result).toBeUndefined();
+      expect(out.error).toContain("Output too large");
+      expect(out.outcome).toBe("output_too_large");
+    }
+  }, 15000);
+
+  // Error details are cut in the child, long before the remote shield sees them.
+  test("error details cut in the sandbox never show part of a secret", async () => {
+    const opening = 'const e = new Error("boom"); //';
+    const pad = 200 - (GITHUB_PAT.length - 1) - opening.length;
+    const code = [
+      opening + " ".repeat(pad) + GITHUB_PAT,
+      `e.body = " ".repeat(1970) + "${GITHUB_PAT}" + " ".repeat(100);`,
+      "throw e;",
+    ].join("\n");
+    const result = await executeRemotely(code);
+    expect(result.error).toBe("boom");
+    expect(result.line.source).toBe(`${opening}${" ".repeat(pad)}…`);
+    expect(result.body).toBe(`${" ".repeat(1970)}…`);
+    expect(remoteResponse(result)).not.toContain(GITHUB_PAT.slice(4, 14));
+  }, 15000);
+
+  test("crash output cut for the error never shows part of a secret", async () => {
+    const lead = "x".repeat(1980);
+    // The token straddles the 2,000-character cut and arrives in two separate writes.
+    const result = await executeScripted({
+      stderr: [lead + GITHUB_PAT.slice(0, 25), `${GITHUB_PAT.slice(25)} after`],
+    });
+    expect(result.outcome).toBe("crashed");
+    expect(result.error).toBe(`Subprocess error: ${lead}`);
+  }, 15000);
+
+  test("crash output that fits the capture limit is shown whole up to the cut", async () => {
+    const result = await executeScripted({
+      stderr: ["é".repeat(500), "é".repeat(500)],
+    });
+    expect(result.error).toBe(`Subprocess error: ${"é".repeat(1000)}`);
+  }, 15000);
+
+  // Whether a token is recognized can depend on what follows it, so output that wasn't captured whole can't be checked.
+  test("crash output over the capture limit is omitted, not cut", async () => {
+    const result = await executeScripted({
+      stderr: [`${GITHUB_PAT} `, "y".repeat(60_000), "z".repeat(60_000)],
+    });
+    expect(result.outcome).toBe("crashed");
+    expect(result.error).toContain("omitted");
+    expect(result.error).not.toContain("ghp_");
+    expect(result.error.length).toBeLessThan(200);
   }, 15000);
 
   // Empty entries still cost their framing, and control characters grow when escaped.

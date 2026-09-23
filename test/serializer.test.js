@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { runInNewContext } from "node:vm";
 import { safeSerialize, serializeResult } from "../src/serializer.js";
+import { GITHUB_PAT } from "./helpers.js";
 
 describe("safeSerialize", () => {
   test("circular reference produces '[circular]'", () => {
@@ -97,8 +98,31 @@ describe("safeSerialize", () => {
   test("the description of an oversized value keeps its own key names short", () => {
     const value = { [`k${"x".repeat(5000)}`]: "y".repeat(500) };
     const out = serializeResult(value, { maxSize: 100, shrink: false });
-    expect(out.value._previewKeys[0]).toHaveLength(103);
+    expect(out.value._previewKeys[0]).toBe(`k${"x".repeat(99)}...`);
     expect(Buffer.byteLength(JSON.stringify(out.value))).toBeLessThan(500);
+  });
+
+  // The shield runs after this, and can't recognize a token that the cut went through.
+  test("the description of an oversized value never shows part of a long key", () => {
+    const value = { [`${"k".repeat(80)}${GITHUB_PAT}`]: "y".repeat(500) };
+    const out = serializeResult(value, { maxSize: 100, shrink: false });
+    expect(out.value._previewKeys).toEqual([`${"k".repeat(80)}...`]);
+  });
+
+  // The message is the snippet's to choose, so its size is too.
+  test("a huge error thrown while reading a value is cut, never through a secret", () => {
+    const message = `${"e".repeat(980)}${GITHUB_PAT} ${"e".repeat(5000)}`;
+    const hostile = new Proxy(
+      {},
+      {
+        ownKeys() {
+          throw new Error(message);
+        },
+      },
+    );
+    expect(serializeResult(hostile).value).toBe(
+      `[unserializable: ${"e".repeat(980)}…]`,
+    );
   });
 
   test("with shrink off an oversized value is described, never cut down", () => {

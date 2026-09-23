@@ -172,6 +172,8 @@ function readGrants(extraFiles) {
     }
   }
   visit("fastly", manifest);
+  // Error text is cut in the sandbox, which needs the token scanner to avoid cutting through a secret.
+  visit("fast-cipher", manifest);
   return [...paths].map((path) => `--allow-fs-read=${path}`);
 }
 

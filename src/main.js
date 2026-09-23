@@ -408,12 +408,7 @@ export async function main({
       shield,
       apiToken: env.FASTLY_API_TOKEN,
       executionProfile: overrides.resolveExecutionProfile?.({}),
-      // Stored results get the same secret encryption as a response, since the model is told to read them.
-      resultStore: resolveResultStore({
-        env,
-        dir: cliArgs.resultDir,
-        seal: shield ? (text) => shield.encrypt(text) : undefined,
-      }),
+      resultStore: resolveResultStore({ env, dir: cliArgs.resultDir }),
     };
     if (mode.transport === "http") {
       return startHttp(() => createMcpServer(local), {

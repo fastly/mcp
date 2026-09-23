@@ -73,8 +73,6 @@ function writeFully(fd, buffer) {
  * `write` never throws.
  * A good result shouldn't fail because the disk did, so it returns null and the caller falls back to describing the result.
  *
- * `seal` runs over the text before it is written, which is where secret encryption plugs in.
- *
  * Old files are swept after each write and on a timer, so they expire even when the server sits idle.
  */
 export function createResultStore({
@@ -83,7 +81,6 @@ export function createResultStore({
   maxBytes = RESULT_FILE_BYTES,
   maxAgeMs = DEFAULT_MAX_AGE_MS,
   sweepIntervalMs = DEFAULT_SWEEP_INTERVAL_MS,
-  seal = (text) => text,
   now = Date.now,
 } = {}) {
   const directory = resolve(dir);
@@ -134,7 +131,7 @@ export function createResultStore({
     write(text) {
       let path;
       try {
-        const buffer = Buffer.from(seal(text));
+        const buffer = Buffer.from(text);
         if (buffer.length > maxBytes) {
           throw new Error(
             `the result is ${buffer.length} bytes, above the ${maxBytes}-byte limit for one file`,
@@ -179,8 +176,8 @@ export function createResultStore({
 }
 
 /** Builds the store from the flag or the environment; "off" disables it. */
-export function resolveResultStore({ env = process.env, dir, seal } = {}) {
+export function resolveResultStore({ env = process.env, dir } = {}) {
   const configured = dir ?? env.FASTLY_MCP_RESULT_DIR;
   if (configured === "off" || configured === "none") return null;
-  return createResultStore({ dir: configured || undefined, seal });
+  return createResultStore({ dir: configured || undefined });
 }

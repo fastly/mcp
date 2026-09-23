@@ -13,7 +13,9 @@ import {
   PREVIEW_BYTES,
   RESULT_FILE_BYTES,
 } from "../limits.js";
+import { WITHHELD } from "../secrets.js";
 import { setKey } from "../serializer.js";
+import { sliceWhole, truncateOutsideSecrets } from "../truncate.js";
 
 const TIMEOUT_MS = 30_000;
 // Extra time a child gives itself past the parent's deadline, in case the
@@ -22,6 +24,7 @@ const CHILD_GRACE_MS = 5_000;
 // The child may serialize up to a file's worth of result, so its whole stdout payload gets room above that.
 const MAX_STDOUT = 8_000_000;
 const MAX_STDERR = 100_000;
+const CRASH_OUTPUT_SHOWN = 2000;
 const MAX_CONSOLE = 100_000;
 
 const ARRAY_PREVIEW_ITEMS = 10;
@@ -49,9 +52,7 @@ function clipString(text, budget) {
     const perUnit = Math.max(1, size / head.length);
     head = head.slice(0, head.length - Math.ceil(excess / perUnit));
   }
-  const last = head.charCodeAt(head.length - 1);
-  if (last >= 0xd800 && last <= 0xdbff) head = head.slice(0, -1);
-  return head + note;
+  return sliceWhole(head, head.length) + note;
 }
 
 function describe(value, budget) {
@@ -148,6 +149,18 @@ function previewOf(value, hint) {
   };
 }
 
+const RETURN_LESS =
+  "Return less data from your code, for example by selecting only the fields you need or by paginating.";
+
+// The shield only sees this after it was cut, so it is cut outside secrets.
+// That takes the whole output: a blind cut at the capture limit may already have gone through a token.
+function crashOutput(stderr) {
+  if (stderr.length > MAX_STDERR) {
+    return `[error output omitted: more than ${MAX_STDERR} characters, too long to check for secrets]`;
+  }
+  return truncateOutsideSecrets(stderr, CRASH_OUTPUT_SHOWN);
+}
+
 function tooLarge(what, bytes, max, advice) {
   return {
     error: `Output too large (${bytes} bytes of ${what}, max ${max}). ${advice}`,
@@ -161,11 +174,20 @@ function tooLarge(what, bytes, max, advice) {
  * Whatever fits goes out whole, no matter how many records it holds.
  * Only size can hold a result back, never item count: a list of 400 users is not a large result, and quietly returning 10 of them is worse than returning all 400.
  * What doesn't fit is written to a file and answered with its path.
+ *
+ * With a shield, secrets are encrypted in the whole result before any of it is stored or clipped.
+ * A token cut in half no longer looks like a token, so encrypting the preview afterwards would let most of it through.
  */
-function deliver(value, { resultStore, resultBytes, reduced } = {}) {
+function deliver(value, { resultStore, resultBytes, reduced, shield } = {}) {
   const json = JSON.stringify(value);
   if (json === undefined) return { result: value };
   const bytes = Buffer.byteLength(json);
+
+  // The sandbox keeps a result within the budget it was given, cut down or not, so anything larger came from a faulty child.
+  // For a remote run that also means no preview: its shield runs after this returns, and would see a preview only once clipped.
+  if (bytes > resultBytes) {
+    return tooLarge("result", bytes, resultBytes, RETURN_LESS);
+  }
 
   if (reduced) {
     // The sandbox had to cut nested values out to make this fit, so it is not the real result and must not be stored as if it were.
@@ -186,7 +208,18 @@ function deliver(value, { resultStore, resultBytes, reduced } = {}) {
 
   if (bytes <= INLINE_RESULT_BYTES) return { result: value };
 
-  const stored = resultStore?.write(json);
+  let text = json;
+  if (shield) {
+    try {
+      text = shield.encrypt(json);
+      value = JSON.parse(text);
+    } catch {
+      // Parsing fails when a match reached into an escape sequence, such as the "n" of "\n".
+      return { error: WITHHELD };
+    }
+  }
+
+  const stored = resultStore?.write(text);
   if (stored) {
     const hint =
       "Preview only. The complete result is in the file named by `resultFile`.";
@@ -213,10 +246,7 @@ function deliver(value, { resultStore, resultBytes, reduced } = {}) {
     ),
     truncated: true,
     resultBytes: bytes,
-    hint:
-      `The result is ${bytes} bytes, above the ${INLINE_RESULT_BYTES}-byte inline limit${reason}. ` +
-      "Return less data from your code, for example by selecting only the fields you need " +
-      "or by paginating.",
+    hint: `The result is ${bytes} bytes, above the ${INLINE_RESULT_BYTES}-byte inline limit${reason}. ${RETURN_LESS}`,
   };
 }
 
@@ -248,7 +278,7 @@ const OUT_OF_MEMORY = /out of memory|allocation failed|cannot allocate/i;
  */
 export async function execute(
   code,
-  { apiToken, remote = false, signal, profile, resultStore } = {},
+  { apiToken, remote = false, signal, profile, resultStore, shield } = {},
 ) {
   if (typeof code !== "string" || !code.trim()) {
     return { error: "code must be a non-empty string" };
@@ -341,15 +371,18 @@ export async function execute(
       }
     });
 
+    // One character past the limit is kept, which is how crashOutput tells that the output didn't fit.
     child.stderr.on("data", (chunk) => {
-      if (stderr.length >= MAX_STDERR) return;
-      stderr += stderrDecoder.write(chunk).slice(0, MAX_STDERR - stderr.length);
+      if (stderr.length > MAX_STDERR) return;
+      stderr += stderrDecoder
+        .write(chunk)
+        .slice(0, MAX_STDERR + 1 - stderr.length);
     });
 
     child.on("close", (exitCode, exitSignal) => {
       stdout += stdoutDecoder.end();
-      if (stderr.length < MAX_STDERR) {
-        stderr += stderrDecoder.end().slice(0, MAX_STDERR - stderr.length);
+      if (stderr.length <= MAX_STDERR) {
+        stderr += stderrDecoder.end().slice(0, MAX_STDERR + 1 - stderr.length);
       }
 
       if (killed) return settle(killed);
@@ -372,7 +405,7 @@ export async function execute(
         }
         return settle({
           error: stderr
-            ? `Subprocess error: ${stderr.slice(0, 2000)}`
+            ? `Subprocess error: ${crashOutput(stderr)}`
             : `Subprocess exited with code ${exitCode} and no output`,
           outcome: "crashed",
         });
@@ -400,6 +433,7 @@ export async function execute(
             resultStore,
             resultBytes,
             reduced: raw.reduced,
+            shield,
           });
           if (logs.length) out.console = logs;
           return settle(out);
