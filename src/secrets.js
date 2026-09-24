@@ -5,6 +5,7 @@ import {
   scan,
   TokenEncryptor,
 } from "fast-cipher/tokens";
+import { setKey } from "./serializer.js";
 
 /** What a caller gets instead of a result that could not be encrypted. */
 export const WITHHELD =
@@ -13,6 +14,8 @@ export const WITHHELD =
 export class SecretShield {
   #encryptor;
   #registry = new Map();
+  // Every ciphertext starts with its pattern's lead, so decrypt looks for leads and checks only these lengths after each one.
+  #lengthsByLead = new Map();
   #tweak;
   #destroyed = false;
 
@@ -33,26 +36,57 @@ export class SecretShield {
         tweak: this.#tweak,
       },
     );
-    for (const span of spans) {
-      this.#registry.set(span.encrypted, span.original);
-    }
+    for (const span of spans) this.#register(span);
     return encrypted;
+  }
+
+  #register({ encrypted, original, patternName }) {
+    this.#registry.set(encrypted, original);
+    const lead = leadOf(PATTERNS.get(patternName));
+    const lengths = this.#lengthsByLead.get(lead) ?? [];
+    if (!lengths.includes(encrypted.length)) {
+      lengths.push(encrypted.length);
+      lengths.sort((a, b) => b - a);
+      this.#lengthsByLead.set(lead, lengths);
+    }
   }
 
   decrypt(text) {
     if (this.#destroyed) throw new Error("SecretShield has been destroyed");
     if (typeof text !== "string" || text.length === 0) return text;
 
-    let result = text;
-    for (const [ct, pt] of this.#registry) {
-      result = result.replaceAll(ct, pt);
+    const matches = [];
+    for (const [lead, lengths] of this.#lengthsByLead) {
+      for (
+        let at = text.indexOf(lead);
+        at !== -1;
+        at = text.indexOf(lead, at + 1)
+      ) {
+        for (const length of lengths) {
+          const plaintext = this.#registry.get(text.slice(at, at + length));
+          if (plaintext !== undefined) {
+            matches.push({ start: at, end: at + length, plaintext });
+            break;
+          }
+        }
+      }
     }
-    return result;
+    if (matches.length === 0) return text;
+    matches.sort((a, b) => a.start - b.start || b.end - a.end);
+    const selected = [];
+    let cursor = 0;
+    for (const match of matches) {
+      if (match.start < cursor) continue;
+      selected.push(match);
+      cursor = match.end;
+    }
+    return replaceRanges(text, selected, (match) => match.plaintext);
   }
 
   destroy() {
     this.#encryptor.destroy();
     this.#registry.clear();
+    this.#lengthsByLead.clear();
     this.#destroyed = true;
   }
 }
@@ -130,8 +164,8 @@ function cipherTables(pattern, body) {
   );
 }
 
-function cipherWorkMs(tokens) {
-  const setups = new Set();
+// Tables already in `setups` cost nothing, and the ones this adds go into it.
+function cipherWorkMs(tokens, setups = new Set()) {
   let work = 0;
   for (const { pattern, body } of tokens) {
     work += body.length * TOKEN_MS_PER_CHAR;
@@ -158,6 +192,36 @@ function replaceRanges(text, ranges, replacement) {
 }
 
 /**
+ * A copy of a JSON value with the secrets in its strings and object keys encrypted.
+ * Working on values rather than on serialized text keeps a match from reaching into an escape sequence.
+ *
+ * It throws when a secret can't be encrypted, and the caller then withholds the whole value.
+ */
+export function shieldJson(value, shield) {
+  // Records repeat their keys, and each distinct key only needs encrypting once.
+  const keys = new Map();
+  const walk = (value) => {
+    if (typeof value === "string") return shield.encrypt(value);
+    if (Array.isArray(value)) return value.map(walk);
+    if (value === null || typeof value !== "object") return value;
+    const out = {};
+    for (const [key, item] of Object.entries(value)) {
+      let protectedKey = keys.get(key);
+      if (protectedKey === undefined) {
+        protectedKey = shield.encrypt(key);
+        keys.set(key, protectedKey);
+      }
+      if (Object.hasOwn(out, protectedKey)) {
+        throw new Error("Secret protection made two object keys collide");
+      }
+      setKey(out, protectedKey, walk(item));
+    }
+    return out;
+  };
+  return walk(value);
+}
+
+/**
  * Secret shield for `--remote-http`.
  *
  * The key comes from the caller's token alone, so any replica can decrypt
@@ -166,9 +230,15 @@ function replaceRanges(text, ranges, replacement) {
  * ciphertext apart from a token the caller typed in.
  * It authenticates nothing: the cipher is format preserving, so a wrong key
  * or an altered ciphertext decrypts to a different, well-formed token.
+ *
+ * One instance serves a single tool call.
+ * The limits on how many secrets one result may hold add up across every string it encrypts.
  */
 export class RemoteSecretShield {
   #encryptor;
+  #outputSetups = new Set();
+  #outputSpanCount = 0;
+  #outputWork = 0;
 
   constructor(apiToken) {
     // The library keeps its own copy of the key and zeroes it on destroy.
@@ -191,7 +261,9 @@ export class RemoteSecretShield {
     if (typeof text !== "string" || text.length === 0) return text;
 
     const spans = scan(text, BUILTIN_PATTERNS);
-    if (spans.length > MAX_OUTPUT_SPANS) {
+    if (spans.length === 0) return text;
+    const spanCount = this.#outputSpanCount + spans.length;
+    if (spanCount > MAX_OUTPUT_SPANS) {
       throw new Error("Too many secrets in one result to encrypt safely");
     }
     const tooLong = ({ pattern, body }) =>
@@ -199,7 +271,9 @@ export class RemoteSecretShield {
     if (spans.some(tooLong)) {
       throw new Error("A secret in the result is too long to encrypt");
     }
-    if (cipherWorkMs(spans) > MAX_CIPHER_WORK_MS) {
+    const setups = new Set(this.#outputSetups);
+    const work = this.#outputWork + cipherWorkMs(spans, setups);
+    if (work > MAX_CIPHER_WORK_MS) {
       throw new Error(
         "Too many kinds of secrets in one result to encrypt safely",
       );
@@ -221,6 +295,9 @@ export class RemoteSecretShield {
     if (encrypted.length > MAX_OUTPUT_LENGTH) {
       throw new Error("Result too large after encrypting its secrets");
     }
+    this.#outputSetups = setups;
+    this.#outputSpanCount = spanCount;
+    this.#outputWork = work;
     return encrypted;
   }
 

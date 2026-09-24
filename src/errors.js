@@ -26,7 +26,8 @@ function dump(value) {
   return JSON.stringify(safeSerialize(value)) ?? "";
 }
 
-function read(value, key) {
+/** `value[key]`, or undefined when a getter or a proxy trap throws. */
+export function read(value, key) {
   if (value === null || value === undefined) return undefined;
   try {
     return value[key];
@@ -80,7 +81,9 @@ export function describeThrown(err) {
   if (err === null) return { error: "null was thrown" };
   if (err === undefined) return { error: "undefined was thrown" };
   if (typeof err === "string") return { error: err };
-  if (typeof err !== "object") return { error: String(err) };
+  if (typeof err !== "object" && typeof err !== "function") {
+    return { error: String(err) };
+  }
 
   const out = {};
   const response = read(err, "response");
@@ -97,7 +100,7 @@ export function describeThrown(err) {
   // the only place a Fastly failure spells out "Unauthorized" or "Not Found".
   const reason = statusText ?? firstString(read(read(err, "error"), "message"));
   const message = firstString(read(err, "message"));
-  const constructorName = read(read(err, "constructor"), "name");
+  const constructorName = firstString(read(read(err, "constructor"), "name"));
 
   if (message) {
     out.error = message;

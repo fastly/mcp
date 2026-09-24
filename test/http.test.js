@@ -378,10 +378,27 @@ describe("helpers: resolveHttpOptions", () => {
     expect(opts.authToken).toBe("envtoken");
   });
 
-  test("invalid path is rejected", () => {
-    expect(() =>
-      resolveHttpOptions({ cliArgs: emptyCliArgs({ httpPath: "mcp" }) }),
-    ).toThrow(/must start with/);
+  test("noncanonical and relative paths are rejected", () => {
+    for (const httpPath of [
+      "mcp",
+      "/mcp?tenant=x",
+      "/mcp#fragment",
+      "//mcp",
+      "//[",
+      "/a/../mcp",
+      "/%GG",
+      "/mcp[",
+    ]) {
+      expect(() =>
+        resolveHttpOptions({ cliArgs: emptyCliArgs({ httpPath }) }),
+      ).toThrow(/must (start with|be a canonical path)/);
+    }
+
+    expect(
+      resolveHttpOptions({
+        cliArgs: emptyCliArgs({ httpPath: "/mcp%5B" }),
+      }).path,
+    ).toBe("/mcp%5B");
   });
 });
 

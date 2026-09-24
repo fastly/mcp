@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
+import { API_RESPONSE_BYTES } from "../src/limits.js";
 import { expectNoInternals, GITHUB_PAT, startLocalServer } from "./helpers.js";
 
 const ENTRY = join(import.meta.dir, "fixtures/sandbox-with-mock-fastly.mjs");
@@ -13,7 +14,14 @@ beforeAll(async () => {
   server = await startLocalServer((_req, res) => {
     const { status, contentType, body } = nextResponse;
     res.writeHead(status, { "content-type": contentType });
-    res.end(body);
+    if (nextResponse.chunked) {
+      for (let offset = 0; offset < body.length; offset += 64 * 1024) {
+        res.write(body.slice(offset, offset + 64 * 1024));
+      }
+      res.end();
+    } else {
+      res.end(body);
+    }
   });
   basePath = server.url;
 });
@@ -66,6 +74,53 @@ describe("large Fastly API responses through the sandbox bridge", () => {
         comment: "x".repeat(padding),
       })),
     );
+
+  test("the raw response limit is enforced before parsing", async () => {
+    nextResponse = {
+      status: 200,
+      contentType: "application/json",
+      body: `${" ".repeat(API_RESPONSE_BYTES - 2)}[]`,
+    };
+    const exact = await runSandbox(
+      "return { count: (await serviceApi.listServices()).length };",
+      { fastlyApiToken: "token" },
+    );
+    expect(exact.result).toEqual({ count: 0 });
+
+    nextResponse = {
+      status: 200,
+      contentType: "application/json",
+      body: `${" ".repeat(API_RESPONSE_BYTES - 1)}[]`,
+      chunked: true,
+    };
+    const oversized = await runSandbox(
+      "return { count: (await serviceApi.listServices()).length };",
+      { fastlyApiToken: "token" },
+    );
+    expect(oversized.ok).toBe(false);
+    expect(oversized.error).toContain(
+      `more than the ${API_RESPONSE_BYTES} bytes`,
+    );
+    expect(oversized.error).toContain("paging or filtering");
+
+    // superagent leaves binary bodies unbuffered unless told otherwise, and an unbuffered body has no size limit.
+    for (const contentType of ["application/octet-stream", "application/pdf"]) {
+      nextResponse = {
+        status: 200,
+        contentType,
+        body: "x".repeat(API_RESPONSE_BYTES + 1),
+        chunked: true,
+      };
+      const binary = await runSandbox(
+        "return typeof (await serviceApi.listServices());",
+        { fastlyApiToken: "token" },
+      );
+      expect(binary.ok).toBe(false);
+      expect(binary.error).toContain(
+        `more than the ${API_RESPONSE_BYTES} bytes`,
+      );
+    }
+  }, 60000);
 
   // The bridge used to hand over placeholders instead of nested values, with nothing to say so.
   test("a response too large to hand over is an error the snippet can read", async () => {
@@ -139,6 +194,17 @@ describe("large Fastly API responses through the sandbox bridge", () => {
 });
 
 describe("Fastly API errors through the sandbox bridge", () => {
+  test("hostile stack access stays a user error under the current runtime", async () => {
+    const out = await runSandbox(`
+      const error = new Error("user failure");
+      Object.defineProperty(error, "stack", { get() { throw new Error("stack trap"); } });
+      throw error;
+    `);
+    expect(out.ok).toBe(false);
+    expect(out.error).toBe("user failure");
+    expect(JSON.stringify(out)).not.toContain("Subprocess error");
+  }, 15000);
+
   test("a rejected token reads as HTTP 401 with the API's own explanation", async () => {
     nextResponse = {
       status: 401,

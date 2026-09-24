@@ -247,24 +247,23 @@ export async function callTool(url, token, name, args, init) {
 /**
  * Sends a request exactly as written and resolves with its status code.
  * fetch() would merge repeated headers, which some tests need to send as is.
- * `withhold` declares more body than is sent, so the server waits for the
- * rest.
- * `hangUpAfterMs` then closes the socket instead of waiting for an answer,
- * and the promise resolves with nothing.
+ * `withhold` declares more body than is sent, so the server waits for the rest.
+ * `hangUpAfterMs` then closes the socket instead of waiting for an answer, and the promise resolves with nothing.
+ * `target` and `hostHeader` replace the request line's target and the Host header, for requests no URL can express.
  */
 export function rawRequest(
   url,
   headerLines,
   body = "{}",
-  { withhold = 0, hangUpAfterMs } = {},
+  { withhold = 0, hangUpAfterMs, target, hostHeader } = {},
 ) {
   const { hostname, port, pathname } = new URL(url);
   return new Promise((resolve, reject) => {
     const socket = connect(Number(port), hostname, () => {
       socket.write(
         [
-          `POST ${pathname} HTTP/1.1`,
-          `Host: ${hostname}:${port}`,
+          `POST ${target ?? pathname} HTTP/1.1`,
+          `Host: ${hostHeader ?? `${hostname}:${port}`}`,
           "Content-Type: application/json",
           `Content-Length: ${Buffer.byteLength(body) + withhold}`,
           "Connection: close",

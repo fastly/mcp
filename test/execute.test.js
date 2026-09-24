@@ -130,6 +130,23 @@ describe("execute", () => {
     expect(result.error).not.toContain("Subprocess error");
   }, 10000);
 
+  test("hostile stack and constructor metadata cannot crash the subprocess", async () => {
+    const stack = await execute(`
+      const error = new Error("user failure");
+      Object.defineProperty(error, "stack", { get() { throw new Error("stack trap"); } });
+      throw error;
+    `);
+    expect(stack.error).toBe("user failure");
+    expect(stack.error).not.toContain("Subprocess error");
+
+    const constructorFailure = await execute(`
+      const name = { [Symbol.toPrimitive]() { throw new Error("constructor trap"); } };
+      throw { constructor: { name } };
+    `);
+    expect(constructorFailure.error).toBe('{"constructor":{"name":{}}}');
+    expect(constructorFailure.error).not.toContain("Subprocess error");
+  }, 15000);
+
   test("stack points at the offending user line and hides sandbox internals", async () => {
     const result = await execute(
       "const a = 1;\nconst b = 2;\nthrow new Error('boom');",
@@ -268,6 +285,21 @@ describe("execute", () => {
     expect(result.result).toBe(42);
     expect(result.console).toHaveLength(1);
     expect(result.console[0].text).toBe("debug info");
+  }, 10000);
+
+  test("console output survives a snippet that returns nothing", async () => {
+    const result = await execute('console.log("debug info");');
+    expect(result.error).toBeUndefined();
+    expect(result.console).toEqual([{ level: "log", text: "debug info" }]);
+  }, 10000);
+
+  test("an error that fits keeps its message when console output would not", async () => {
+    const result = await execute(
+      'console.log("x".repeat(95000)); throw new Error("y".repeat(20000));',
+    );
+    expect(result.error).toBe("y".repeat(20000));
+    expect(result.console).toBeUndefined();
+    expect(result.hint).toContain("Console output was omitted");
   }, 10000);
 
   test("process global is not reachable", async () => {
@@ -691,26 +723,34 @@ describe("execute", () => {
     }
   }, 15000);
 
-  // A heuristic match can swallow the "n" of an escaped newline, and the encrypted JSON then no longer parses.
   test("a result whose secrets cannot be encrypted is withheld, not previewed", async () => {
-    const shields = [
-      {
+    const store = tempStore();
+    const result = await execute('return "a\\n" + "x".repeat(200000);', {
+      resultStore: store,
+      shield: {
         encrypt: () => {
           throw new Error("cycle walk did not converge");
         },
       },
-      { encrypt: (text) => text.replace("\\n", "\\[ENCRYPTED:fastly]") },
-    ];
-    for (const shield of shields) {
-      const store = tempStore();
-      const result = await execute('return "a\\n" + "x".repeat(200000);', {
-        resultStore: store,
-        shield,
-      });
-      expect(result.error).toContain("withheld");
-      expect(result.result).toBeUndefined();
-      expect(readdirSync(store.directory)).toEqual([]);
-    }
+    });
+    expect(result.error).toContain("withheld");
+    expect(result.result).toBeUndefined();
+    expect(readdirSync(store.directory)).toEqual([]);
+  }, 15000);
+
+  test("stored results are shielded as values before JSON serialization", async () => {
+    const store = tempStore();
+    const shield = new SecretShield({ key: Buffer.alloc(16, 7) });
+    const prefix = "a\nAb0Cd1Ef2Gh3Ij4Kl5Mn6Op7Qr8St9U.";
+    const result = await execute(
+      `return ${JSON.stringify(prefix)} + "x".repeat(200000);`,
+      { resultStore: store, shield },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.resultFile).toBeDefined();
+    expect(JSON.parse(readFileSync(result.resultFile, "utf8"))).toBe(
+      `${prefix}${"x".repeat(200000)}`,
+    );
   }, 15000);
 
   // A result the sandbox had to cut down is not the result, and must not be stored as if it were.

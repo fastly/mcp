@@ -1,7 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { AdmissionError } from "./admission.js";
-import { MarkerError, RemoteSecretShield, WITHHELD } from "./secrets.js";
+import { INLINE_RESULT_BYTES } from "./limits.js";
+import {
+  MarkerError,
+  RemoteSecretShield,
+  shieldJson,
+  WITHHELD,
+} from "./secrets.js";
 import { execute } from "./tools/execute.js";
 import { inspect } from "./tools/inspect.js";
 import { search } from "./tools/search.js";
@@ -54,8 +60,17 @@ const INSPECT_INPUT_SCHEMA = z.object({
 });
 
 function textResult(result, isError) {
+  const text = JSON.stringify(result);
+  const bytes = Buffer.byteLength(text);
+  if (bytes > INLINE_RESULT_BYTES) {
+    const error = `Tool response is ${bytes} bytes, more than the ${INLINE_RESULT_BYTES}-byte inline limit. Ask for less data.`;
+    return textResult(
+      Object.hasOwn(result, "ok") ? { ok: false, error } : { error },
+      true,
+    );
+  }
   return {
-    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    content: [{ type: "text", text }],
     isError,
   };
 }
@@ -63,6 +78,16 @@ function textResult(result, isError) {
 const jsonResult = (result) => textResult(result, !result.ok);
 const executionResult = (result) =>
   textResult(result, "error" in result && !("result" in result));
+
+function shieldedJsonResult(result, shield) {
+  if (!shield) return jsonResult(result);
+  try {
+    return jsonResult(shieldJson(result, shield));
+  } catch {
+    // Never fall back to plaintext: a result whose secrets cannot be encrypted is withheld as a whole.
+    return jsonResult({ ok: false, error: WITHHELD });
+  }
+}
 
 function walkStrings(value, fn, path = []) {
   if (typeof value === "string") return fn(value, path);
@@ -79,32 +104,12 @@ function walkStrings(value, fn, path = []) {
   return value;
 }
 
-function shieldResponse(response, shield) {
-  if (!response.content) return response;
-  response.content = response.content.map((block) => {
-    if (block.type === "text" && typeof block.text === "string") {
-      return { ...block, text: shield.encrypt(block.text) };
-    }
-    if (block.type === "resource" && block.resource?.text) {
-      return {
-        ...block,
-        resource: {
-          ...block.resource,
-          text: shield.encrypt(block.resource.text),
-        },
-      };
-    }
-    return block;
-  });
-  return response;
-}
-
 /**
- * Wraps tool handlers so secrets are decrypted on the way in and encrypted
- * on the way out.
+ * Wraps tool handlers so secrets are decrypted on the way in, and hands each handler the shield for encrypting its own output.
+ * Output is shielded by the handler rather than here because execute has to measure, store and clip the encrypted form.
+ *
  * `openShield` returns the shield for one call and how to let go of it.
- * A local server shares its process-wide shield; a remote one derives a
- * shield from the caller's token and destroys it afterwards.
+ * A local server shares its process-wide shield; a remote one derives a shield from the caller's token and destroys it afterwards.
  */
 function makeShielded(openShield) {
   return function shielded(handler) {
@@ -117,14 +122,7 @@ function makeShielded(openShield) {
         const decrypted = walkStrings(params, (text, path) =>
           shield.decrypt(text, path.join(".")),
         );
-        const response = await handler(decrypted, extra);
-        try {
-          return shieldResponse(response, shield);
-        } catch {
-          // Never fall back to plaintext: a result whose secrets cannot be
-          // encrypted is withheld as a whole.
-          return executionResult({ error: WITHHELD });
-        }
+        return await handler(decrypted, extra, shield);
       } catch (error) {
         if (!(error instanceof MarkerError)) throw error;
         return executionResult({ error: error.message, hint: error.hint });
@@ -138,7 +136,7 @@ function makeShielded(openShield) {
 function remoteExecutor({ apiToken, identity, requestId, signal }, services) {
   const { admission, audit, validator, executionProfile } = services;
 
-  return async (code, toolSignal) => {
+  return async (code, toolSignal, shield) => {
     const record = {
       requestId,
       tokenId: identity.tokenId,
@@ -196,6 +194,7 @@ function remoteExecutor({ apiToken, identity, requestId, signal }, services) {
         remote: true,
         signal: deadline,
         profile: executionProfile,
+        shield,
       });
       // Fastly saying 401 to the token itself means our cached admission is
       // stale; a 403 may only be a scope problem.
@@ -231,7 +230,9 @@ export function registerTools(
   mcp.registerTool(
     "search",
     { description: SEARCH_DESCRIPTION, inputSchema: SEARCH_INPUT_SCHEMA },
-    shielded(async ({ query }) => jsonResult(search(index, query))),
+    shielded(async ({ query }, _extra, shield) =>
+      shieldedJsonResult(search(index, query), shield),
+    ),
   );
 
   mcp.registerTool(
@@ -242,9 +243,9 @@ export function registerTools(
         : EXECUTE_DESCRIPTION,
       inputSchema: EXECUTE_INPUT_SCHEMA,
     },
-    shielded(async ({ code }, extra) => {
+    shielded(async ({ code }, extra, shield) => {
       const { outcome: _internal, ...result } = runRemotely
-        ? await runRemotely(code, extra?.mcpReq?.signal)
+        ? await runRemotely(code, extra?.mcpReq?.signal, shield)
         : await execute(code, {
             apiToken,
             signal: extra?.mcpReq?.signal,
@@ -259,8 +260,8 @@ export function registerTools(
   mcp.registerTool(
     "inspect",
     { description: INSPECT_DESCRIPTION, inputSchema: INSPECT_INPUT_SCHEMA },
-    shielded(async ({ method }) =>
-      jsonResult(inspect(index, method, { remote: !!remote })),
+    shielded(async ({ method }, _extra, shield) =>
+      shieldedJsonResult(inspect(index, method, { remote: !!remote }), shield),
     ),
   );
 }

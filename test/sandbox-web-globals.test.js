@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { API_RESPONSE_BYTES } from "../src/limits.js";
 import { execute } from "../src/tools/execute.js";
 import { startLocalServer } from "./helpers.js";
 
@@ -13,6 +14,35 @@ beforeAll(async () => {
         res.end("late");
       }, 8000);
       res.on("close", () => clearTimeout(timer));
+      return;
+    }
+    if (req.url === "/body-limit-exact") {
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.end(`${"a".repeat(API_RESPONSE_BYTES - 3)}€`);
+      return;
+    }
+    if (req.url === "/body-limit-fixed") {
+      const body = Buffer.alloc(API_RESPONSE_BYTES + 1, 0x61);
+      res.writeHead(200, {
+        "Content-Type": "text/plain",
+        "Content-Length": body.length,
+      });
+      res.end(body);
+      return;
+    }
+    if (req.url === "/body-limit-chunked") {
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      const chunk = Buffer.alloc(64 * 1024, 0x61);
+      let sent = 0;
+      const timer = setInterval(() => {
+        sent += chunk.length;
+        if (sent > API_RESPONSE_BYTES * 10) {
+          clearInterval(timer);
+          res.end();
+          return;
+        }
+        res.write(chunk);
+      }, 10);
       return;
     }
     const chunks = [];
@@ -235,6 +265,35 @@ describe("Headers facade in the sandbox", () => {
 });
 
 describe("fetch bodies and abort in the sandbox", () => {
+  test("response bodies are bounded by bytes for fixed and chunked transfers", async () => {
+    const exact = await execute(`
+      const text = await (await fetch("${echoUrl}body-limit-exact")).text();
+      return { chars: text.length, tail: text.slice(-1) };
+    `);
+    expect(exact.result).toEqual({
+      chars: API_RESPONSE_BYTES - 2,
+      tail: "€",
+    });
+
+    for (const path of ["body-limit-fixed", "body-limit-chunked"]) {
+      const started = performance.now();
+      const oversized = await execute(`
+        try {
+          await (await fetch("${echoUrl}${path}")).text();
+          return "accepted";
+        } catch (error) {
+          return error.message;
+        }
+      `);
+      expect(oversized.result).toContain(
+        `exceeds the ${API_RESPONSE_BYTES}-byte limit`,
+      );
+      if (path === "body-limit-chunked") {
+        expect(performance.now() - started).toBeLessThan(3000);
+      }
+    }
+  }, 30000);
+
   test("binary bodies reach the wire byte for byte", async () => {
     const result = await execute(`
       const encoded = await (await fetch("${echoUrl}", {

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
+import { INLINE_RESULT_BYTES } from "../src/limits.js";
 import {
   BUN_DETECTS_DISCONNECTS,
   callTool,
@@ -12,6 +13,7 @@ import {
   TOKEN_A,
   TOKEN_A2,
   TOKEN_B,
+  UPSTREAM_SECRET,
   until,
 } from "./remote-helpers.js";
 
@@ -281,6 +283,39 @@ for (const runtime of ["bun", "node"]) {
       });
       expect(imported.parsed.error).toContain("import() is not available");
     }, 60000);
+
+    test("response shielding preserves JSON escapes and round-trips", async () => {
+      const plaintext = "a\nAb0Cd1Ef2Gh3Ij4Kl5Mn6Op7Qr8St9U";
+      const first = await callTool(server.url, TOKEN_A, "execute", {
+        code: `return ${JSON.stringify(plaintext)};`,
+      });
+      expect(first.isError).toBeFalsy();
+      expect(first.parsed.result).toBe(plaintext);
+
+      const second = await callTool(server.url, TOKEN_A, "execute", {
+        code: `return ${JSON.stringify(first.parsed.result)};`,
+      });
+      expect(second.parsed.result).toBe(plaintext);
+    }, 30000);
+
+    test.skipIf(runtime === "bun")(
+      "a result that secret markers push past the inline limit comes back as an encrypted preview",
+      async () => {
+        const result = await callTool(server.url, TOKEN_A, "execute", {
+          code: `return Array(1500).fill(${JSON.stringify(UPSTREAM_SECRET)});`,
+        });
+        expect(Buffer.byteLength(result.text)).toBeLessThanOrEqual(
+          INLINE_RESULT_BYTES,
+        );
+        expect(result.isError).toBe(false);
+        expect(result.parsed.truncated).toBe(true);
+        expect(result.parsed.hint).toContain("inline limit");
+        expect(result.parsed.result._total).toBe(1500);
+        expect(result.text).toContain("{{fastly-encrypted:v1:github-pat:");
+        expect(result.text).not.toContain(UPSTREAM_SECRET);
+      },
+      30000,
+    );
 
     test("package upload is hidden, explained and refused; package metadata still works", async () => {
       const found = await callTool(server.url, TOKEN_A, "search", {

@@ -1,4 +1,4 @@
-import { enrichMethod } from "../indexer.js";
+import { buildUsage, enrichMethod } from "../indexer.js";
 import { remoteUnavailableOperations } from "../method-policy.js";
 
 // The remote index leaves these operations out, so without this the model
@@ -67,12 +67,7 @@ export function inspect(index, method, { remote = false } = {}) {
     doc.constraints = match.constraints;
   }
 
-  if (match.example) {
-    doc.example = match.example;
-  }
-
-  const args = match.params.length > 0 ? "{ /* params */ }" : "";
-  doc.usage = `return await ${match.shortcut}.${match.method}(${args});`;
+  doc.example = buildUsage(match);
 
   return doc;
 }

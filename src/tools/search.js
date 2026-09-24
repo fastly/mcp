@@ -1,4 +1,4 @@
-import { enrichMethod } from "../indexer.js";
+import { buildUsage, enrichMethod } from "../indexer.js";
 
 const MAX_RESULTS = 10;
 
@@ -142,14 +142,6 @@ function detectScope(description) {
   return undefined;
 }
 
-function buildUsage(method) {
-  const args =
-    method.requiredParams.length > 0
-      ? `{ ${method.requiredParams.map((p) => `${p}: '...'`).join(", ")} }`
-      : "";
-  return `return await ${method.shortcut}.${method.method}(${args});`;
-}
-
 function projectMatch(method) {
   const projected = {
     apiClass: method.apiClass,
@@ -187,11 +179,18 @@ export function search(index, query) {
     enrichMethod(method);
     const score = scoreMethod(method, tokens);
     if (score > 0) {
-      scored.push({ method, score });
+      scored.push({
+        method,
+        score,
+        exactMethod: method.methodLower === fullLower,
+      });
     }
   }
 
-  scored.sort((a, b) => b.score - a.score);
+  scored.sort(
+    (a, b) =>
+      Number(b.exactMethod) - Number(a.exactMethod) || b.score - a.score,
+  );
 
   const total = scored.length;
   const matches = scored

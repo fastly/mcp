@@ -1,6 +1,6 @@
 import vm from "node:vm";
 import Fastly from "fastly";
-import { describeThrown } from "./errors.js";
+import { describeThrown, read } from "./errors.js";
 import { API_RESPONSE_BYTES, INLINE_RESULT_BYTES } from "./limits.js";
 import { operationsOf, remoteDenial } from "./method-policy.js";
 import { serializeResult } from "./serializer.js";
@@ -46,17 +46,19 @@ const FASTLY_ORIGINS = new Set([
   "https://rt.fastly.com",
 ]);
 
+// superagent only enforces the size limit on bodies it buffers, and it leaves binary types such as application/octet-stream unbuffered.
+Fastly.ApiClient.instance.plugins = [
+  (request) => request.buffer(true).maxResponseSize(API_RESPONSE_BYTES),
+];
+
 if (remote) {
-  // Generated methods already pin their origin; this second lock also keeps
-  // a redirect from carrying the caller's token elsewhere.
-  Fastly.ApiClient.instance.plugins = [
-    (request) => {
-      if (!FASTLY_ORIGINS.has(new URL(request.url).origin)) {
-        throw new Error("Remote executions can only reach the Fastly API");
-      }
-      request.redirects(0);
-    },
-  ];
+  // Generated methods already pin their origin; this second lock also keeps a redirect from carrying the caller's token elsewhere.
+  Fastly.ApiClient.instance.plugins.push((request) => {
+    if (!FASTLY_ORIGINS.has(new URL(request.url).origin)) {
+      throw new Error("Remote executions can only reach the Fastly API");
+    }
+    request.redirects(0);
+  });
 }
 
 const apiInstances = new Map();
@@ -96,6 +98,32 @@ function authHint(status) {
   return status === 401 ? BAD_TOKEN_HINT : FORBIDDEN_HINT;
 }
 
+async function readFetchBody(response, abort) {
+  const chunks = [];
+  let bytes = 0;
+  // Leaving the loop early cancels the stream.
+  for await (const chunk of response.body ?? []) {
+    bytes += chunk.byteLength;
+    if (bytes > API_RESPONSE_BYTES) {
+      abort();
+      throw new Error(
+        `Fetch response body exceeds the ${API_RESPONSE_BYTES}-byte limit`,
+      );
+    }
+    chunks.push(chunk);
+  }
+  // TextDecoder drops a leading byte order mark, like response.text() does.
+  return new TextDecoder().decode(Buffer.concat(chunks, bytes));
+}
+
+const FETCH_LESS =
+  "Use the method's paging or filtering parameters to fetch less at a time.";
+
+function responseTooLarge(apiClass, method, bytes) {
+  const size = bytes === undefined ? "" : `${bytes} bytes, `;
+  return `The response from ${apiClass}.${method} is ${size}more than the ${API_RESPONSE_BYTES} bytes a snippet can receive from one call. ${FETCH_LESS}`;
+}
+
 async function callFastly(payload) {
   const { apiClass, method, args } = JSON.parse(payload);
   const api = apiInstances.get(apiClass);
@@ -116,20 +144,18 @@ async function callFastly(payload) {
     // Better an error the snippet can read than a response full of placeholders with nothing to say so.
     if (reduced?.cappedDepth !== undefined) {
       throw new Error(
-        `The response from ${apiClass}.${method} nested deeper than ${reduced.cappedDepth} levels and cannot be represented completely. ` +
-          "Use the method's paging or filtering parameters to fetch less at a time.",
+        `The response from ${apiClass}.${method} nested deeper than ${reduced.cappedDepth} levels and cannot be represented completely. ${FETCH_LESS}`,
       );
     }
     if (reduced) {
-      throw new Error(
-        `The response from ${apiClass}.${method} is ${reduced.bytes} bytes, more than the ` +
-          `${API_RESPONSE_BYTES} bytes a snippet can receive from one call. ` +
-          "Use the method's paging or filtering parameters to fetch less at a time.",
-      );
+      throw new Error(responseTooLarge(apiClass, method, reduced.bytes));
     }
     return JSON.stringify({ ok: true, value });
   } catch (err) {
-    const failure = describeThrown(err);
+    const failure =
+      err?.error?.code === "ETOOLARGE"
+        ? { error: responseTooLarge(apiClass, method) }
+        : describeThrown(err);
     const hint = authHint(failure.status);
     if (hint) failure.hint = hint;
     return JSON.stringify({ ok: false, failure });
@@ -156,12 +182,11 @@ async function hostBridge(kind, payload) {
       if (bodyBase64 !== undefined) {
         options.body = Buffer.from(bodyBase64, "base64");
       }
-      // A sandbox abort must cancel the real request, or a hung response
-      // keeps this process alive until the parent's timeout. A fetch
-      // without a signal can never abort, so it skips the bookkeeping.
+      // A sandbox abort must cancel the real request, or a hung response keeps this process alive until the parent's timeout.
+      // Every request gets a controller so an oversized body can be cut off, but only one with a signal is tracked for sandbox aborts.
+      const controller = new AbortController();
+      options.signal = controller.signal;
       if (fetchId !== undefined) {
-        const controller = new AbortController();
-        options.signal = controller.signal;
         activeFetches.set(fetchId, controller);
       }
       try {
@@ -169,7 +194,7 @@ async function hostBridge(kind, payload) {
         return JSON.stringify({
           ok: true,
           value: {
-            body: await response.text(),
+            body: await readFetchBody(response, () => controller.abort()),
             headers: [...response.headers],
             ok: response.ok,
             status: response.status,
@@ -703,11 +728,11 @@ const installFacade = vm.runInContext(
 
 function rewriteError(err, source) {
   const out = describeThrown(err);
-  if (!err || typeof err !== "object") return out;
-  if (!err.stack || typeof err.stack !== "string") return out;
+  const stack = read(err, "stack");
+  if (typeof stack !== "string") return out;
 
   const frameRe = /user-code:(\d+):(\d+)/;
-  const lines = err.stack.split("\n");
+  const lines = stack.split("\n");
   const kept = [];
   let firstUserFrame = null;
 

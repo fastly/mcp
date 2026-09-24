@@ -13,7 +13,7 @@ import {
   PREVIEW_BYTES,
   RESULT_FILE_BYTES,
 } from "../limits.js";
-import { WITHHELD } from "../secrets.js";
+import { shieldJson, WITHHELD } from "../secrets.js";
 import { setKey } from "../serializer.js";
 import { sliceWhole, truncateOutsideSecrets } from "../truncate.js";
 
@@ -149,6 +149,40 @@ function previewOf(value, hint) {
   };
 }
 
+function withConsole(response, logs) {
+  return logs.length > 0 ? { ...response, console: logs } : response;
+}
+
+// Console output goes out with the response when both fit inline, and is dropped with a notice when only the response does.
+function fitResponse(response, logs) {
+  const complete = withConsole(response, logs);
+  if (jsonBytes(complete) <= INLINE_RESULT_BYTES) return complete;
+  if (logs.length === 0) return undefined;
+
+  const notice =
+    `Console output was omitted because its ${jsonBytes(logs)}-byte serialized form would make this response exceed ` +
+    `the ${INLINE_RESULT_BYTES}-byte inline limit.`;
+  const withoutLogs = {
+    ...response,
+    hint: response.hint ? `${response.hint} ${notice}` : notice,
+  };
+  return jsonBytes(withoutLogs) <= INLINE_RESULT_BYTES
+    ? withoutLogs
+    : undefined;
+}
+
+function fitOrRefuse(response, logs, what, advice) {
+  return (
+    fitResponse(response, logs) ??
+    tooLarge(
+      what,
+      jsonBytes(withConsole(response, logs)),
+      INLINE_RESULT_BYTES,
+      advice,
+    )
+  );
+}
+
 const RETURN_LESS =
   "Return less data from your code, for example by selecting only the fields you need or by paginating.";
 
@@ -168,6 +202,19 @@ function tooLarge(what, bytes, max, advice) {
   };
 }
 
+const withheld = () => ({ error: WITHHELD, outcome: "withheld" });
+
+// Anything built from the child's output can hold a secret, so it goes through the shield before any of it is measured, stored or clipped.
+// Returns undefined when a secret can't be encrypted, and the whole value is then withheld.
+function protect(value, shield) {
+  if (!shield) return value;
+  try {
+    return shieldJson(value, shield);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Decides how a successful result goes out.
  *
@@ -175,92 +222,92 @@ function tooLarge(what, bytes, max, advice) {
  * Only size can hold a result back, never item count: a list of 400 users is not a large result, and quietly returning 10 of them is worse than returning all 400.
  * What doesn't fit is written to a file and answered with its path.
  *
- * With a shield, secrets are encrypted in the whole result before any of it is stored or clipped.
+ * The result arrives with its secrets already encrypted, so the file and the preview only ever hold the encrypted form.
  * A token cut in half no longer looks like a token, so encrypting the preview afterwards would let most of it through.
  */
-function deliver(value, { resultStore, resultBytes, reduced, shield } = {}) {
-  const json = JSON.stringify(value);
-  if (json === undefined) return { result: value };
-  const bytes = Buffer.byteLength(json);
-
-  // The sandbox keeps a result within the budget it was given, cut down or not, so anything larger came from a faulty child.
-  // For a remote run that also means no preview: its shield runs after this returns, and would see a preview only once clipped.
-  if (bytes > resultBytes) {
-    return tooLarge("result", bytes, resultBytes, RETURN_LESS);
-  }
-
+function deliver(value, { resultStore, resultBytes, reduced, logs }) {
   if (reduced) {
     // The sandbox had to cut nested values out to make this fit, so it is not the real result and must not be stored as if it were.
     const cut =
       reduced.depth > 0
         ? `values nested deeper than ${reduced.depth} level${reduced.depth === 1 ? "" : "s"} were replaced by "[truncated: max depth]"`
         : "only a description of it could be returned";
+    const response = { result: value, truncated: true };
     if (reduced.cappedDepth !== undefined) {
       const reason =
         reduced.depth === reduced.cappedDepth
           ? `The result nested deeper than ${reduced.cappedDepth} levels, so ${cut}.`
           : `The result was ${reduced.bytes} bytes after values deeper than ${reduced.cappedDepth} levels were omitted, still above the ${resultBytes}-byte limit, so ${cut}.`;
-      return {
-        result: value,
-        truncated: true,
-        hint:
-          `${reason} Its complete size is unknown, and it was not written to a file because the file would be incomplete. ` +
-          "Return fewer fields, or page through the data and process it inside your code.",
-      };
-    }
-    return {
-      result: value,
-      truncated: true,
-      resultBytes: reduced.bytes,
-      hint:
+      response.hint =
+        `${reason} Its complete size is unknown, and it was not written to a file because the file would be incomplete. ` +
+        "Return fewer fields, or page through the data and process it inside your code.";
+    } else {
+      response.resultBytes = reduced.bytes;
+      response.hint =
         `The result is ${reduced.bytes} bytes at full depth, above the ${resultBytes}-byte limit, ` +
         `so ${cut}. It was not written to a file because the file would be incomplete. ` +
-        "Return fewer fields, or page through the data and process it inside your code.",
-    };
-  }
-
-  if (bytes <= INLINE_RESULT_BYTES) return { result: value };
-
-  let text = json;
-  if (shield) {
-    try {
-      text = shield.encrypt(json);
-      value = JSON.parse(text);
-    } catch {
-      // Parsing fails when a match reached into an escape sequence, such as the "n" of "\n".
-      return { error: WITHHELD };
+        "Return fewer fields, or page through the data and process it inside your code.";
     }
+    return fitOrRefuse(
+      response,
+      logs,
+      "result and console output",
+      RETURN_LESS,
+    );
   }
+
+  const text = JSON.stringify(value);
+  const bytes = text === undefined ? 0 : Buffer.byteLength(text);
+  // A result over the limit on its own can't fit, however little console output comes with it.
+  if (bytes <= INLINE_RESULT_BYTES) {
+    const inline = fitResponse({ result: value }, logs);
+    if (inline) return inline;
+  }
+  const responseBytes = jsonBytes(withConsole({ result: value }, logs));
 
   const stored = resultStore?.write(text);
   if (stored) {
     const hint =
       "Preview only. The complete result is in the file named by `resultFile`.";
-    return {
+    const response = {
       result: previewOf(value, hint),
       truncated: true,
       resultBytes: bytes,
       resultFile: stored.path,
       hint:
-        `The result is ${bytes} bytes, above the ${INLINE_RESULT_BYTES}-byte inline limit, ` +
-        `so all of it was written to ${stored.path} as JSON. Read that file to get every ` +
+        `The complete response would be ${responseBytes} bytes, above the ${INLINE_RESULT_BYTES}-byte inline limit. ` +
+        `The result itself is ${bytes} bytes, so all of it was written to ${stored.path} as JSON. Read that file to get every ` +
         "record; the preview in `result` is the first few entries only. The file is " +
         "temporary and is removed automatically after a few hours.",
     };
+    return fitOrRefuse(
+      response,
+      logs,
+      "result metadata and console output",
+      "Log less, or return less data.",
+    );
   }
 
   const reason = resultStore
     ? ` and could not be written to a file (${resultStore.lastError ?? "unknown error"})`
     : " and result files are disabled on this server";
-  return {
+  const response = {
     result: previewOf(
       value,
       "Preview only. The rest of the result was not kept.",
     ),
     truncated: true,
     resultBytes: bytes,
-    hint: `The result is ${bytes} bytes, above the ${INLINE_RESULT_BYTES}-byte inline limit${reason}. ${RETURN_LESS}`,
+    hint:
+      `The complete response would be ${responseBytes} bytes, above the ${INLINE_RESULT_BYTES}-byte inline limit. ` +
+      `The result itself is ${bytes} bytes${reason}. ${RETURN_LESS}`,
   };
+  return fitOrRefuse(
+    response,
+    logs,
+    "result preview and console output",
+    "Log less, or return less data.",
+  );
 }
 
 const activeChildren = new Set();
@@ -416,20 +463,20 @@ export async function execute(
             outcome: "cpu_limit",
           });
         }
-        return settle({
+        const crash = {
           error: stderr
             ? `Subprocess error: ${crashOutput(stderr)}`
             : `Subprocess exited with code ${exitCode} and no output`,
           outcome: "crashed",
-        });
+        };
+        return settle(protect(crash, shield) ?? withheld());
       }
 
       try {
         const raw = JSON.parse(stdout);
-        const logs = raw.console ?? [];
         // Console output is never stored, so it keeps its own small budget whether or not the snippet succeeded.
         // Measured on the serialized form, which is what the model receives: ten thousand empty entries cost real bytes even though their text is nothing.
-        const logBytes = jsonBytes(logs);
+        const logBytes = jsonBytes(raw.console ?? []);
         if (logBytes > MAX_CONSOLE) {
           return settle(
             tooLarge(
@@ -440,19 +487,29 @@ export async function execute(
             ),
           );
         }
-
         if (raw.ok) {
-          const out = deliver(raw.result, {
-            resultStore,
-            resultBytes,
-            reduced: raw.reduced,
-            shield,
-          });
-          if (logs.length) out.console = logs;
-          return settle(out);
+          // The sandbox keeps a result within the budget it was given, cut down or not, so anything larger came from a faulty child.
+          const bytes = jsonBytes(raw.result);
+          if (bytes > resultBytes) {
+            return settle(tooLarge("result", bytes, resultBytes, RETURN_LESS));
+          }
         }
 
-        const { ok, console: _logs, error, ...failure } = raw;
+        const payload = protect(raw, shield);
+        if (!payload) return settle(withheld());
+        const logs = payload.console ?? [];
+        if (payload.ok) {
+          return settle(
+            deliver(payload.result, {
+              resultStore,
+              resultBytes,
+              reduced: payload.reduced,
+              logs,
+            }),
+          );
+        }
+
+        const { ok, console: _logs, error, ...failure } = payload;
         const out = { error: error ?? "Unknown error", ...failure };
         // Failures are never stored either, so the error has to fit inline.
         const failureBytes = jsonBytes(out);
@@ -466,13 +523,20 @@ export async function execute(
             ),
           );
         }
-        if (logs.length) out.console = logs;
-        return settle(out);
+        return settle(
+          fitOrRefuse(
+            out,
+            logs,
+            "error details and console output",
+            "Log less, and return a shorter error description.",
+          ),
+        );
       } catch (e) {
-        return settle({
+        const failure = {
           error: `Failed to parse subprocess output: ${e.message}`,
           outcome: "crashed",
-        });
+        };
+        return settle(protect(failure, shield) ?? withheld());
       }
     });
 

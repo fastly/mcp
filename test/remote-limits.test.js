@@ -82,6 +82,114 @@ describe("source addresses and prevalidation budgets", () => {
     expect(ignored.status).toBe(200);
   }, 15000);
 
+  test("malformed request targets are admitted and audited as fixed rejections", async () => {
+    for (const target of ["//[", "/mcp#fragment", "/x\\../mcp", "/%GG"]) {
+      const status = await rawRequest(
+        trusting.url,
+        [`Fastly-Key: ${TOKEN_A}`],
+        "{}",
+        { target },
+      );
+      expect(status).toBe(400);
+    }
+    const record = await trusting.auditRecord(
+      (entry) => entry.category === "request_target_malformed",
+    );
+    expect(record).toMatchObject({
+      event: "request_rejected",
+      sourceIp: "127.0.0.1",
+      status: 400,
+    });
+    expect(record.requestId).toMatch(/^[0-9a-f-]{36}$/);
+  }, 15000);
+
+  test("routing compares the raw origin-form path", async () => {
+    for (const target of [
+      "////",
+      "/a/../mcp",
+      "/%2e%2e/mcp",
+      "/mcp/%2e%2e/healthz",
+    ]) {
+      const status = await rawRequest(
+        trusting.url,
+        [`Fastly-Key: ${TOKEN_A}`],
+        "{}",
+        { target },
+      );
+      expect(status).toBe(404);
+    }
+
+    const query = await rawRequest(
+      trusting.url,
+      [`Fastly-Key: ${TOKEN_A}`, "Accept: application/json, text/event-stream"],
+      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      { target: "/mcp?tenant=x" },
+    );
+    expect(query).toBe(200);
+  }, 15000);
+
+  test("absolute-form targets use their authority and reach the MCP adapter", async () => {
+    const body = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/list",
+    });
+    const status = await rawRequest(
+      trusting.url,
+      [`Fastly-Key: ${TOKEN_A}`, "Accept: application/json, text/event-stream"],
+      body,
+      { target: trusting.url, hostHeader: "evil.example" },
+    );
+    expect(status).toBe(200);
+
+    const httpsStatus = await rawRequest(
+      trusting.url,
+      [`Fastly-Key: ${TOKEN_A}`, "Accept: application/json, text/event-stream"],
+      body,
+      { target: trusting.url.replace("http:", "https:") },
+    );
+    expect(httpsStatus).toBe(200);
+
+    const disallowed = await rawRequest(
+      trusting.url,
+      [`Fastly-Key: ${TOKEN_A}`],
+      "{}",
+      { target: "http://evil.example/mcp" },
+    );
+    expect(disallowed).toBe(421);
+
+    // The authority is compared as written, like a Host header, so other spellings of an allowed address are refused too.
+    const { port } = new URL(trusting.url);
+    for (const host of ["127.1", "2130706433", "0x7f.0.0.1"]) {
+      const status = await rawRequest(trusting.url, [], "{}", {
+        target: `http://${host}:${port}/mcp`,
+      });
+      expect(status).toBe(421);
+    }
+    const userinfo = await rawRequest(trusting.url, [], "{}", {
+      target: `http://user@127.0.0.1:${port}/mcp`,
+    });
+    expect(userinfo).toBe(400);
+  }, 15000);
+
+  test("closed audit and diagnostic pipes do not crash the remote server", async () => {
+    const server = await spawnRemoteServer();
+    try {
+      server.child.stdout.destroy();
+      server.child.stderr.destroy();
+      const response = await rpc(
+        server.url,
+        { jsonrpc: "2.0", id: 1, method: "tools/list" },
+        { "Fastly-Key": TOKEN_A },
+      );
+      expect(response.status).toBe(200);
+      await sleep(100);
+      expect(isAlive(server.child.pid)).toBe(true);
+    } finally {
+      await server.close();
+    }
+  }, 30000);
+
   test("a flood of random keys cannot buy more than the failure budget upstream", async () => {
     const before = trusting.upstreamValidations();
     const statuses = [];

@@ -17,8 +17,6 @@ const mockIndex = [
       },
     ],
     returnType: "{String: String}",
-    example:
-      'const options = {\n  service_id: "SU1Z0isxPaozGVKXdv0eY",\n};\n\napiInstance.bulkPurgeTag(options)\n  .then((data) => {\n    console.log(data, "API called successfully.");\n  })',
   },
   {
     apiClass: "ServiceApi",
@@ -35,7 +33,6 @@ const mockIndex = [
       },
     ],
     returnType: "[ServiceResponse]",
-    example: "",
   },
   {
     apiClass: "ServiceApi",
@@ -52,7 +49,6 @@ const mockIndex = [
       },
     ],
     returnType: "ServiceResponse",
-    example: "",
   },
 ];
 
@@ -67,9 +63,10 @@ describe("inspect", () => {
     expect(result.description).toBe("List services");
     expect(result.returnType).toBe("[ServiceResponse]");
     expect(result.params).toHaveLength(1);
-    expect(result.usage).toContain("serviceApi");
-    expect(result.usage).toContain("listServices");
-    expect(result.usage).not.toContain("new Fastly");
+    expect(result.example).toContain("serviceApi");
+    expect(result.example).toContain("listServices");
+    expect(result.example).not.toContain("new Fastly");
+    expect(result.usage).toBeUndefined();
   });
 
   test("case-insensitive match", () => {
@@ -91,16 +88,17 @@ describe("inspect", () => {
     expect(result.method).toBe("bulkPurgeTag");
   });
 
-  test("includes example when available", () => {
+  test("the example is the same call search suggests, with the required parameters", () => {
     const result = inspect(mockIndex, "bulkPurgeTag");
     expect(result.ok).toBe(true);
-    expect(result.example).toContain("bulkPurgeTag");
+    expect(result.example).toBe(
+      "return await purgeApi.bulkPurgeTag({ service_id: '...' });",
+    );
   });
 
-  test("omits example field when empty", () => {
+  test("the example leaves optional parameters out", () => {
     const result = inspect(mockIndex, "listServices");
-    expect(result.ok).toBe(true);
-    expect(result.example).toBeUndefined();
+    expect(result.example).toBe("return await serviceApi.listServices();");
   });
 
   test("unknown method returns error with suggestions", () => {
@@ -129,12 +127,7 @@ describe("inspect", () => {
     expect(result.ok).toBe(false);
   });
 
-  test("usage snippet includes params placeholder when method has params", () => {
-    const result = inspect(mockIndex, "listServices");
-    expect(result.usage).toContain("{ /* params */ }");
-  });
-
-  test("usage snippet has empty parens when no params", () => {
+  test("example has empty parens when no params", () => {
     const result = inspect(
       [
         {
@@ -149,7 +142,7 @@ describe("inspect", () => {
       ],
       "ping",
     );
-    expect(result.usage).toBe("return await statusApi.ping();");
+    expect(result.example).toBe("return await statusApi.ping();");
   });
 
   test("inspect surfaces constraints when present", () => {

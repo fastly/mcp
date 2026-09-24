@@ -93,14 +93,9 @@ jobs:
             exit 1
           fi
 
-          if [[ -n "$INPUT_DIST_TAG" ]]; then
-            DIST_TAG="$INPUT_DIST_TAG"
-          elif [[ "$VERSION" == *-* ]]; then
-            DIST_TAG="${VERSION#*-}"
-            DIST_TAG="${DIST_TAG%%.*}"
-            DIST_TAG="${DIST_TAG%%+*}"
-          else
-            DIST_TAG="latest"
+          if ! DIST_TAG="$(node scripts/release-dist-tag.js "$VERSION" "$INPUT_DIST_TAG")"; then
+            echo "::error::Could not derive a valid npm dist-tag."
+            exit 1
           fi
 
           {

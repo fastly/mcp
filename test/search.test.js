@@ -200,6 +200,34 @@ describe("search", () => {
     }
   });
 
+  test("an exact method name ranks above a longer partial method match", () => {
+    const result = search(
+      [
+        {
+          apiClass: "AclsInComputeApi",
+          method: "computeAclListAcls",
+          httpMethod: "GET",
+          httpPath: "/resources/acls",
+          description: "List ACLs",
+          params: [],
+          returnType: "Object",
+        },
+        {
+          apiClass: "AclApi",
+          method: "listAcls",
+          httpMethod: "GET",
+          httpPath: "/service/{service_id}/version/{version_id}/acl",
+          description: "List ACLs",
+          params: [],
+          returnType: "Object",
+        },
+      ],
+      "listAcls",
+    );
+    expect(result.matches[0].apiClass).toBe("AclApi");
+    expect(result.matches[0].method).toBe("listAcls");
+  });
+
   test("hint field contains the query text", () => {
     const result = search(mockIndex, "purge");
     expect(result.ok).toBe(true);

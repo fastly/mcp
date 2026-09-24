@@ -199,6 +199,15 @@ export function resolveHttpOptions({ cliArgs, env = {}, defaults = {} }) {
   if (!path.startsWith("/")) {
     throw new Error(`--http-path must start with "/", got "${path}"`);
   }
+  // Requests are matched on their raw path, so one that a URL parser would rewrite could never be reached.
+  let canonical = false;
+  try {
+    parseOriginForm(path);
+    canonical = new URL(path, "http://fastly-mcp.invalid").pathname === path;
+  } catch {}
+  if (!canonical) {
+    throw new Error(`--http-path must be a canonical path, got "${path}"`);
+  }
 
   const authToken =
     cliArgs.httpAuthToken ?? env.FASTLY_MCP_HTTP_AUTH_TOKEN ?? undefined;
@@ -387,17 +396,10 @@ function admitLocalRequest(req, res, { authToken, reqPath, path }) {
   return { trace: {} };
 }
 
-/**
- * Every check a `--remote-http` request passes before it reaches MCP, with
- * the cheapest ones first so unauthenticated traffic costs the least.
- * Resolves with the request context, or undefined once it has answered.
- */
-async function admitRemoteRequest(
-  req,
-  res,
-  { remote, authToken, reqPath, path },
-) {
-  const { validator, budgets, trustedProxies, audit } = remote;
+// What every remote request goes through, even one with a malformed target: a request ID, its source address and the source's request budget.
+// Returns undefined once it has answered.
+function beginRemoteRequest(req, res, remote) {
+  const { budgets, trustedProxies, audit } = remote;
   const started = performance.now();
   const requestId = randomUUID();
   res.setHeader("X-Request-Id", requestId);
@@ -430,6 +432,23 @@ async function admitRemoteRequest(
     );
     return undefined;
   }
+
+  return { requestId, sourceIp, source, started, refuse };
+}
+
+/**
+ * Every check a `--remote-http` request passes before it reaches MCP, with the cheapest ones first so unauthenticated traffic costs the least.
+ * Resolves with the request context, or undefined once it has answered.
+ */
+async function admitRemoteRequest(
+  req,
+  res,
+  { remote, authToken, reqPath, path },
+) {
+  const { validator, budgets, audit } = remote;
+  const admission = beginRemoteRequest(req, res, remote);
+  if (!admission) return undefined;
+  const { requestId, sourceIp, source, started, refuse } = admission;
 
   if (!checkAuth(req, authToken)) {
     refuse(401, "deployment_token_rejected", "Unauthorized", {
@@ -506,6 +525,79 @@ async function admitRemoteRequest(
   res.on("finish", () => record("completed"));
   res.on("close", () => record("disconnected"));
   return context;
+}
+
+function rejectMalformedTarget(req, res, remote) {
+  if (!remote) {
+    writeJsonError(res, 400, "Malformed request target", {
+      Connection: "close",
+    });
+    return;
+  }
+  const admission = beginRemoteRequest(req, res, remote);
+  admission?.refuse(
+    400,
+    "request_target_malformed",
+    "Malformed request target",
+  );
+}
+
+const TARGET_PATH_CHAR = /^[A-Za-z0-9\-._~!$&'()*+,;=:@/]$/;
+const TARGET_QUERY_CHAR = /^[A-Za-z0-9\-._~!$&'()*+,;=:@/?]$/;
+
+function validTargetPart(value, allowed) {
+  for (let i = 0; i < value.length; i++) {
+    if (value[i] === "%") {
+      if (!/^[0-9A-Fa-f]{2}$/.test(value.slice(i + 1, i + 3))) return false;
+      i += 2;
+    } else if (!allowed.test(value[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function parseOriginForm(target) {
+  if (
+    !target.startsWith("/") ||
+    target.includes("#") ||
+    target.includes("\\")
+  ) {
+    throw new Error("Malformed request target");
+  }
+  const queryAt = target.indexOf("?");
+  const path = queryAt === -1 ? target : target.slice(0, queryAt);
+  const query = queryAt === -1 ? "" : target.slice(queryAt + 1);
+  if (
+    !validTargetPart(path, TARGET_PATH_CHAR) ||
+    !validTargetPart(query, TARGET_QUERY_CHAR)
+  ) {
+    throw new Error("Malformed request target");
+  }
+  return { path, originForm: target };
+}
+
+// An absolute-form target names its own authority, which takes the place of the Host header (RFC 9112, section 3.2.2).
+// It is compared as written, like a Host header, so no URL parser gets to normalize it first.
+function parseRequestTarget(target, method) {
+  if (target === "*" && method === "OPTIONS") {
+    return { path: "*", originForm: "*" };
+  }
+  if (target.startsWith("/")) return parseOriginForm(target);
+  const scheme = /^https?:\/\//i.exec(target);
+  if (!scheme || target.includes("\\")) {
+    throw new Error("Malformed request target");
+  }
+
+  const rest = target.slice(scheme[0].length);
+  const authorityEnd = rest.search(/[/?#]/);
+  const authority = authorityEnd === -1 ? rest : rest.slice(0, authorityEnd);
+  if (!authority || authority.includes("@")) {
+    throw new Error("Malformed request target");
+  }
+  let originForm = authorityEnd === -1 ? "/" : rest.slice(authorityEnd);
+  if (originForm.startsWith("?")) originForm = `/${originForm}`;
+  return { ...parseOriginForm(originForm), authority: authority.toLowerCase() };
 }
 
 export async function startHttp(
@@ -610,8 +702,15 @@ export async function startHttp(
 
   const handle = safe(async (req, res) => {
     const method = req.method ?? "GET";
-    const reqPath = new URL(req.url ?? "/", "http://h").pathname;
     res.setHeader("Cache-Control", NO_STORE);
+    let target;
+    try {
+      target = parseRequestTarget(req.url ?? "/", method);
+    } catch {
+      rejectMalformedTarget(req, res, remote);
+      return;
+    }
+    const reqPath = target.path;
 
     const originHeader = req.headers.origin;
     if (originHeader) {
@@ -636,10 +735,14 @@ export async function startHttp(
       return;
     }
 
-    if (!allowedHosts.has(String(req.headers.host).toLowerCase())) {
+    const authority =
+      target.authority ?? String(req.headers.host).toLowerCase();
+    if (!allowedHosts.has(authority)) {
       writeJsonError(res, 421, "Host not allowed");
       return;
     }
+    req.url = target.originForm;
+    if (target.authority) req.headers.host = target.authority;
 
     // Rate limits cap how fast requests arrive, not how many are open at once.
     if (remote && inFlight >= maxInFlight) {

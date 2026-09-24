@@ -123,6 +123,56 @@ describe("buildIndex – parse correctness", () => {
     expect(ignoreIfSet.description).toContain('0" = false');
     expect(ignoreIfSet.description).not.toContain("&#x3D;");
   });
+
+  test("array links and duplicated bold types do not hide options", () => {
+    const expected = {
+      "DmRoutingConfigsApi.listDmRoutingConfigs": ["state"],
+      "ApisecurityOperationsApi.apiSecurityListDiscoveredOperations": [
+        "method",
+        "domain",
+      ],
+      "ApisecurityOperationsApi.apiSecurityListOperations": [
+        "method",
+        "domain",
+      ],
+      "UserApi.createUser": ["roles"],
+      "UserApi.updateUser": ["roles"],
+      "RateLimiterApi.createRateLimiter": ["http_methods", "client_key"],
+      "RateLimiterApi.updateRateLimiter": ["http_methods", "client_key"],
+      "HealthcheckApi.createHealthcheck": ["headers"],
+      "HealthcheckApi.updateHealthcheck": ["headers"],
+      "ApexRedirectApi.createApexRedirect": ["domains"],
+      "ApexRedirectApi.updateApexRedirect": ["domains"],
+      "DirectorApi.createDirector": ["backends"],
+      "PackageApi.putPackage": ["_package"],
+    };
+    for (const [qualified, names] of Object.entries(expected)) {
+      const [apiClass, method] = qualified.split(".");
+      const found = index.find(
+        (entry) => entry.apiClass === apiClass && entry.method === method,
+      );
+      expect(found).toBeDefined();
+      expect(found.params.map((param) => param.name)).toEqual(
+        expect.arrayContaining(names),
+      );
+    }
+
+    const createRateLimiter = index.find(
+      (entry) =>
+        entry.apiClass === "RateLimiterApi" &&
+        entry.method === "createRateLimiter",
+    );
+    expect(
+      createRateLimiter.params.find((p) => p.name === "http_methods").type,
+    ).toBe("[String]");
+    const putPackage = index.find(
+      (entry) =>
+        entry.apiClass === "PackageApi" && entry.method === "putPackage",
+    );
+    expect(putPackage.params.find((p) => p.name === "_package").type).toBe(
+      "File",
+    );
+  });
 });
 
 describe("buildIndex – golden test", () => {

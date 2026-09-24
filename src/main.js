@@ -437,6 +437,9 @@ export async function main({
 
 /** Like `main`, but prints startup errors and exits 2 instead of throwing. */
 export async function runCli(options) {
+  // Without a listener, a write to a closed stderr would crash the server with an unhandled 'error' event.
+  // There is nowhere left to report that failure anyway.
+  process.stderr.on("error", () => {});
   try {
     await main(options);
   } catch (err) {

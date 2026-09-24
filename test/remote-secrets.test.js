@@ -331,6 +331,13 @@ describe("remote shield text handling", () => {
     );
   });
 
+  test("output limits cover separate strings in the same result", () => {
+    const shield = new RemoteSecretShield(TOKEN_A);
+    for (let i = 0; i < 2000; i++) shield.encrypt(GITHUB_PAT);
+    expect(() => shield.encrypt(GITHUB_PAT)).toThrow("Too many secrets");
+    shield.destroy();
+  });
+
   test("a destroyed shield refuses to work", () => {
     const shield = new RemoteSecretShield(TOKEN_A);
     shield.destroy();

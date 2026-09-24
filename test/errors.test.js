@@ -178,4 +178,26 @@ describe("describeThrown", () => {
       "Unknown error (empty object thrown)",
     );
   });
+
+  test("hostile function coercion and constructor names cannot crash reporting", () => {
+    const failure = function failure() {};
+    Object.defineProperty(failure, Symbol.toPrimitive, {
+      value() {
+        throw new Error("coercion trap");
+      },
+    });
+    expect(describeThrown(failure)).toEqual({
+      error: "Function (no message)",
+    });
+
+    const name = {
+      [Symbol.toPrimitive]() {
+        throw new Error("constructor trap");
+      },
+    };
+    expect(() => describeThrown({ constructor: { name } })).not.toThrow();
+    expect(describeThrown({ constructor: { name } }).error).toBe(
+      '{"constructor":{"name":{}}}',
+    );
+  });
 });

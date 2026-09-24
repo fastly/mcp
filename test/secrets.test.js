@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { SecretShield } from "../src/secrets.js";
+import { SecretShield, shieldJson } from "../src/secrets.js";
 
 // Fixed key for deterministic tests
 const TEST_KEY = new Uint8Array([
@@ -16,6 +16,12 @@ const OPENAI_KEY = "sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuv";
 // A realistic SendGrid key (structured: SG.<22 BASE64URL chars>.<43 BASE64URL chars>)
 const SENDGRID_KEY =
   "SG.ABCDEFGHIJKLMNOPQRSTUv.ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq";
+// These two share their "sk-" lead with OPENAI_KEY.
+const ANTHROPIC_KEY =
+  "sk-ant-api03-q8ZrT2mXw7LpK4vN9cYb3HsJ6dFg1RtU5eWo0iPa-_Qz8XyV2nMb7CkL4jHg9DfS3aWe6RtY1uIo5pZx0cVb";
+const OPENAI_LEGACY_KEY = "sk-T3BlbkFJq8ZrT2mXw7LpK4vN9cYb3HsJ6dFg1RtU5eWo0iPa";
+const FASTLY_TOKEN = "Ab3dEf7hIj1lMn0pQr2tUv4xYz6_B-9D";
+const AWS_SECRET = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
 
 describe("SecretShield", () => {
   test("round-trip: encrypt then decrypt returns original", () => {
@@ -79,6 +85,53 @@ describe("SecretShield", () => {
 
     expect(shield.encrypt(encrypted)).toBe(encrypted);
     expect(shield.decrypt(encrypted)).toBe(text);
+    shield.destroy();
+  });
+
+  test("decrypting one ciphertext cannot cascade through another registry entry", () => {
+    const shield = new SecretShield({ key: TEST_KEY });
+    const first = GITHUB_PAT;
+    const second = "ghp_hKBK5fikImbH8BCmIbyH7fcU1WR32UKPLe2B";
+    const firstCiphertext = shield.encrypt(first);
+    expect(firstCiphertext).toBe("ghp_ilWQmLlUt6QtEjABNXpGOL3yzbvAg2mVpzU5");
+    expect(shield.encrypt(second)).toBe(first);
+
+    expect(shield.decrypt(firstCiphertext)).toBe(first);
+    expect(shield.decrypt(`before ${firstCiphertext} after`)).toBe(
+      `before ${first} after`,
+    );
+    shield.destroy();
+  });
+
+  test("simple and heuristic ciphertexts round trip without rescanning replacements", () => {
+    const shield = new SecretShield({ key: TEST_KEY });
+    for (const plaintext of [GITHUB_PAT, FASTLY_TOKEN, AWS_SECRET]) {
+      const ciphertext = shield.encrypt(plaintext);
+      expect(ciphertext).not.toBe(plaintext);
+      expect(shield.decrypt(`before ${ciphertext} after`)).toBe(
+        `before ${plaintext} after`,
+      );
+      expect(shield.encrypt(ciphertext)).toBe(ciphertext);
+    }
+    shield.destroy();
+  });
+
+  test("ciphertexts whose leads overlap each decrypt to their own plaintext", () => {
+    const shield = new SecretShield({ key: TEST_KEY });
+    const keys = [ANTHROPIC_KEY, OPENAI_KEY, OPENAI_LEGACY_KEY, FASTLY_TOKEN];
+    const text = keys.join(" and ");
+    const encrypted = shield.encrypt(text);
+    for (const key of keys) expect(encrypted).not.toContain(key);
+    expect(shield.decrypt(encrypted)).toBe(text);
+    shield.destroy();
+  });
+
+  test("structured shielding refuses encrypted key collisions", () => {
+    const shield = new SecretShield({ key: TEST_KEY });
+    const ciphertext = shield.encrypt(GITHUB_PAT);
+    expect(() =>
+      shieldJson({ [GITHUB_PAT]: "first", [ciphertext]: "second" }, shield),
+    ).toThrow("object keys collide");
     shield.destroy();
   });
 

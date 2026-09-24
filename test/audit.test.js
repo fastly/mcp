@@ -485,6 +485,25 @@ describe("streamSink", () => {
     expect(stream.chunks).toHaveLength(3);
     expect(log.pendingRecords).toBe(0);
   });
+
+  test("an asynchronous stream error is consumed and bounds later records", () => {
+    const stream = fakeStream();
+    const failures = [];
+    const log = logTo(streamSink(stream), {
+      onSinkFailure: (error) => failures.push(error),
+    });
+    log.emit("startup");
+
+    const brokenPipe = Object.assign(new Error("broken pipe"), {
+      code: "EPIPE",
+    });
+    expect(() => stream.emit("error", brokenPipe)).not.toThrow();
+    for (let i = 0; i < 1010; i++) log.emit("mcp_request", { sequence: i });
+
+    expect(failures).toEqual([brokenPipe]);
+    expect(log.pendingRecords).toBe(1000);
+    expect(log.droppedRecords).toBe(10);
+  });
 });
 
 describe("fileSink", () => {
@@ -553,6 +572,34 @@ describe("fileSink", () => {
     expect(records[2].run).toBe(2);
   });
 
+  test("an incomplete final record keeps its own line and nothing is deleted", () => {
+    const path = join(directory, "partial-tail.log");
+    writeFileSync(path, '{"event":"startup","run":1}\n{"event":"mcp_');
+
+    const second = logTo(fileSink(path));
+    second.emit("startup", { run: 2 });
+    second.close();
+
+    const lines = readFileSync(path, "utf8").trimEnd().split("\n");
+    expect(lines).toHaveLength(3);
+    expect(JSON.parse(lines[0]).run).toBe(1);
+    expect(lines[1]).toBe('{"event":"mcp_');
+    expect(JSON.parse(lines[2]).run).toBe(2);
+  });
+
+  test("a file without any newline is left whole", () => {
+    const path = join(directory, "no-newline.log");
+    writeFileSync(path, "precious data without newline");
+
+    const log = logTo(fileSink(path));
+    log.emit("startup");
+    log.close();
+
+    const lines = readFileSync(path, "utf8").trimEnd().split("\n");
+    expect(lines[0]).toBe("precious data without newline");
+    expect(JSON.parse(lines[1]).event).toBe("startup");
+  });
+
   test("finishes a short write before accepting the record", () => {
     const path = join(directory, "short-write.log");
     let writes = 0;
@@ -566,6 +613,30 @@ describe("fileSink", () => {
     sink.close();
     expect(writes).toBeGreaterThan(1);
     expect(readFileSync(path, "utf8")).toBe('{"event":"startup"}\n');
+  });
+
+  test("resumes after a partial write error without duplicating the prefix", () => {
+    const path = join(directory, "partial-error.log");
+    let calls = 0;
+    const sink = fileSink(path, {
+      write(fd, buffer, offset, length) {
+        calls++;
+        if (calls === 1) {
+          return writeFileChunk(fd, buffer, offset, Math.min(length, 3));
+        }
+        if (calls === 2) throw new Error("EIO");
+        return writeFileChunk(fd, buffer, offset, length);
+      },
+    });
+    const log = logTo(sink);
+    log.emit("startup", { run: 1 });
+    expect(log.pendingRecords).toBe(1);
+    log.flush();
+    log.close();
+
+    const text = readFileSync(path, "utf8");
+    expect(text.split("\n")).toHaveLength(2);
+    expect(JSON.parse(text)).toMatchObject({ event: "startup", run: 1 });
   });
 
   test("a path that cannot be opened fails at startup, not at the first record", () => {

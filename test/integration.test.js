@@ -3,6 +3,7 @@ import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { INLINE_RESULT_BYTES } from "../src/limits.js";
 import { GITHUB_PAT, tempDir, tokenAtPreviewCut } from "./helpers.js";
 
 const SERVER_PATH = join(import.meta.dir, "../src/index.js");
@@ -65,6 +66,44 @@ describe("large results over MCP", () => {
     expect(parsed.truncated).toBeUndefined();
     expect(parsed.result).toHaveLength(500);
     expect(parsed.result[499].id).toBe("u499");
+  }, 20000);
+
+  test("compact results stay within the final inline byte limit", async () => {
+    const result = await bigClient.callTool({
+      name: "execute",
+      arguments: { code: "return Array(20000).fill(0);" },
+    });
+    expect(Buffer.byteLength(result.content[0].text)).toBeLessThanOrEqual(
+      INLINE_RESULT_BYTES,
+    );
+    expect(JSON.parse(result.content[0].text).result).toHaveLength(20000);
+  }, 20000);
+
+  test("the final response envelope participates in file delivery", async () => {
+    const parsed = await run('return "x".repeat(99990);');
+    expect(parsed.error).toBeUndefined();
+    expect(parsed.resultFile).toStartWith(dir);
+    expect(parsed.hint).toContain("complete response would be 100003 bytes");
+    expect(parsed.hint).toContain("result itself is 99992 bytes");
+    expect(parsed.hint).not.toContain(
+      "result is 99992 bytes, above the 100000-byte inline limit",
+    );
+    expect(JSON.parse(readFileSync(parsed.resultFile, "utf8"))).toBe(
+      "x".repeat(99990),
+    );
+  }, 20000);
+
+  test("large console output cannot hide a stored result path", async () => {
+    const parsed = await run(
+      'console.log("c".repeat(95000)); return "r".repeat(200000);',
+    );
+    expect(parsed.error).toBeUndefined();
+    expect(parsed.resultFile).toStartWith(dir);
+    expect(parsed.console).toBeUndefined();
+    expect(parsed.hint).toContain("Console output was omitted");
+    expect(JSON.parse(readFileSync(parsed.resultFile, "utf8"))).toBe(
+      "r".repeat(200000),
+    );
   }, 20000);
 
   test("an oversized list arrives as a path to the whole result", async () => {
@@ -214,8 +253,9 @@ describe("MCP integration", () => {
     expect(parsed.apiClass).toBe("ServiceApi");
     expect(parsed.method).toBe("listServices");
     expect(parsed.httpMethod).toBe("GET");
-    expect(parsed.usage).toContain("serviceApi.listServices");
-    expect(parsed.usage).not.toContain("new Fastly");
+    expect(parsed.example).toContain("serviceApi.listServices");
+    expect(parsed.example).not.toContain("new Fastly");
+    expect(parsed.usage).toBeUndefined();
     expect(parsed.params).toBeDefined();
   }, 10000);
 
@@ -292,6 +332,22 @@ describe("MCP integration with encryption (env vars)", () => {
     const decParsed = JSON.parse(decResult.content[0].text);
     // The result should be the encrypted form again (re-encrypted on output)
     expect(decParsed.result).toBe(encryptedToken);
+  }, 15000);
+
+  test("shielding structured strings preserves valid JSON", async () => {
+    const plaintext = "a\nAb0Cd1Ef2Gh3Ij4Kl5Mn6Op7Qr8St9U";
+    const first = await encClient.callTool({
+      name: "execute",
+      arguments: { code: `return ${JSON.stringify(plaintext)};` },
+    });
+    const protectedValue = JSON.parse(first.content[0].text).result;
+    expect(protectedValue).toBe(plaintext);
+
+    const second = await encClient.callTool({
+      name: "execute",
+      arguments: { code: `return ${JSON.stringify(protectedValue)};` },
+    });
+    expect(JSON.parse(second.content[0].text).result).toBe(plaintext);
   }, 15000);
 
   test("search tool works with encryption enabled", async () => {

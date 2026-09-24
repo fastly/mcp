@@ -129,11 +129,11 @@ function parseApiDoc(content, apiClass) {
       const lines = optionsBlock.split("\n");
       for (const line of lines) {
         const pm = line.match(
-          /^\*\*(\w+)\*\*\s*\|\s*(?:\[?\*\*([^*|[\]]+)\*\*\]?(?:\([^)]*\))?|)\s*\|\s*([^|]*)\|(.*)$/,
+          /^\*\*(\w+)\*\*\s*\|\s*(.*?)\s*\|\s*([^|]*)\|(.*)$/,
         );
         if (!pm) continue;
         const paramName = pm[1];
-        const paramType = (pm[2] || "").trim();
+        const paramType = (pm[2].match(/\*\*([^*]+)\*\*/)?.[1] || "").trim();
         const paramDesc = cleanDocText(pm[3] || "");
         const notes = (pm[4] || "").trim();
         const required = !notes.includes("[optional]");
@@ -143,20 +143,6 @@ function parseApiDoc(content, apiClass) {
           required,
           description: paramDesc,
         });
-      }
-    }
-
-    let example = "";
-    const exampleIdx = section.indexOf("### Example");
-    if (exampleIdx !== -1) {
-      const afterExample = section.slice(exampleIdx);
-      const codeStart = afterExample.indexOf("```javascript\n");
-      if (codeStart !== -1) {
-        const codeBody = afterExample.slice(codeStart + 14);
-        const codeEnd = codeBody.indexOf("```");
-        if (codeEnd !== -1) {
-          example = codeBody.slice(0, codeEnd).trim();
-        }
       }
     }
 
@@ -183,7 +169,6 @@ function parseApiDoc(content, apiClass) {
       params,
       constraints,
       returnType,
-      example,
     });
   }
 
@@ -218,6 +203,15 @@ export function enrichMethod(method) {
     .map((p) => p.name);
   method.pathParams = extractPathParams(method.httpPath);
   return method;
+}
+
+/** A call to an enriched method with placeholders for its required parameters. */
+export function buildUsage(method) {
+  const args =
+    method.requiredParams.length > 0
+      ? `{ ${method.requiredParams.map((p) => `${p}: '...'`).join(", ")} }`
+      : "";
+  return `return await ${method.shortcut}.${method.method}(${args});`;
 }
 
 export async function buildIndex(docsDir = DOCS_DIR) {
