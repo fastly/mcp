@@ -216,7 +216,11 @@ for (const runtime of ["bun", "node"]) {
             _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" },
           },
         },
-        { "Fastly-Key": TOKEN_A, "Mcp-Method": "tools/call" },
+        {
+          "Fastly-Key": TOKEN_A,
+          "Mcp-Method": "tools/call",
+          "Mcp-Protocol-Version": "2026-07-28",
+        },
       );
       expect((await readResult(res)).error).toBeDefined();
     }, 15000);

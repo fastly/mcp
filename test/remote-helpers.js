@@ -194,7 +194,10 @@ export function rpc(url, body, headers = {}, init = {}) {
 
 export function modernRpc(url, token, body, init) {
   const { params = {}, ...rest } = body;
-  const headers = { "Mcp-Method": body.method };
+  const headers = {
+    "Mcp-Method": body.method,
+    "Mcp-Protocol-Version": MODERN_VERSION,
+  };
   if (params.name) headers["Mcp-Name"] = params.name;
   if (token !== undefined) headers["Fastly-Key"] = token;
   return rpc(

@@ -37,12 +37,15 @@ function rpc(url, body, extraHeaders = {}) {
 }
 
 /**
- * POST a 2026-07-28 request. `Mcp-Method` is mandatory rather than a routing
- * convenience: omit it and the server answers -32020.
+ * POST a 2026-07-28 request. `Mcp-Method` and `Mcp-Protocol-Version` are
+ * mandatory rather than routing conveniences: omit one and the server answers -32020.
  */
 function modernRpc(url, body) {
   const { params = {}, ...rest } = body;
-  const headers = { "Mcp-Method": body.method };
+  const headers = {
+    "Mcp-Method": body.method,
+    "Mcp-Protocol-Version": MODERN_VERSION,
+  };
   if (params.name) headers["Mcp-Name"] = params.name;
 
   return rpc(
@@ -612,6 +615,29 @@ describe("Streamable HTTP transport — 2026-07-28 wire shape", () => {
     expect(res.status).toBe(200);
     const { result } = await res.json();
     expect(JSON.parse(result.content[0].text).ok).toBe(true);
+  }, 10000);
+
+  test("a modern request without Mcp-Protocol-Version is refused before it runs", async () => {
+    const res = await rpc(
+      server.url,
+      {
+        jsonrpc: "2.0",
+        id: 5,
+        method: "tools/list",
+        params: {
+          _meta: {
+            [PROTOCOL_VERSION_META_KEY]: MODERN_VERSION,
+            [CLIENT_INFO_META_KEY]: { name: "wire-test", version: "1.0.0" },
+            [CLIENT_CAPABILITIES_META_KEY]: {},
+          },
+        },
+      },
+      { "Mcp-Method": "tools/list" },
+    );
+    expect(res.status).toBe(400);
+    const { id, error } = await res.json();
+    expect(id).toBe(5);
+    expect(error.code).toBe(-32020);
   }, 10000);
 });
 
