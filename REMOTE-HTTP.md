@@ -223,7 +223,7 @@ location / {
 This block needs an existing HTTPS configuration and certificate; it does not create them.
 Check the nginx configuration and reload it once the checks in the next step pass.
 
-If you use another web server, keep the original `Host`, `Fastly-Key`, `Authorization`, `Mcp-Method` and `Mcp-Name` headers.
+If you use another web server, keep the original `Host`, `Fastly-Key`, `Authorization`, `Mcp-Method`, `Mcp-Name` and `Mcp-Protocol-Version` headers.
 Set `X-Forwarded-For` to the connecting client's address, replacing any value the client supplied.
 Turn off caching and response buffering, and allow at least 60 seconds for a response.
 
