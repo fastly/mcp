@@ -966,6 +966,6 @@ describe("Streamable HTTP transport — secret encryption", () => {
     expect(res.status).toBe(200);
     const text = await res.text();
     expect(text).not.toContain(GITHUB_PAT);
-    expect(text).toContain("ghp_");
+    expect(text).toContain("{ENCRYPTED:");
   }, 15000);
 });

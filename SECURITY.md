@@ -62,10 +62,18 @@ The startup audit record says which protections are active.
 ### Secret encryption
 
 In remote mode, the secret encryption key is derived from the caller's token with HKDF-SHA-256.
-The encryption is deterministic: equal secrets give equal ciphertexts, and short segments have few possible values, so a caller could enumerate them under their own key.
+Each recognized secret is replaced with `{ENCRYPTED:...}`, which holds the whole encrypted token plus a short check value.
 
-The `{{fastly-encrypted:v1:...}}` marker only tells ciphertext from plaintext.
-It authenticates nothing, so a wrong key or an altered ciphertext decrypts to a different, well-formed value without any error.
+If the key or the tweak is wrong, or the value was changed, the check fails instead of producing a believable token.
+The check gives about 48.5 bits of protection, assuming the FAST cipher behaves as a strong tweakable pseudorandom permutation.
+It is not authenticated encryption.
+
+The same secret always gives the same encrypted value under the same key.
+So anyone who can get a guessed value encrypted with that key can check whether the guess is right.
+
+The encrypted value hides the token's prefix, but its length and the text around it can still show what kind of token it is.
+It also isn't tied to where it appears, so a valid one can be reused, moved to another argument or removed without anyone noticing.
+
 The feature keeps recognized secrets away from the model, not from the operator of the server.
 
 ### Token validation

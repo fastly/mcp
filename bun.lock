@@ -7,7 +7,7 @@
       "dependencies": {
         "@modelcontextprotocol/node": "^2.1.0",
         "@modelcontextprotocol/server": "^2.1.0",
-        "fast-cipher": "0.3.0",
+        "fast-cipher": "0.3.1",
         "fastly": "^16.1.0",
         "zod": "^4.6.5",
       },
@@ -79,7 +79,7 @@
 
     "eventsource-parser": ["eventsource-parser@3.1.1", "", {}, "sha512-EKN1vKAMcZ8MlYMpaNuxN6R9yakzH6uajHcHVTqWJzvu5pWw9DyhbP35HH8MVBQ+dZjAfDxk+A8NiR9KWaXiyQ=="],
 
-    "fast-cipher": ["fast-cipher@0.3.0", "", {}, "sha512-0GXdk4YDBT7WKwe8Jn048Zk+PkIf9xT/CTUVVu8DUP7cvmvV2qAZFV1SYYpHZcjpsIuxbI2Fmrg7XkxrT4yl7Q=="],
+    "fast-cipher": ["fast-cipher@0.3.1", "", {}, "sha512-KTgwAAczoxMDA9sXMK96i2wk0TUydgIbrXvQUsKFzANn+QChNOHg6m+wifPcmLqwEO6zZBFR6Of9SX7sNLMz1g=="],
 
     "fast-safe-stringify": ["fast-safe-stringify@2.1.1", "", {}, "sha512-W+KJc2dmILlPplD/H4K9l9LcAHAfPtP6BY84uVLXQ6Evcz9Lcg33Y2z1IVblT6xdY54PXYVHEv+0Wpq8Io6zkA=="],
 

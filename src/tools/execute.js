@@ -13,7 +13,7 @@ import {
   PREVIEW_BYTES,
   RESULT_FILE_BYTES,
 } from "../limits.js";
-import { shieldJson, WITHHELD } from "../secrets.js";
+import { shieldJson, WITHHELD, WRAPPER_OPENER } from "../secrets.js";
 import { setKey } from "../serializer.js";
 import { sliceWhole, truncateOutsideSecrets } from "../truncate.js";
 
@@ -38,6 +38,16 @@ function jsonBytes(value) {
   return Buffer.byteLength(JSON.stringify(value) ?? "null");
 }
 
+// A cut encrypted value can't be decrypted, so the preview stops before it.
+function withoutPartialWrapper(head) {
+  const open = head.lastIndexOf(WRAPPER_OPENER);
+  if (open !== -1 && !head.includes("}", open)) return head.slice(0, open);
+  for (let n = Math.min(WRAPPER_OPENER.length - 1, head.length); n > 0; n--) {
+    if (head.endsWith(WRAPPER_OPENER.slice(0, n))) return head.slice(0, -n);
+  }
+  return head;
+}
+
 // Cuts a string down to about `budget` bytes of JSON, note included.
 // Measured on the escaped form, since that's what the response carries and a control character costs six bytes there.
 function clipString(text, budget) {
@@ -52,7 +62,7 @@ function clipString(text, budget) {
     const perUnit = Math.max(1, size / head.length);
     head = head.slice(0, head.length - Math.ceil(excess / perUnit));
   }
-  return sliceWhole(head, head.length) + note;
+  return withoutPartialWrapper(sliceWhole(head, head.length)) + note;
 }
 
 function describe(value, budget) {
@@ -195,6 +205,14 @@ function crashOutput(stderr) {
   return truncateOutsideSecrets(stderr, CRASH_OUTPUT_SHOWN);
 }
 
+const tooLargeError = (bytes) =>
+  tooLarge(
+    "error details",
+    bytes,
+    INLINE_RESULT_BYTES,
+    "The snippet threw, and the error was too large to return. Catch the error and return a shorter description of it.",
+  );
+
 function tooLarge(what, bytes, max, advice) {
   return {
     error: `Output too large (${bytes} bytes of ${what}, max ${max}). ${advice}`,
@@ -203,6 +221,128 @@ function tooLarge(what, bytes, max, advice) {
 }
 
 const withheld = () => ({ error: WITHHELD, outcome: "withheld" });
+
+// Never repeat the child's output here: it could hold part of a secret.
+const unreadable = () => ({
+  error: "The subprocess returned output this server could not read",
+  outcome: "crashed",
+});
+
+const CONSOLE_LEVELS = new Set(["log", "info", "warn", "error", "debug"]);
+const SUCCESS_FIELDS = new Set(["ok", "result", "reduced", "console"]);
+const FAILURE_FIELDS = new Set([
+  "ok",
+  "error",
+  "status",
+  "statusText",
+  "body",
+  "hint",
+  "stack",
+  "line",
+  "console",
+]);
+
+const isRecord = (value) =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+const hasOnly = (value, fields) =>
+  Object.keys(value).every((key) => fields.has(key));
+const isCount = (value) => Number.isSafeInteger(value) && value >= 0;
+const isOptionalString = (value) =>
+  value === undefined || typeof value === "string";
+
+function isConsoleEntry(entry) {
+  return (
+    isRecord(entry) &&
+    hasOnly(entry, new Set(["level", "text"])) &&
+    CONSOLE_LEVELS.has(entry.level) &&
+    typeof entry.text === "string"
+  );
+}
+
+function isReduced(reduced) {
+  return (
+    isRecord(reduced) &&
+    hasOnly(reduced, new Set(["bytes", "depth", "cappedDepth"])) &&
+    isCount(reduced.bytes) &&
+    isCount(reduced.depth) &&
+    (reduced.cappedDepth === undefined || isCount(reduced.cappedDepth))
+  );
+}
+
+function isSourceLine(line) {
+  return (
+    isRecord(line) &&
+    hasOnly(line, new Set(["number", "column", "source"])) &&
+    Number.isSafeInteger(line.number) &&
+    line.number >= 1 &&
+    // The snippet can rewrite its stack, so the column can be any number, or null.
+    (line.column === null ||
+      (Number.isInteger(line.column) && line.column >= 0)) &&
+    typeof line.source === "string"
+  );
+}
+
+/**
+ * Keeps only what the sandbox writes, and returns undefined for anything else.
+ * That way a faulty child can't hand the shield more than it expects.
+ */
+function childOutput(raw) {
+  if (!isRecord(raw)) return undefined;
+  const logs = raw.console;
+  if (
+    logs !== undefined &&
+    !(Array.isArray(logs) && logs.every(isConsoleEntry))
+  ) {
+    return undefined;
+  }
+  const out = { ok: raw.ok };
+  if (raw.ok === true) {
+    if (!hasOnly(raw, SUCCESS_FIELDS) || !Object.hasOwn(raw, "result")) {
+      return undefined;
+    }
+    if (raw.reduced !== undefined && !isReduced(raw.reduced)) return undefined;
+    out.result = raw.result;
+    if (raw.reduced !== undefined) {
+      const { bytes, depth, cappedDepth } = raw.reduced;
+      out.reduced =
+        cappedDepth === undefined
+          ? { bytes, depth }
+          : { bytes, depth, cappedDepth };
+    }
+  } else if (raw.ok === false) {
+    const valid =
+      hasOnly(raw, FAILURE_FIELDS) &&
+      typeof raw.error === "string" &&
+      (raw.status === undefined || Number.isFinite(raw.status)) &&
+      (raw.statusText === undefined ||
+        (typeof raw.statusText === "string" && raw.statusText.length > 0)) &&
+      isOptionalString(raw.body) &&
+      isOptionalString(raw.hint) &&
+      isOptionalString(raw.stack) &&
+      (raw.line === undefined || isSourceLine(raw.line));
+    if (!valid) return undefined;
+    for (const field of [
+      "error",
+      "status",
+      "statusText",
+      "body",
+      "hint",
+      "stack",
+    ]) {
+      if (raw[field] !== undefined) out[field] = raw[field];
+    }
+    if (raw.line !== undefined) {
+      const { number, column, source } = raw.line;
+      out.line = { number, column, source };
+    }
+  } else {
+    return undefined;
+  }
+  if (logs !== undefined) {
+    out.console = logs.map(({ level, text }) => ({ level, text }));
+  }
+  return out;
+}
 
 // Anything built from the child's output can hold a secret, so it goes through the shield before any of it is measured, stored or clipped.
 // Returns undefined when a secret can't be encrypted, and the whole value is then withheld.
@@ -472,8 +612,13 @@ export async function execute(
         return settle(protect(crash, shield) ?? withheld());
       }
 
+      let raw;
       try {
-        const raw = JSON.parse(stdout);
+        raw = childOutput(JSON.parse(stdout));
+      } catch {}
+      if (!raw) return settle(unreadable());
+
+      try {
         // Console output is never stored, so it keeps its own small budget whether or not the snippet succeeded.
         // Measured on the serialized form, which is what the model receives: ten thousand empty entries cost real bytes even though their text is nothing.
         const logBytes = jsonBytes(raw.console ?? []);
@@ -493,6 +638,13 @@ export async function execute(
           if (bytes > resultBytes) {
             return settle(tooLarge("result", bytes, resultBytes, RETURN_LESS));
           }
+        } else {
+          // Checked before encryption too, so the shield never gets more than a response can hold.
+          const { ok: _ok, console: _console, ...failure } = raw;
+          const failureBytes = jsonBytes(failure);
+          if (failureBytes > INLINE_RESULT_BYTES) {
+            return settle(tooLargeError(failureBytes));
+          }
         }
 
         const payload = protect(raw, shield);
@@ -509,19 +661,11 @@ export async function execute(
           );
         }
 
-        const { ok, console: _logs, error, ...failure } = payload;
-        const out = { error: error ?? "Unknown error", ...failure };
+        const { ok: _ok, console: _logs, ...out } = payload;
         // Failures are never stored either, so the error has to fit inline.
         const failureBytes = jsonBytes(out);
         if (failureBytes > INLINE_RESULT_BYTES) {
-          return settle(
-            tooLarge(
-              "error details",
-              failureBytes,
-              INLINE_RESULT_BYTES,
-              "The snippet threw, and the error was too large to return. Catch the error and return a shorter description of it.",
-            ),
-          );
+          return settle(tooLargeError(failureBytes));
         }
         return settle(
           fitOrRefuse(
@@ -533,7 +677,7 @@ export async function execute(
         );
       } catch (e) {
         const failure = {
-          error: `Failed to parse subprocess output: ${e.message}`,
+          error: `Failed to process subprocess output: ${e.message}`,
           outcome: "crashed",
         };
         return settle(protect(failure, shield) ?? withheld());

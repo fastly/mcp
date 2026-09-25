@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { INLINE_RESULT_BYTES } from "../src/limits.js";
+import { SecretShield } from "../src/secrets.js";
 import {
   BUN_DETECTS_DISCONNECTS,
   callTool,
@@ -302,11 +303,57 @@ for (const runtime of ["bun", "node"]) {
       expect(second.parsed.result).toBe(plaintext);
     }, 30000);
 
+    test("undecryptable input gets each tool's own error, without echoing it", async () => {
+      const shield = SecretShield.forCaller(TOKEN_A);
+      const wrapper = shield.encrypt(UPSTREAM_SECRET);
+      shield.destroy();
+      const payload = wrapper.slice("{ENCRYPTED:".length, -1);
+      const flipped = payload.endsWith("A") ? "B" : "A";
+      const inputs = [
+        [
+          `{ENCRYPTED:${payload.slice(0, -1)}${flipped}}`,
+          "Encrypted token failed verification",
+        ],
+        [
+          wrapper.slice(0, -1),
+          "Encrypted token has an invalid symbol or no closing brace",
+        ],
+        // About 42,000 characters, more than one call may decrypt.
+        [Array(700).fill(wrapper).join(" "), "Too many encrypted values"],
+      ];
+      for (const [input, reason] of inputs) {
+        for (const [tool, args, location] of [
+          ["search", { query: `purge ${input}` }, "query"],
+          ["inspect", { method: input }, "method"],
+          ["execute", { code: `return "${input}";` }, "code"],
+        ]) {
+          const result = await callTool(server.url, TOKEN_A, tool, args);
+          expect(result.isError).toBe(true);
+          expect(result.text).not.toContain(payload.slice(0, 12));
+          if (tool === "execute") {
+            expect(result.parsed.error).toBe(`${reason} in ${location}`);
+            expect(result.parsed.hint).toContain(
+              "Retrieve the original value again",
+            );
+          } else {
+            expect(Object.keys(result.parsed).sort()).toEqual(["error", "ok"]);
+            expect(result.parsed.ok).toBe(false);
+            expect(result.parsed.error).toStartWith(
+              `${reason} in ${location}. `,
+            );
+            expect(result.parsed.error).toContain(
+              "Retrieve the original value again",
+            );
+          }
+        }
+      }
+    }, 60000);
+
     test.skipIf(runtime === "bun")(
-      "a result that secret markers push past the inline limit comes back as an encrypted preview",
+      "a result that wrappers push past the inline limit comes back as an encrypted preview",
       async () => {
         const result = await callTool(server.url, TOKEN_A, "execute", {
-          code: `return Array(1500).fill(${JSON.stringify(UPSTREAM_SECRET)});`,
+          code: `return Array(2200).fill(${JSON.stringify(UPSTREAM_SECRET)});`,
         });
         expect(Buffer.byteLength(result.text)).toBeLessThanOrEqual(
           INLINE_RESULT_BYTES,
@@ -314,8 +361,8 @@ for (const runtime of ["bun", "node"]) {
         expect(result.isError).toBe(false);
         expect(result.parsed.truncated).toBe(true);
         expect(result.parsed.hint).toContain("inline limit");
-        expect(result.parsed.result._total).toBe(1500);
-        expect(result.text).toContain("{{fastly-encrypted:v1:github-pat:");
+        expect(result.parsed.result._total).toBe(2200);
+        expect(result.text).toContain("{ENCRYPTED:");
         expect(result.text).not.toContain(UPSTREAM_SECRET);
       },
       30000,

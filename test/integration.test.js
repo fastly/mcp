@@ -139,7 +139,7 @@ describe("large results over MCP", () => {
       expect(stored).not.toContain(token);
       const records = JSON.parse(stored);
       expect(records).toHaveLength(2000);
-      expect(records[1999].token).toStartWith("ghp_");
+      expect(records[1999].token).toMatch(/^\{ENCRYPTED:[^}]+\}$/);
       expect(parsed.result.items[0].token).toBe(records[0].token);
 
       const cut = await sealed.callTool({
@@ -311,8 +311,8 @@ describe("MCP integration with encryption (env vars)", () => {
     const text = result.content[0].text;
     // The real token should NOT appear in the response
     expect(text).not.toContain(GITHUB_PAT);
-    // But a ghp_ prefixed token should (encrypted form)
-    expect(text).toContain("ghp_");
+    // Its encrypted form should.
+    expect(text).toContain("{ENCRYPTED:");
   }, 15000);
 
   test("execute tool decrypts tokens in input code", async () => {
@@ -333,6 +333,48 @@ describe("MCP integration with encryption (env vars)", () => {
     // The result should be the encrypted form again (re-encrypted on output)
     expect(decParsed.result).toBe(encryptedToken);
   }, 15000);
+
+  test("undecryptable input gets each tool's own error, without echoing it", async () => {
+    const encrypted = await encClient.callTool({
+      name: "execute",
+      arguments: { code: `return "${GITHUB_PAT}";` },
+    });
+    const wrapper = JSON.parse(encrypted.content[0].text).result;
+    expect(wrapper).toStartWith("{ENCRYPTED:");
+    const payload = wrapper.slice("{ENCRYPTED:".length, -1);
+    const flipped = payload.endsWith("A") ? "B" : "A";
+    const inputs = [
+      [
+        `{ENCRYPTED:${payload.slice(0, -1)}${flipped}}`,
+        "Encrypted token failed verification",
+      ],
+      [
+        wrapper.slice(0, -1),
+        "Encrypted token has an invalid symbol or no closing brace",
+      ],
+    ];
+    for (const [input, reason] of inputs) {
+      for (const [name, args, location] of [
+        ["search", { query: `purge ${input}` }, "query"],
+        ["inspect", { method: input }, "method"],
+        ["execute", { code: `return "${input}";` }, "code"],
+      ]) {
+        const result = await encClient.callTool({ name, arguments: args });
+        const text = result.content[0].text;
+        const parsed = JSON.parse(text);
+        expect(result.isError).toBe(true);
+        expect(text).not.toContain(payload.slice(0, 12));
+        if (name === "execute") {
+          expect(parsed.error).toBe(`${reason} in ${location}`);
+          expect(parsed.hint).toContain("Retrieve the original value again");
+        } else {
+          expect(Object.keys(parsed).sort()).toEqual(["error", "ok"]);
+          expect(parsed.ok).toBe(false);
+          expect(parsed.error).toStartWith(`${reason} in ${location}. `);
+        }
+      }
+    }
+  }, 30000);
 
   test("shielding structured strings preserves valid JSON", async () => {
     const plaintext = "a\nAb0Cd1Ef2Gh3Ij4Kl5Mn6Op7Qr8St9U";
@@ -401,6 +443,6 @@ describe("MCP integration with encryption (CLI flags)", () => {
     });
     const text = result.content[0].text;
     expect(text).not.toContain(GITHUB_PAT);
-    expect(text).toContain("ghp_");
+    expect(text).toContain("{ENCRYPTED:");
   }, 15000);
 });

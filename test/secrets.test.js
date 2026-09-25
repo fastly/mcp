@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { SecretShield, shieldJson } from "../src/secrets.js";
+import { MarkerError, SecretShield, shieldJson } from "../src/secrets.js";
 
 // Fixed key for deterministic tests
 const TEST_KEY = new Uint8Array([
@@ -23,44 +23,66 @@ const OPENAI_LEGACY_KEY = "sk-T3BlbkFJq8ZrT2mXw7LpK4vN9cYb3HsJ6dFg1RtU5eWo0iPa";
 const FASTLY_TOKEN = "Ab3dEf7hIj1lMn0pQr2tUv4xYz6_B-9D";
 const AWS_SECRET = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
 
+const WRAPPER = /\{ENCRYPTED:[0-9A-Za-z+/\-_.]+\}/g;
+
+function wrappersIn(text) {
+  return text.match(WRAPPER) ?? [];
+}
+
+function refusal(fn) {
+  try {
+    fn();
+  } catch (error) {
+    return error;
+  }
+  throw new Error("expected a refusal");
+}
+
 describe("SecretShield", () => {
-  test("round-trip: encrypt then decrypt returns original", () => {
+  test("a secret becomes a wrapper 20 characters longer, and decrypts back", () => {
     const shield = new SecretShield({ key: TEST_KEY });
     const original = `Use this token: ${GITHUB_PAT} to authenticate.`;
     const encrypted = shield.encrypt(original);
+    expect(encrypted).not.toContain("ghp_");
+    expect(encrypted.startsWith("Use this token: {ENCRYPTED:")).toBe(true);
+    expect(encrypted.endsWith("} to authenticate.")).toBe(true);
+    expect(shield.decrypt(encrypted)).toBe(original);
 
-    expect(encrypted).not.toBe(original);
-    expect(encrypted).toContain("ghp_");
-    expect(encrypted).not.toContain(GITHUB_PAT);
-
-    const decrypted = shield.decrypt(encrypted);
-    expect(decrypted).toBe(original);
+    for (const token of [GITHUB_PAT, SENDGRID_KEY, ANTHROPIC_KEY]) {
+      const wrapped = shield.encrypt(token);
+      expect(wrapped).toMatch(/^\{ENCRYPTED:[0-9A-Za-z+/\-_.]+\}$/);
+      expect(wrapped).toHaveLength(token.length + 20);
+    }
     shield.destroy();
   });
 
-  test("multi-token: encrypts and decrypts multiple tokens", () => {
+  test("every kind of token round trips, several to a text", () => {
     const shield = new SecretShield({ key: TEST_KEY });
-    const original = `GitHub: ${GITHUB_PAT}\nOpenAI: ${OPENAI_KEY}`;
-    const encrypted = shield.encrypt(original);
-
-    expect(encrypted).not.toContain(GITHUB_PAT);
-    expect(encrypted).not.toContain(OPENAI_KEY);
-
-    const decrypted = shield.decrypt(encrypted);
-    expect(decrypted).toBe(original);
+    // Prefixed, structured and prefix-less tokens, some sharing their first characters.
+    const tokens = [
+      GITHUB_PAT,
+      OPENAI_KEY,
+      ANTHROPIC_KEY,
+      OPENAI_LEGACY_KEY,
+      SENDGRID_KEY,
+      FASTLY_TOKEN,
+      AWS_SECRET,
+    ];
+    const text = tokens.join(" and ");
+    const encrypted = shield.encrypt(text);
+    for (const token of tokens) expect(encrypted).not.toContain(token);
+    expect(encrypted).not.toContain("SG.");
+    expect(wrappersIn(encrypted)).toHaveLength(tokens.length);
+    expect(shield.decrypt(encrypted)).toBe(text);
     shield.destroy();
   });
 
-  test("no-op for clean text: text without tokens passes through unchanged", () => {
+  test("text without wrappers, empty strings and non-strings pass through", () => {
     const shield = new SecretShield({ key: TEST_KEY });
     const text = "Hello world, this is plain text with no secrets.";
     expect(shield.encrypt(text)).toBe(text);
     expect(shield.decrypt(text)).toBe(text);
-    shield.destroy();
-  });
-
-  test("empty and non-string input passes through", () => {
-    const shield = new SecretShield({ key: TEST_KEY });
+    expect(shield.decrypt(`use ${GITHUB_PAT}`)).toBe(`use ${GITHUB_PAT}`);
     expect(shield.encrypt("")).toBe("");
     expect(shield.decrypt("")).toBe("");
     expect(shield.encrypt(null)).toBe(null);
@@ -69,232 +91,138 @@ describe("SecretShield", () => {
     shield.destroy();
   });
 
-  test("determinism: same token always produces same ciphertext", () => {
-    const shield = new SecretShield({ key: TEST_KEY });
-    const text = `token: ${GITHUB_PAT}`;
-    const enc1 = shield.encrypt(text);
-    const enc2 = shield.encrypt(text);
-    expect(enc1).toBe(enc2);
-    shield.destroy();
-  });
-
-  test("encrypting ciphertext again keeps it decryptable in one pass", () => {
-    const shield = new SecretShield({ key: TEST_KEY });
-    const text = `token: ${GITHUB_PAT}`;
-    const encrypted = shield.encrypt(text);
-
-    expect(shield.encrypt(encrypted)).toBe(encrypted);
-    expect(shield.decrypt(encrypted)).toBe(text);
-    shield.destroy();
-  });
-
-  test("decrypting one ciphertext cannot cascade through another registry entry", () => {
-    const shield = new SecretShield({ key: TEST_KEY });
-    const first = GITHUB_PAT;
-    const second = "ghp_hKBK5fikImbH8BCmIbyH7fcU1WR32UKPLe2B";
-    const firstCiphertext = shield.encrypt(first);
-    expect(firstCiphertext).toBe("ghp_ilWQmLlUt6QtEjABNXpGOL3yzbvAg2mVpzU5");
-    expect(shield.encrypt(second)).toBe(first);
-
-    expect(shield.decrypt(firstCiphertext)).toBe(first);
-    expect(shield.decrypt(`before ${firstCiphertext} after`)).toBe(
-      `before ${first} after`,
-    );
-    shield.destroy();
-  });
-
-  test("simple and heuristic ciphertexts round trip without rescanning replacements", () => {
-    const shield = new SecretShield({ key: TEST_KEY });
-    for (const plaintext of [GITHUB_PAT, FASTLY_TOKEN, AWS_SECRET]) {
-      const ciphertext = shield.encrypt(plaintext);
-      expect(ciphertext).not.toBe(plaintext);
-      expect(shield.decrypt(`before ${ciphertext} after`)).toBe(
-        `before ${plaintext} after`,
-      );
-      expect(shield.encrypt(ciphertext)).toBe(ciphertext);
-    }
-    shield.destroy();
-  });
-
-  test("ciphertexts whose leads overlap each decrypt to their own plaintext", () => {
-    const shield = new SecretShield({ key: TEST_KEY });
-    const keys = [ANTHROPIC_KEY, OPENAI_KEY, OPENAI_LEGACY_KEY, FASTLY_TOKEN];
-    const text = keys.join(" and ");
-    const encrypted = shield.encrypt(text);
-    for (const key of keys) expect(encrypted).not.toContain(key);
-    expect(shield.decrypt(encrypted)).toBe(text);
-    shield.destroy();
-  });
-
-  test("structured shielding refuses encrypted key collisions", () => {
-    const shield = new SecretShield({ key: TEST_KEY });
-    const ciphertext = shield.encrypt(GITHUB_PAT);
-    expect(() =>
-      shieldJson({ [GITHUB_PAT]: "first", [ciphertext]: "second" }, shield),
-    ).toThrow("object keys collide");
-    shield.destroy();
-  });
-
-  test("destroy lifecycle: encrypt and decrypt throw after destroy", () => {
-    const shield = new SecretShield({ key: TEST_KEY });
-    shield.destroy();
-    expect(() => shield.encrypt("test")).toThrow(
-      "SecretShield has been destroyed",
-    );
-    expect(() => shield.decrypt("test")).toThrow(
-      "SecretShield has been destroyed",
-    );
-  });
-
-  test("tweak isolation: different tweaks produce different ciphertext", () => {
-    const tweak1 = new TextEncoder().encode("context-a");
-    const tweak2 = new TextEncoder().encode("context-b");
-    const shield1 = new SecretShield({ key: TEST_KEY, tweak: tweak1 });
-    const shield2 = new SecretShield({ key: TEST_KEY, tweak: tweak2 });
-
-    const text = `token: ${GITHUB_PAT}`;
-    const enc1 = shield1.encrypt(text);
-    const enc2 = shield2.encrypt(text);
-
-    expect(enc1).not.toBe(enc2);
-    expect(enc1).not.toBe(text);
-    expect(enc2).not.toBe(text);
-
-    // Each decrypts its own
-    expect(shield1.decrypt(enc1)).toBe(text);
-    expect(shield2.decrypt(enc2)).toBe(text);
-
-    shield1.destroy();
-    shield2.destroy();
-  });
-
-  test("ephemeral key: no key provided generates random key", () => {
-    const shield1 = new SecretShield();
-    const shield2 = new SecretShield();
-    const text = `token: ${GITHUB_PAT}`;
-
-    // Different random keys produce different ciphertext
-    const enc1 = shield1.encrypt(text);
-    const enc2 = shield2.encrypt(text);
-    expect(enc1).not.toBe(enc2);
-
-    shield1.destroy();
-    shield2.destroy();
-  });
-
-  test("fresh instance with same key cannot decrypt (empty registry)", () => {
+  test("a fresh instance with the same key gives the same wrappers and decrypts them", () => {
     const shield1 = new SecretShield({ key: TEST_KEY });
     const text = `token: ${GITHUB_PAT}`;
     const encrypted = shield1.encrypt(text);
     shield1.destroy();
 
-    // New instance with SAME key but empty registry
     const shield2 = new SecretShield({ key: TEST_KEY });
-    const attempted = shield2.decrypt(encrypted);
-    // Registry is empty — should not recover original
-    expect(attempted).toBe(encrypted);
+    expect(shield2.encrypt(text)).toBe(encrypted);
+    expect(shield2.decrypt(encrypted)).toBe(text);
     shield2.destroy();
   });
 
-  test("encrypt preserves token prefix format", () => {
+  test("a wrapper made with another tweak or key is refused", () => {
+    const text = `token: ${GITHUB_PAT}`;
+    const original = new SecretShield({
+      key: TEST_KEY,
+      tweak: new TextEncoder().encode("context-a"),
+    });
+    const encrypted = original.encrypt(text);
+    for (const other of [
+      new SecretShield({
+        key: TEST_KEY,
+        tweak: new TextEncoder().encode("context-b"),
+      }),
+      new SecretShield(),
+    ]) {
+      expect(other.encrypt(text)).not.toBe(encrypted);
+      expect(() => other.decrypt(encrypted)).toThrow(MarkerError);
+      other.destroy();
+    }
+    expect(original.decrypt(encrypted)).toBe(text);
+    original.destroy();
+  });
+
+  test("malformed wrappers are refused by location, without echoing them", () => {
     const shield = new SecretShield({ key: TEST_KEY });
-    const encrypted = shield.encrypt(GITHUB_PAT);
-
-    expect(encrypted).toMatch(/^ghp_/);
-    expect(encrypted).toHaveLength(GITHUB_PAT.length);
-    expect(encrypted).not.toBe(GITHUB_PAT);
-
+    const [wrapper] = wrappersIn(shield.encrypt(GITHUB_PAT));
+    const payload = wrapper.slice("{ENCRYPTED:".length, -1);
+    const flipped = payload.endsWith("A") ? "B" : "A";
+    const cases = [
+      // Framed correctly, but the check fails.
+      `{ENCRYPTED:${payload.slice(0, -1)}${flipped}}`,
+      wrapper.slice(0, -1),
+      wrapper.slice(0, 20),
+      "{ENCRYPTED:abc}",
+      `{ENCRYPTED:${"A".repeat(530)}}`,
+      `{ENCRYPTED:${payload.slice(0, 10)} ${payload.slice(11)}}`,
+    ];
+    for (const input of cases) {
+      const error = refusal(() =>
+        shield.decrypt(`${wrapper} then ${input}`, "code"),
+      );
+      expect(error).toBeInstanceOf(MarkerError);
+      expect(error.message).toEndWith(" in code");
+      expect(error.message).not.toContain(payload.slice(0, 12));
+      expect(error.message).not.toContain("AAAA");
+      expect(error.hint).toContain("Retrieve the original value again");
+    }
     shield.destroy();
   });
 
-  test("structured token round-trip: SendGrid SG.seg1.seg2", () => {
+  test("the local shield has no input budget", () => {
     const shield = new SecretShield({ key: TEST_KEY });
-    const original = `key: ${SENDGRID_KEY}`;
-    const encrypted = shield.encrypt(original);
-
-    expect(encrypted).not.toBe(original);
-    expect(encrypted).toContain("SG.");
-    expect(encrypted).not.toContain(SENDGRID_KEY);
-
-    const decrypted = shield.decrypt(encrypted);
-    expect(decrypted).toBe(original);
+    // About 66,000 wrapper characters, more than a remote call may decrypt.
+    const text = Array.from({ length: 1100 }, () => GITHUB_PAT).join(" ");
+    const encrypted = shield.encrypt(text);
+    expect(encrypted.length).toBeGreaterThan(60_000);
+    expect(shield.decrypt(encrypted)).toBe(text);
     shield.destroy();
   });
 
-  test("structured token: isolated ciphertext decrypts", () => {
-    const shield = new SecretShield({ key: TEST_KEY });
-    const encrypted = shield.encrypt(`key: ${SENDGRID_KEY}`);
-
-    // Extract just the encrypted SendGrid token from the output
-    const encToken = encrypted.slice("key: ".length);
-    expect(encToken).toMatch(/^SG\./);
-    expect(encToken).not.toBe(SENDGRID_KEY);
-
-    // Agent copies the isolated token into a new context
-    const agentInput = `Use this key: ${encToken}`;
-    const decrypted = shield.decrypt(agentInput);
-    expect(decrypted).toBe(`Use this key: ${SENDGRID_KEY}`);
-    shield.destroy();
-  });
-
-  test("adjacent context: token preceded by alphanumeric chars", () => {
-    const shield = new SecretShield({ key: TEST_KEY });
-    // Token preceded by alphanumeric 'X', followed by space (scanner still matches)
-    const original = `X${GITHUB_PAT} done`;
-    const encrypted = shield.encrypt(original);
-
-    expect(encrypted).not.toContain(GITHUB_PAT);
-
-    // Full string round-trip
-    expect(shield.decrypt(encrypted)).toBe(original);
-
-    // Extract just the encrypted ghp_ token (without the leading X)
-    const ghpIdx = encrypted.indexOf("ghp_");
-    const encToken = encrypted.slice(ghpIdx, ghpIdx + GITHUB_PAT.length);
-    expect(shield.decrypt(`isolated: ${encToken}`)).toBe(
-      `isolated: ${GITHUB_PAT}`,
-    );
-    shield.destroy();
-  });
-
-  test("simple token: isolated ciphertext decrypts", () => {
+  // Otherwise anyone who can write to the account could dress a secret up as a wrapper and have it shown in the clear.
+  test("text that already contains an opener is refused", () => {
     const shield = new SecretShield({ key: TEST_KEY });
     const encrypted = shield.encrypt(`token: ${GITHUB_PAT}`);
-    const encToken = encrypted.slice("token: ".length);
-
-    // Agent copies the isolated token to a different context
-    const decrypted = shield.decrypt(`auth: ${encToken}`);
-    expect(decrypted).toBe(`auth: ${GITHUB_PAT}`);
+    expect(() => shield.encrypt(encrypted)).toThrow();
+    expect(() => shield.encrypt(`planted {ENCRYPTED:${GITHUB_PAT}}`)).toThrow();
+    expect(() => shieldJson({ note: encrypted }, shield)).toThrow();
+    expect(() => shieldJson({ [encrypted]: "value" }, shield)).toThrow();
     shield.destroy();
   });
 
-  test("provenance: bare encrypted body without prefix is NOT decrypted", () => {
+  test("a token longer than 512 characters is refused", () => {
     const shield = new SecretShield({ key: TEST_KEY });
-    const encrypted = shield.encrypt(`token: ${GITHUB_PAT}`);
-
-    // Extract just the encrypted BODY (without ghp_ prefix)
-    const encToken = encrypted.slice("token: ".length);
-    const bareBody = encToken.slice("ghp_".length);
-
-    // Bare body should NOT be reversed — it was never emitted standalone
-    expect(shield.decrypt(bareBody)).toBe(bareBody);
-
-    // Surrounded by other text should also not be reversed
-    expect(shield.decrypt(`x${bareBody}y`)).toBe(`x${bareBody}y`);
+    const long = `sk-proj-${"A".repeat(505)}`;
+    expect(long).toHaveLength(513);
+    expect(() => shieldJson({ key: long }, shield)).toThrow();
+    const fits = `sk-proj-${"A".repeat(504)}`;
+    expect(shield.decrypt(shieldJson({ key: fits }, shield).key)).toBe(fits);
     shield.destroy();
   });
 
-  test("provenance: bare encrypted body of structured token is NOT decrypted", () => {
+  test("structured shielding encrypts keys once and keeps distinct keys apart", () => {
     const shield = new SecretShield({ key: TEST_KEY });
-    const encrypted = shield.encrypt(`key: ${SENDGRID_KEY}`);
+    const value = [
+      { [GITHUB_PAT]: 1, [`x${GITHUB_PAT}`]: 2, plain: GITHUB_PAT },
+      { [GITHUB_PAT]: 3 },
+    ];
+    const shielded = shieldJson(value, shield);
+    const firstKeys = Object.keys(shielded[0]);
+    expect(firstKeys).toHaveLength(3);
+    expect(Object.keys(shielded[1])).toEqual([firstKeys[0]]);
+    expect(JSON.stringify(shielded)).not.toContain(GITHUB_PAT);
+    expect(JSON.parse(shield.decrypt(JSON.stringify(shielded)))).toEqual(value);
+    shield.destroy();
+  });
 
-    // Extract the encrypted SendGrid token
-    const encToken = encrypted.slice("key: ".length);
-    // Strip the SG. prefix to get the bare encrypted segments
-    const bareSegments = encToken.slice("SG.".length);
+  test("destroy lifecycle: encrypt and decrypt throw after destroy, even on plain or empty text", () => {
+    const shield = new SecretShield({ key: TEST_KEY });
+    shield.destroy();
+    for (const input of ["test", "", GITHUB_PAT]) {
+      expect(() => shield.encrypt(input)).toThrow(
+        "SecretShield has been destroyed",
+      );
+      expect(() => shield.decrypt(input)).toThrow(
+        "SecretShield has been destroyed",
+      );
+    }
+  });
 
-    // Bare segments should NOT be reversed
-    expect(shield.decrypt(bareSegments)).toBe(bareSegments);
+  test("a wrapper copied alone decrypts in a new context", () => {
+    const shield = new SecretShield({ key: TEST_KEY });
+    for (const token of [GITHUB_PAT, SENDGRID_KEY]) {
+      // Letters right before the token don't stop it from being found.
+      const encrypted = shield.encrypt(`X${token} done`);
+      expect(encrypted.startsWith("X{ENCRYPTED:")).toBe(true);
+      expect(shield.decrypt(encrypted)).toBe(`X${token} done`);
+      const [wrapper] = wrappersIn(encrypted);
+      expect(shield.decrypt(`Use this key: ${wrapper}`)).toBe(
+        `Use this key: ${token}`,
+      );
+    }
     shield.destroy();
   });
 });

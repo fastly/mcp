@@ -216,9 +216,14 @@ In local mode, the server returns API output to the MCP client as it came back f
 Remote mode always encrypts recognized secrets with a key derived from the caller's token, as described in the [remote HTTP guide](REMOTE-HTTP.md#connect-your-client).
 
 If you want an additional layer of protection before tool output reaches the model, enable secret encryption.
-When encryption is enabled, recognized token formats are replaced with encrypted stand-ins before they are returned to the assistant.
-These replacements keep the same general shape and stay consistent during the server session, so the assistant can refer to them in later calls.
-When those values appear in a later `execute` call, the server decrypts them before running the code.
+When encryption is enabled, each recognized token is replaced with an encrypted value that looks like `{ENCRYPTED:...}` before it reaches the assistant.
+The same token always gets the same encrypted value, so the assistant can refer to it in later calls.
+
+When the assistant sends an encrypted value back, the server decrypts it before the tool runs.
+If the value was changed, cut short, or made with a different key, the server returns an error instead of guessing.
+
+If a result can't be encrypted safely, the whole result is withheld.
+This happens when it contains a token longer than 512 characters, or text that already looks like an encrypted value.
 
 To enable encryption in an MCP configuration that uses `bunx`, add `--encrypt-secrets` after the binary name:
 
@@ -253,12 +258,11 @@ You can also enable it with an environment variable:
 }
 ```
 
-For local encryption, the key is generated when the server starts by default.
-Because decryption uses a table built in memory, only the server session that encrypted a value can recover the original secret.
-After a restart, old encrypted values can no longer be decrypted, even if the key is pinned.
+For local encryption, a new key is generated each time the server starts, so encrypted values stop working after a restart.
 
-Setting `FASTLY_MCP_ENCRYPT_KEY` to exactly 32 hex characters, which is a 16-byte key, keeps the encrypted forms stable across restarts, but it does not bring old values back.
+Setting `FASTLY_MCP_ENCRYPT_KEY` to exactly 32 hex characters, which is a 16-byte key, keeps the same key across restarts, so older encrypted values keep working.
 You can also set `FASTLY_MCP_ENCRYPT_TWEAK` if you want a separate tweak value for domain separation.
+Encrypted values only work with the tweak they were made with.
 
 Secret encryption is a safety feature, not a complete data classification system.
 It only encrypts values that match known token patterns.

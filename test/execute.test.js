@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { getExecutionRuntime } from "../src/execution-runtime.js";
 import { PREVIEW_BYTES } from "../src/limits.js";
 import { createResultStore } from "../src/result-files.js";
-import { RemoteSecretShield, SecretShield } from "../src/secrets.js";
+import { SecretShield } from "../src/secrets.js";
 import { execute } from "../src/tools/execute.js";
 import {
   expectNoInternals,
@@ -40,9 +40,12 @@ function executeRemotely(code) {
 
 // What the model would see of a remote result, once the shield has run over the response.
 function remoteResponse(result) {
-  return new RemoteSecretShield("synthetic-token").encrypt(
-    JSON.stringify(result, null, 2),
-  );
+  const shield = SecretShield.forCaller("synthetic-token");
+  try {
+    return shield.encrypt(JSON.stringify(result, null, 2));
+  } finally {
+    shield.destroy();
+  }
 }
 
 // Runs a stand-in child that writes the given stderr pieces and stdout instead of running code.
@@ -711,8 +714,10 @@ describe("execute", () => {
       const shield = new SecretShield();
       const result = await execute(code, { resultStore, shield });
       expect(result.truncated).toBe(true);
-      const response = shield.encrypt(JSON.stringify(result));
+      // The response already holds encrypted values, which can't be encrypted again.
+      const response = JSON.stringify(result);
       expect(response).not.toContain(partial);
+      expect(response).not.toContain(token.slice(0, 10));
       if (resultStore) {
         const stored = readFileSync(result.resultFile, "utf8");
         expect(stored).not.toContain(token);
@@ -920,4 +925,202 @@ describe("execute", () => {
       await server.close();
     }
   }, 40000);
+});
+
+// What comes right before a truncation note must never be part of an encrypted value.
+const PARTIAL_WRAPPER_BEFORE_NOTE =
+  /\{(?:E|EN|ENC|ENCR|ENCRY|ENCRYP|ENCRYPT|ENCRYPTE|ENCRYPTED|ENCRYPTED:[0-9A-Za-z+/\-_.]*) \[\d+ chars, truncated\]/;
+
+// Where the cut lands in the 60-character encrypted value: inside "{ENCRYPTED:", right after it, in the middle, and just before the closing brace.
+const CUT_OFFSETS = [5, 11, 30, 59];
+
+function kept(budget, clippedLength) {
+  return budget - ` [${clippedLength} chars, truncated]`.length - 2;
+}
+
+async function previewWithShield(code) {
+  const shield = new SecretShield();
+  try {
+    const result = await execute(code, { resultStore: null, shield });
+    expect(result.truncated).toBe(true);
+    const response = JSON.stringify(result);
+    expect(response).not.toMatch(PARTIAL_WRAPPER_BEFORE_NOTE);
+    expect(response).not.toContain(GITHUB_PAT.slice(0, 10));
+    // Every encrypted value left in the response is whole, so it can be used again.
+    expect(() => shield.decrypt(response)).not.toThrow();
+    return { result, shield: shield.decrypt(response) };
+  } finally {
+    shield.destroy();
+  }
+}
+
+describe("previews never cut a wrapper", () => {
+  test("the head of a scalar preview", async () => {
+    const length = 100_001;
+    const cut = kept(PREVIEW_BYTES, length + 20);
+    for (const offset of [...CUT_OFFSETS, 60]) {
+      const before = cut - offset;
+      const code = `return " ".repeat(${before}) + "${GITHUB_PAT}" + " ".repeat(${length - before - GITHUB_PAT.length});`;
+      const { result, shield: decrypted } = await previewWithShield(code);
+      const head = result.result.head;
+      const text = head.slice(0, head.lastIndexOf(" ["));
+      if (offset < 60) {
+        expect(text).toBe(" ".repeat(before));
+      } else {
+        expect(text.endsWith("}")).toBe(true);
+        expect(decrypted).toContain(GITHUB_PAT);
+      }
+    }
+  }, 30000);
+
+  test("a string nested in an array", async () => {
+    const itemLength = 60_000;
+    const share = Math.floor((PREVIEW_BYTES - 2 - 1) / 2);
+    const cut = kept(share, itemLength + 20);
+    for (const offset of CUT_OFFSETS) {
+      const before = cut - offset;
+      const code = `return [" ".repeat(${before}) + "${GITHUB_PAT}" + " ".repeat(${itemLength - before - GITHUB_PAT.length}), "y".repeat(${itemLength})];`;
+      const { result } = await previewWithShield(code);
+      const [first] = result.result.items;
+      expect(first.slice(0, first.lastIndexOf(" ["))).toBe(" ".repeat(before));
+    }
+  }, 30000);
+
+  test("a property name", async () => {
+    const keyLength = 400;
+    const cut = kept(200, keyLength + 20);
+    for (const offset of CUT_OFFSETS) {
+      const before = cut - offset;
+      const key = `${" ".repeat(before)}${GITHUB_PAT}${" ".repeat(keyLength - before - GITHUB_PAT.length)}`;
+      const code = `return { ${JSON.stringify(key)}: "x".repeat(60000), b: "y".repeat(60000) };`;
+      const { result } = await previewWithShield(code);
+      const [name] = Object.keys(result.result.preview);
+      expect(name.slice(0, name.lastIndexOf(" ["))).toBe(" ".repeat(before));
+    }
+  }, 30000);
+
+  test("the key names listed in an object summary", async () => {
+    const keyLength = 100;
+    const cut = kept(64, keyLength + 20);
+    for (const offset of CUT_OFFSETS.filter((offset) => offset <= cut)) {
+      const before = cut - offset;
+      const key = `${" ".repeat(before)}${GITHUB_PAT}${" ".repeat(keyLength - before - GITHUB_PAT.length)}`;
+      const code = `const big = { ${JSON.stringify(key)}: "v".repeat(2000) };
+        for (const k of ["a", "b", "c", "d", "e"]) big[k] = "v".repeat(2000);
+        return [big, "z".repeat(120000)];`;
+      const { result } = await previewWithShield(code);
+      const [summary] = result.result.items;
+      expect(summary).toStartWith(`{Object: keys=${" ".repeat(before)} [`);
+    }
+  }, 30000);
+});
+
+describe("child output validation", () => {
+  const UNREADABLE = {
+    error: "The subprocess returned output this server could not read",
+    outcome: "crashed",
+  };
+
+  function spyShield() {
+    const seen = [];
+    const encrypt = (text) => {
+      seen.push(text);
+      return text;
+    };
+    return { seen, shield: { encrypt } };
+  }
+
+  test("output that breaks the sandbox's contract never reaches the shield", async () => {
+    const padding = "p".repeat(7_000_000);
+    const cases = [
+      JSON.stringify({ ok: true, result: 0, padding }),
+      JSON.stringify({ ok: false, error: "boom", padding }),
+      JSON.stringify({ ok: "yes", result: 0 }),
+      JSON.stringify({ ok: true }),
+      JSON.stringify({ ok: false, error: { message: "boom" } }),
+      JSON.stringify({ ok: false, error: "boom", status: "404" }),
+      JSON.stringify({ ok: false, error: "boom", statusText: "" }),
+      JSON.stringify({
+        ok: true,
+        result: 0,
+        reduced: { bytes: "12", depth: 0 },
+      }),
+      '{"ok":true,"result":0,"reduced":{"bytes":1e400,"depth":0}}',
+      JSON.stringify({
+        ok: true,
+        result: 0,
+        reduced: { bytes: 1, depth: 0, extra: 1 },
+      }),
+      JSON.stringify({
+        ok: false,
+        error: "boom",
+        line: { number: 1, column: 1, source: "x", extra: "y" },
+      }),
+      JSON.stringify({
+        ok: true,
+        result: 0,
+        console: [{ level: "trace", text: "hi" }],
+      }),
+      JSON.stringify([{ ok: true, result: 0 }]),
+      `{"ok":true,"result":"${GITHUB_PAT}`,
+    ];
+    for (const stdout of cases) {
+      const { seen, shield } = spyShield();
+      const out = await executeScripted({ stdout }, { shield });
+      expect(out).toEqual(UNREADABLE);
+      expect(seen).toEqual([]);
+    }
+  }, 60000);
+
+  test("oversized error details are refused before the shield sees them", async () => {
+    const { seen, shield } = spyShield();
+    const out = await executeScripted(
+      { stdout: JSON.stringify({ ok: false, error: "e".repeat(200_000) }) },
+      { shield },
+    );
+    expect(out.outcome).toBe("output_too_large");
+    expect(seen).toEqual([]);
+  }, 15000);
+
+  test("every shape the sandbox writes still goes through", async () => {
+    const { seen, shield } = spyShield();
+    const cases = [
+      ['throw "plain";', (out) => expect(out.error).toBe("plain")],
+      [
+        'throw Object.assign(new Error("Not Found"), { status: 404, statusText: "Not Found", body: "missing", hint: "check the id" });',
+        (out) =>
+          expect(out).toMatchObject({
+            error: "Not Found",
+            status: 404,
+            statusText: "Not Found",
+            body: "missing",
+            hint: "check the id",
+          }),
+      ],
+      [
+        'console.warn("careful");\nconst e = new Error("boom");\nthrow e;',
+        (out) => {
+          expect(out.error).toBe("boom");
+          expect(out.line).toMatchObject({ number: 2 });
+          expect(out.console).toEqual([{ level: "warn", text: "careful" }]);
+        },
+      ],
+    ];
+    // The snippet can rewrite its stack, so the column can be huge.
+    for (const column of ["9007199254740993", "9".repeat(400)]) {
+      cases.push([
+        `const e = new Error("rewritten"); e.stack = "Error: rewritten\\n    at user-code:2:${column}"; throw e;`,
+        (out) => {
+          expect(out.error).toBe("rewritten");
+          expect(out.line.number).toBe(1);
+        },
+      ]);
+    }
+    for (const [code, check] of cases) {
+      const out = await execute(code, { shield });
+      expect(out.error).not.toBe(UNREADABLE.error);
+      check(out);
+    }
+    expect(seen.length).toBeGreaterThan(0);
+  }, 30000);
 });

@@ -2,12 +2,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { AdmissionError } from "./admission.js";
 import { INLINE_RESULT_BYTES } from "./limits.js";
-import {
-  MarkerError,
-  RemoteSecretShield,
-  shieldJson,
-  WITHHELD,
-} from "./secrets.js";
+import { MarkerError, SecretShield, shieldJson, WITHHELD } from "./secrets.js";
 import { execute } from "./tools/execute.js";
 import { inspect } from "./tools/inspect.js";
 import { search } from "./tools/search.js";
@@ -79,6 +74,12 @@ const jsonResult = (result) => textResult(result, !result.ok);
 const executionResult = (result) =>
   textResult(result, "error" in result && !("result" in result));
 
+// search and inspect have no hint field, so the hint goes into the message.
+const refuseJson = (error) =>
+  jsonResult({ ok: false, error: `${error.message}. ${error.hint}` });
+const refuseExecution = (error) =>
+  executionResult({ error: error.message, hint: error.hint });
+
 function shieldedJsonResult(result, shield) {
   if (!shield) return jsonResult(result);
   try {
@@ -108,11 +109,15 @@ function walkStrings(value, fn, path = []) {
  * Wraps tool handlers so secrets are decrypted on the way in, and hands each handler the shield for encrypting its own output.
  * Output is shielded by the handler rather than here because execute has to measure, store and clip the encrypted form.
  *
+ * Decryption happens before admission and before the execute deadline, and it can't be stopped once it starts.
+ * The remote shield's input budget is what keeps it short.
+ *
  * `openShield` returns the shield for one call and how to let go of it.
  * A local server shares its process-wide shield; a remote one derives a shield from the caller's token and destroys it afterwards.
+ * `refuse` builds the tool's own error when an argument can't be decrypted.
  */
 function makeShielded(openShield) {
-  return function shielded(handler) {
+  return function shielded(handler, refuse) {
     return async (params, extra) => {
       const opened = openShield();
       if (!opened) return handler(params, extra);
@@ -125,7 +130,7 @@ function makeShielded(openShield) {
         return await handler(decrypted, extra, shield);
       } catch (error) {
         if (!(error instanceof MarkerError)) throw error;
-        return executionResult({ error: error.message, hint: error.hint });
+        return refuse(error);
       } finally {
         close();
       }
@@ -218,7 +223,7 @@ export function registerTools(
   const shielded = makeShielded(
     remote
       ? () => {
-          const fresh = new RemoteSecretShield(apiToken);
+          const fresh = SecretShield.forCaller(apiToken);
           return { shield: fresh, close: () => fresh.destroy() };
         }
       : () => shield && { shield, close: () => {} },
@@ -230,8 +235,10 @@ export function registerTools(
   mcp.registerTool(
     "search",
     { description: SEARCH_DESCRIPTION, inputSchema: SEARCH_INPUT_SCHEMA },
-    shielded(async ({ query }, _extra, shield) =>
-      shieldedJsonResult(search(index, query), shield),
+    shielded(
+      async ({ query }, _extra, shield) =>
+        shieldedJsonResult(search(index, query), shield),
+      refuseJson,
     ),
   );
 
@@ -254,14 +261,19 @@ export function registerTools(
             shield,
           });
       return executionResult(result);
-    }),
+    }, refuseExecution),
   );
 
   mcp.registerTool(
     "inspect",
     { description: INSPECT_DESCRIPTION, inputSchema: INSPECT_INPUT_SCHEMA },
-    shielded(async ({ method }, _extra, shield) =>
-      shieldedJsonResult(inspect(index, method, { remote: !!remote }), shield),
+    shielded(
+      async ({ method }, _extra, shield) =>
+        shieldedJsonResult(
+          inspect(index, method, { remote: !!remote }),
+          shield,
+        ),
+      refuseJson,
     ),
   );
 }

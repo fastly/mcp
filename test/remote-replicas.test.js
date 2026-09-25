@@ -8,11 +8,11 @@ import {
   UPSTREAM_SECRET,
 } from "./remote-helpers.js";
 
-const MARKER = /\{\{fastly-encrypted:v1:[a-z0-9-]+:[^{}\s]+\}\}/g;
+const WRAPPER = /\{ENCRYPTED:[0-9A-Za-z+/\-_.]+\}/g;
 
 describe("encrypted values move between replicas", () => {
   let mock;
-  let marker;
+  let wrapper;
   const logs = [];
 
   beforeAll(async () => {
@@ -36,7 +36,7 @@ describe("encrypted values move between replicas", () => {
     }
   }
 
-  test("replica one, under Bun, only ever shows the model a marker", async () => {
+  test("replica one, under Bun, only ever shows the model a wrapper", async () => {
     await onFreshReplica("bun", async (replica) => {
       const result = await callTool(replica.url, TOKEN_A, "execute", {
         code: `const service = await serviceApi.getService({ service_id: "one" });
@@ -45,11 +45,11 @@ describe("encrypted values move between replicas", () => {
       });
       expect(result.isError).toBeFalsy();
       expect(result.text).not.toContain(UPSTREAM_SECRET);
-      const markers = result.text.match(MARKER);
-      expect(markers).toHaveLength(2);
-      expect(markers[0]).toBe(markers[1]);
-      [marker] = markers;
-      expect(result.parsed.console[0].text).toBe(`logged token: ${marker}`);
+      const wrappers = result.text.match(WRAPPER);
+      expect(wrappers).toHaveLength(2);
+      expect(wrappers[0]).toBe(wrappers[1]);
+      [wrapper] = wrappers;
+      expect(result.parsed.console[0].text).toBe(`logged token: ${wrapper}`);
 
       const thrown = await callTool(replica.url, TOKEN_A, "execute", {
         code: `const service = await serviceApi.getService({ service_id: "one" });
@@ -57,47 +57,51 @@ describe("encrypted values move between replicas", () => {
       });
       expect(thrown.isError).toBe(true);
       expect(thrown.text).not.toContain(UPSTREAM_SECRET);
-      expect(thrown.parsed.error).toContain(marker);
+      expect(thrown.parsed.error).toContain(wrapper);
     });
   }, 60000);
 
   test("replica two, a fresh Node process, decrypts it with nothing but the header", async () => {
-    expect(marker).toBeDefined();
+    expect(wrapper).toBeDefined();
     await onFreshReplica("node", async (replica) => {
       const before = mock.calls.length;
       const result = await callTool(replica.url, TOKEN_A, "execute", {
-        code: `return await serviceApi.getService({ service_id: "${marker}" });`,
+        code: `return await serviceApi.getService({ service_id: "${wrapper}" });`,
       });
       expect(result.isError).toBeFalsy();
       const [call] = mock.calls.slice(before);
       expect(decodeURIComponent(call.path)).toContain(UPSTREAM_SECRET);
       expect(result.text).not.toContain(UPSTREAM_SECRET);
-      expect(result.parsed.result.comment).toBe(`token: ${marker}`);
+      expect(result.parsed.result.comment).toBe(`token: ${wrapper}`);
     });
   }, 60000);
 
-  test("another caller's key turns the marker into a different token, silently", async () => {
+  test("another caller's key is refused instead of yielding a different token", async () => {
     await onFreshReplica("bun", async (replica) => {
       const before = mock.calls.length;
       const result = await callTool(replica.url, TOKEN_B, "execute", {
-        code: `return (await serviceApi.getService({ service_id: "${marker}" })).id;`,
+        code: `return (await serviceApi.getService({ service_id: "${wrapper}" })).id;`,
       });
-      expect(result.isError).toBeFalsy();
-      const path = decodeURIComponent(mock.calls.slice(before)[0].path);
-      expect(path).toMatch(/ghp_[A-Za-z0-9]{36}/);
-      expect(path).not.toContain(UPSTREAM_SECRET);
+      expect(result.isError).toBe(true);
+      expect(result.parsed.error).toBe(
+        "Encrypted token failed verification in code",
+      );
+      expect(result.text).not.toContain(UPSTREAM_SECRET);
+      expect(mock.calls.length).toBe(before);
     });
   }, 60000);
 
-  test("a damaged marker is refused by location before anything runs", async () => {
+  test("a damaged wrapper is refused by location before anything runs", async () => {
     await onFreshReplica("bun", async (replica) => {
       const before = mock.calls.length;
-      const damaged = marker.slice(0, -6);
+      const damaged = wrapper.slice(0, -6);
       const result = await callTool(replica.url, TOKEN_A, "execute", {
-        code: `const ok = "${marker}"; return await serviceApi.getService({ service_id: "${damaged}" });`,
+        code: `const ok = "${wrapper}"; return await serviceApi.getService({ service_id: "${damaged}" });`,
       });
       expect(result.isError).toBe(true);
-      expect(result.parsed.error).toContain("code, marker 2");
+      expect(result.parsed.error).toBe(
+        "Encrypted token has an invalid symbol or no closing brace in code",
+      );
       expect(result.parsed.hint).toContain("Retrieve the original value again");
       expect(result.text).not.toContain(UPSTREAM_SECRET);
       expect(result.text).not.toContain(damaged);
