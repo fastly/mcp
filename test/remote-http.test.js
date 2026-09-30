@@ -456,7 +456,7 @@ for (const runtime of ["bun", "node"]) {
       ]);
     }, 60000);
 
-    // The mock routes every host to itself, so a client that followed the redirect would show up as a second call.
+    // Following the redirect would send a second request to the mock.
     test("an NGWAF call refuses a redirect to another host", async () => {
       const before = mock.calls.length;
       const refused = await callTool(server.url, TOKEN_A, "execute", {

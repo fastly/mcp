@@ -2,10 +2,9 @@ import { buildIndex, enrichMethod } from "./indexer.js";
 import { ngwafMethods } from "./ngwaf.js";
 
 /**
- * The index discovery serves: operations parsed from the generated SDK docs, then the ones this project implements itself.
+ * Combines generated SDK documentation with this server's own methods.
  *
- * An owned class must not share a name with a generated one, even with different methods.
- * Such an overlap means an SDK upgrade now ships the class, and failing here gives one clear startup error instead of a failure on every execution.
+ * Reject class overlap so an SDK upgrade fails at startup instead of on every execution.
  */
 export async function buildApiIndex({ docsDir, owned = ngwafMethods() } = {}) {
   const generated = await buildIndex(docsDir);

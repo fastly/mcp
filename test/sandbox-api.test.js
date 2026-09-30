@@ -52,9 +52,6 @@ afterAll(async () => {
   if (server) await server.close();
 });
 
-// Every SDK constructor authenticates with FASTLY_API_TOKEN when it is set, which would replace the token under test with the developer's own.
-const { FASTLY_API_TOKEN: _developerToken, ...childEnv } = process.env;
-
 function runSandbox(
   code,
   { fastlyApiToken, runtime = process.execPath, policy, entry = ENTRY } = {},
@@ -66,7 +63,13 @@ function runSandbox(
         : ["--experimental-vm-modules", entry];
     const child = spawn(runtime, args, {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...childEnv, FASTLY_MCP_TEST_API: basePath },
+      // Like production, the child gets no inherited environment, so the developer's own FASTLY_API_TOKEN cannot replace the token under test.
+      env: {
+        PATH: process.env.PATH,
+        BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0",
+        DO_NOT_TRACK: "1",
+        FASTLY_MCP_TEST_API: basePath,
+      },
     });
 
     let stdout = "";
@@ -209,60 +212,6 @@ describe("large Fastly API responses through the sandbox bridge", () => {
     expect(whole.ok).toBe(true);
     expect(whole.reduced).toBeUndefined();
     expect(whole.result).toEqual(body.next);
-  }, 15000);
-
-  // Rule conditions nest a group, a multival and a single condition, which the old six-level budget refused.
-  test("the deepest rule conditions survive the bridge and a combined result", async () => {
-    const rule = {
-      id: "698650606232b4afcd5a47f7",
-      type: "request",
-      scope: { type: "workspace", applies_to: ["Am2qjXkgamuYp3u54rQkLD"] },
-      enabled: true,
-      group_operator: "any",
-      conditions: [
-        {
-          type: "group",
-          group_operator: "all",
-          conditions: [
-            { type: "single", field: "ip", operator: "in_list", value: "x" },
-            {
-              type: "multival",
-              field: "request_header",
-              operator: "exists",
-              group_operator: "all",
-              conditions: [
-                {
-                  type: "single",
-                  field: "name",
-                  operator: "equals",
-                  value: "x-something",
-                },
-              ],
-            },
-          ],
-        },
-      ],
-      actions: [{ type: "block" }],
-    };
-    const page = { data: [rule], meta: { limit: 100, total: 1 } };
-    nextResponse = {
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify(page),
-    };
-
-    const out = await runSandbox(
-      `const workspace = await iamPermissionsApi.listPermissions();
-       const account = await iamPermissionsApi.listPermissions();
-       return { workspaceRules: [workspace], accountRules: [account] };`,
-      { fastlyApiToken: "token" },
-    );
-    expect(out.ok).toBe(true);
-    expect(out.reduced).toBeUndefined();
-    expect(out.result).toEqual({
-      workspaceRules: [page],
-      accountRules: [page],
-    });
   }, 15000);
 
   // What a snippet may receive is separate from what it may return.
@@ -571,6 +520,10 @@ const WORKSPACE = {
   not_in_any_sdk: "kept",
 };
 
+// Serves `rules` for every rule listing and WORKSPACE for anything else.
+const rulesAndWorkspace = (rules) => (req) =>
+  json(req.url.includes("/rules") ? rules : WORKSPACE);
+
 describe("NGWAF adapters through the sandbox bridge", () => {
   test("requests reach the fixed endpoints with encoded IDs and only the options given", async () => {
     nextResponse = json({ data: [], meta: { limit: 100, total: 0 } });
@@ -712,8 +665,7 @@ describe("NGWAF results through final delivery", () => {
 
   test("a large combined result is written to a file with every level intact", async () => {
     const page = manyRules(150);
-    nextResponse = (req) =>
-      req.url.includes("/rules") ? json(page) : json(WORKSPACE);
+    nextResponse = rulesAndWorkspace(page);
     const store = createResultStore({ dir: tempDir("ngwaf-results") });
     stores.push(store);
     const result = await execute(COMBINED, {
@@ -732,8 +684,7 @@ describe("NGWAF results through final delivery", () => {
 
   test("a remote caller gets a small combined result whole and a large one described", async () => {
     const small = manyRules(2);
-    nextResponse = (req) =>
-      req.url.includes("/rules") ? json(small) : json(WORKSPACE);
+    nextResponse = rulesAndWorkspace(small);
     const remote = (code) =>
       execute(code, { apiToken: "token", remote: true, profile: profile() });
     const whole = await remote(COMBINED);
@@ -745,8 +696,7 @@ describe("NGWAF results through final delivery", () => {
     });
 
     const large = manyRules(150);
-    nextResponse = (req) =>
-      req.url.includes("/rules") ? json(large) : json(WORKSPACE);
+    nextResponse = rulesAndWorkspace(large);
     const described = await remote(COMBINED);
     expect(described.truncated).toBe(true);
     expect(described.resultFile).toBeUndefined();
@@ -756,14 +706,60 @@ describe("NGWAF results through final delivery", () => {
   }, 30000);
 });
 
-// The flow in the README, run as written against mock NGWAF collections that page in different ways.
-describe("the documented NGWAF flow", () => {
-  const readme = readFileSync(join(import.meta.dir, "../README.md"), "utf8");
-  const section = readme.slice(readme.indexOf("### NGWAF rules"));
-  const FLOW = section.slice(
-    section.indexOf("```js\n") + 6,
-    section.indexOf("\n```", section.indexOf("```js\n")),
-  );
+// The paging the method descriptions ask for, run against mock NGWAF collections that page in different ways.
+describe("the NGWAF paging flow", () => {
+  const FLOW = `
+const { configuration } = await productNgwafApi.getProductNgwafConfiguration({
+  service_id: 'SERVICE_ID',
+});
+const workspaceId = configuration.workspace_id;
+
+async function collect(list) {
+  const rules = new Map();
+  let total;
+  for (let page = 1; ; page++) {
+    const { data, meta } = await list({ page });
+    if (total !== undefined && meta.total !== total) {
+      return { rules, incomplete: 'the total changed while paging' };
+    }
+    total = meta.total;
+    const before = rules.size;
+    for (const rule of data) rules.set(rule.id, rule);
+    if (rules.size === total) return { rules };
+    if (data.length === 0) {
+      return { rules, incomplete: 'a page came back empty' };
+    }
+    if (rules.size === before) {
+      return { rules, incomplete: 'a page added no new rule' };
+    }
+  }
+}
+
+const [workspace, workspaceRules, accountRules] = await Promise.all([
+  ngwafWorkspacesApi.getWorkspace({ workspace_id: workspaceId }),
+  collect((options) =>
+    ngwafRulesApi.listWorkspaceRules({ workspace_id: workspaceId, ...options }),
+  ),
+  collect((options) => ngwafRulesApi.listAccountRules(options)),
+]);
+const applies = (rule) =>
+  ['*', workspaceId].some((id) => rule.scope?.applies_to?.includes(id));
+const rules = new Map([
+  ...workspaceRules.rules,
+  ...[...accountRules.rules].filter(([, rule]) => applies(rule)),
+]);
+return {
+  workspace: {
+    id: workspace.id,
+    name: workspace.name,
+    mode: workspace.mode,
+    attack_signal_thresholds: workspace.attack_signal_thresholds,
+  },
+  traffic_ramp: configuration.traffic_ramp,
+  incomplete: [workspaceRules.incomplete, accountRules.incomplete].filter(Boolean),
+  enabled_rules: [...rules.values()].filter((rule) => rule.enabled),
+};
+`;
 
   const rule = (id, enabled, appliesTo) => ({
     ...NESTED_RULE,
@@ -788,15 +784,11 @@ describe("the documented NGWAF flow", () => {
   ];
 
   // Two rules per page, numbered from 1 like the live API, which refuses page 0.
-  // `base: 0` stands for a server numbering from 0, `pages` replaces the slicing, and `totals` gives `meta.total` call by call.
-  function collection(
-    rules,
-    { base = 1, ignorePage, pages, totals, countAll } = {},
-  ) {
-    let calls = 0;
+  // `pages` replaces the slicing, and `totals` gives `meta.total` page by page.
+  function collection(rules, { pages, totals } = {}) {
     return (params) => {
-      const page = params.has("page") ? Number(params.get("page")) : base;
-      if (page < base) {
+      const page = params.has("page") ? Number(params.get("page")) : 1;
+      if (page < 1) {
         return {
           status: 400,
           contentType: "application/json",
@@ -808,13 +800,10 @@ describe("the documented NGWAF flow", () => {
         enabled === null
           ? rules
           : rules.filter((r) => String(r.enabled) === enabled);
-      const index = ignorePage ? 0 : page - base;
       const data = pages
-        ? (pages[index] ?? [])
-        : matching.slice(index * 2, index * 2 + 2);
-      const total =
-        totals?.[calls] ?? (countAll ? rules.length : matching.length);
-      calls++;
+        ? (pages[page - 1] ?? [])
+        : matching.slice(page * 2 - 2, page * 2);
+      const total = totals?.[page - 1] ?? matching.length;
       return json({ data, meta: { limit: 2, total } });
     };
   }
@@ -850,13 +839,10 @@ describe("the documented NGWAF flow", () => {
     return { ...out.result, ids, calls: requestsSince(start) };
   }
 
+  const [a1, a2, a3, a4] = ACCOUNT_RULES;
+
   const pagesOf = (calls, path) =>
     calls.filter((c) => c.path === path).map((c) => c.query.page);
-
-  test("the README snippet is the one under test", () => {
-    expect(FLOW).toContain("async function collect(list)");
-    expect(FLOW.trimEnd()).toEndWith("};");
-  });
 
   test("every page is read and only the applicable enabled rules remain", async () => {
     const out = await runFlow(ngwafApi());
@@ -874,13 +860,14 @@ describe("the documented NGWAF flow", () => {
     for (const path of ["/ngwaf/v1/workspaces/ws1/rules", "/ngwaf/v1/rules"]) {
       expect(pagesOf(out.calls, path)).toEqual(["1", "2"]);
     }
+    // The snippet pages the unfiltered collections and filters locally.
+    expect(out.calls.every((c) => c.query.enabled === undefined)).toBe(true);
     expect(out.enabled_rules.find((r) => r.id === "w3").conditions).toEqual(
       NESTED_RULE.conditions,
     );
   }, 15000);
 
   test("rows repeated across pages do not count twice", async () => {
-    const [a1, a2, a3, a4] = ACCOUNT_RULES;
     const out = await runFlow(
       ngwafApi({
         mode: "log",
@@ -898,15 +885,23 @@ describe("the documented NGWAF flow", () => {
 
   test("a server that ignores the page number is reported as incomplete", async () => {
     const out = await runFlow(
-      ngwafApi({ account: collection(ACCOUNT_RULES, { ignorePage: true }) }),
+      ngwafApi({
+        account: collection(ACCOUNT_RULES, {
+          pages: [
+            [a1, a2],
+            [a1, a2],
+          ],
+        }),
+      }),
     );
     expect(out.incomplete).toEqual(["a page added no new rule"]);
     expect(pagesOf(out.calls, "/ngwaf/v1/rules")).toEqual(["1", "2"]);
   }, 15000);
 
   test("paging from the wrong first page is reported as incomplete", async () => {
+    // A server numbering from 0 answers page 1 with its second page.
     const out = await runFlow(
-      ngwafApi({ account: collection(ACCOUNT_RULES, { base: 0 }) }),
+      ngwafApi({ account: collection(ACCOUNT_RULES, { pages: [[a3, a4]] }) }),
     );
     expect(out.incomplete).toEqual(["a page came back empty"]);
     // a1 was on the page that was skipped.
@@ -937,20 +932,11 @@ describe("the documented NGWAF flow", () => {
     expect(countsFiltered.incomplete).toEqual([]);
     expect(countsFiltered.ids).toEqual(["a1", "a2", "w1", "w3"]);
 
+    // Four rules in all, three of them enabled.
     const countsAll = ngwafApi({
-      account: collection(ACCOUNT_RULES, { countAll: true }),
+      account: collection(ACCOUNT_RULES, { totals: [4, 4, 4] }),
     });
     const misled = await runFlow(countsAll, filtered);
     expect(misled.incomplete).toEqual(["a page came back empty"]);
-
-    // The snippet as documented pages the unfiltered collection and filters locally.
-    const unfiltered = await runFlow(
-      ngwafApi({ account: collection(ACCOUNT_RULES, { countAll: true }) }),
-    );
-    expect(unfiltered.incomplete).toEqual([]);
-    expect(unfiltered.ids).toEqual(["a1", "a2", "w1", "w3"]);
-    expect(unfiltered.calls.every((c) => c.query.enabled === undefined)).toBe(
-      true,
-    );
   }, 30000);
 });

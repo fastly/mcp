@@ -112,7 +112,7 @@ export async function startMockFastly() {
         JSON.stringify({
           id: "service-1",
           comment: `token: ${UPSTREAM_SECRET}`,
-          requested: decodeURIComponent(req.url),
+          requested,
         }),
       );
       return;

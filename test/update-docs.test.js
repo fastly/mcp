@@ -24,7 +24,7 @@ afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
 });
 
-// A git that records its arguments and fails, so nothing is ever cloned or copied.
+// Stop at git clone after recording the ref, without accessing the network.
 function run(script, args = []) {
   const work = tempDir("update-docs");
   dirs.push(work);
@@ -60,11 +60,8 @@ function run(script, args = []) {
 const branchOf = (gitArgs) => gitArgs[gitArgs.indexOf("--branch") + 1];
 
 describe("update-docs.sh", () => {
-  test("the SDK pin is an exact version", () => {
-    expect(PINNED).toMatch(/^\d+\.\d+\.\d+$/);
-  });
-
   test("the default ref follows package.json, wherever the script is run from", () => {
+    expect(PINNED).toMatch(/^\d+\.\d+\.\d+$/);
     const out = run(SCRIPT);
     expect(out.status).not.toBe(0);
     expect(out.gitArgs[0]).toBe("clone");

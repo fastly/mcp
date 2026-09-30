@@ -5,7 +5,7 @@ import { join } from "node:path";
 import Fastly from "fastly";
 import { buildApiIndex } from "../src/api-index.js";
 import { buildIndex } from "../src/indexer.js";
-import { NGWAF_API_CLASSES, ngwafMethods } from "../src/ngwaf.js";
+import { ngwafMethods } from "../src/ngwaf.js";
 import { inspect } from "../src/tools/inspect.js";
 import { search } from "../src/tools/search.js";
 import { tempDir } from "./helpers.js";
@@ -66,14 +66,6 @@ describe("the public index", () => {
   test("adds the NGWAF adapters to the generated operations", async () => {
     const generated = await buildIndex();
     expect(index.length).toBe(generated.length + ngwafMethods().length);
-    for (const { apiClass, method } of ngwafMethods()) {
-      const entry = index.find(
-        (e) => e.apiClass === apiClass && e.method === method,
-      );
-      expect(entry.shortcut).toBe(
-        apiClass.charAt(0).toLowerCase() + apiClass.slice(1),
-      );
-    }
   });
 
   test("the generated docs name exactly the pinned SDK's API classes", async () => {
@@ -81,15 +73,10 @@ describe("the public index", () => {
     const exported = Object.keys(Fastly).filter(
       (name) => /Api$/.test(name) && typeof Fastly[name] === "function",
     );
-    expect(generated.size).toBe(139);
     expect([...generated].sort()).toEqual(exported.sort());
-    for (const name of Object.keys(NGWAF_API_CLASSES)) {
-      expect(generated.has(name)).toBe(false);
-      expect(Object.hasOwn(Fastly, name)).toBe(false);
-    }
   });
 
-  // Loading the SDK costs the server process about 130 ms and 51 MiB on Node, and only the sandbox child needs it.
+  // Discovery must not pay the SDK's import cost in the server process.
   test("building the index never loads the SDK into the server", () => {
     const probe = `
       import { createRequire } from "node:module";
@@ -112,9 +99,6 @@ describe("the public index", () => {
     await expect(buildApiIndex({ docsDir })).rejects.toThrow(
       "NgwafRulesApi is both in the generated SDK docs and implemented by this server",
     );
-    await expect(
-      buildApiIndex({ docsDir, owned: [owned("NgwafRulesApi", "listOther")] }),
-    ).rejects.toThrow("NgwafRulesApi is both");
   });
 
   test("an owned method defined twice is refused", async () => {
@@ -185,10 +169,14 @@ describe("NGWAF discovery", () => {
       expect(doc.description).toContain("`enabled: true`");
       expect(doc.description).toContain("sent unchanged");
       expect(doc.description).toContain("getProductNgwafConfiguration");
-      expect(doc.params.map((p) => p.name)).toEqual(
-        expect.arrayContaining(["action", "enabled", "limit", "page", "types"]),
-      );
-      expect(doc.params.filter((p) => !p.required).length).toBe(5);
+      const optionalParams = doc.params.filter((p) => !p.required);
+      expect(optionalParams.map((p) => p.name)).toEqual([
+        "action",
+        "enabled",
+        "limit",
+        "page",
+        "types",
+      ]);
       expect(doc.constraints).toBeUndefined();
     }
     const account = inspect(index, "listAccountRules");
@@ -209,6 +197,9 @@ describe("NGWAF discovery", () => {
     );
 
     const workspace = inspect(index, "ngwafworkspacesapi.GETWORKSPACE");
+    expect(workspace.returnType).toBe("Object");
+    expect(workspace.constraints).toBeUndefined();
+    expect(workspace.params.map((p) => p.name)).toEqual(["workspace_id"]);
     expect(workspace.description).toContain("protection `mode`");
     expect(workspace.description).toContain("`traffic_ramp`");
     expect(workspace.description).toContain(

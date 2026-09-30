@@ -1,5 +1,5 @@
 /**
- * Budgets shared by the sandbox child and its parent, in bytes unless they say otherwise.
+ * Byte and nesting budgets shared by the sandbox child and its parent.
  *
  * These used to be one 100 KB number.
  * They are separate now because a result that is too large to show the model is not too large to keep.
@@ -21,8 +21,7 @@ export const PREVIEW_BYTES = 16_000;
 export const API_RESPONSE_BYTES = 4_000_000;
 
 /**
- * How many levels of nesting the sandbox keeps, in one API response and in the final result alike.
- * NGWAF rules nest a group, a multival and a single condition inside the rules envelope, which takes nine levels.
- * Twelve leaves room for a snippet to wrap a few of those in its own result.
+ * Maximum nesting depth for API responses and final sandbox results.
+ * NGWAF rule envelopes reach nine levels; twelve leaves room for wrapping.
  */
 export const SANDBOX_MAX_DEPTH = 12;

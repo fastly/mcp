@@ -1,27 +1,14 @@
-/**
- * Read-only NGWAF operations that the fastly SDK does not implement yet.
- *
- * The classes run in the sandbox child on the SDK's own ApiClient, so they share its authentication, request plugins and error format.
- * This module never imports the SDK, which keeps the SDK out of the server process when discovery reads the metadata.
- */
+// Discovery imports this module in the server process, so keep the SDK import in the sandbox.
 
 const BASE_PATH = "https://api.fastly.com";
-
-const LIST_OPTIONS = {
-  action: "String",
-  enabled: "Boolean",
-  limit: "Number",
-  page: "Number",
-  types: "String",
-};
 
 function isType(value, type) {
   if (type === "Number") return Number.isInteger(value);
   return typeof value === type.toLowerCase();
 }
 
-// Unknown options are refused so that a filter this method does not send, such as the account list's `scope`, never looks applied.
-function readOptions(method, options, types) {
+// Refuse unsupported filters so callers cannot mistake them for applied filters.
+function readOptions(method, options, params) {
   if (options === undefined) return {};
   if (
     typeof options !== "object" ||
@@ -32,16 +19,18 @@ function readOptions(method, options, types) {
   }
   const values = {};
   for (const [name, value] of Object.entries(options)) {
-    const type = Object.hasOwn(types, name) ? types[name] : undefined;
-    if (type === undefined) {
+    const param = params.find((p) => p.name === name);
+    if (param === undefined) {
       throw new TypeError(
-        `${method} does not accept '${name}'. Its options are ${Object.keys(types).join(", ")}.`,
+        `${method} does not accept '${name}'. Its options are ${params.map((p) => p.name).join(", ")}.`,
       );
     }
     if (value === undefined || value === null) continue;
-    if (!isType(value, type)) {
+    if (!isType(value, param.type)) {
       const expected =
-        type === "Number" ? "an integer" : `a ${type.toLowerCase()}`;
+        param.type === "Number"
+          ? "an integer"
+          : `a ${param.type.toLowerCase()}`;
       throw new TypeError(`'${name}' must be ${expected}.`);
     }
     values[name] = value;
@@ -49,24 +38,15 @@ function readOptions(method, options, types) {
   return values;
 }
 
-function requireId(values, name) {
-  const id = values[name];
+function requireId(name, id) {
   if (id === undefined || id === "") {
     throw new Error(`Missing the required parameter '${name}'.`);
   }
-  // Path encoding leaves dots alone, and a server that resolves dot segments would answer for another endpoint.
+  // Dots survive path encoding and can change which endpoint receives the request.
   if (id === "." || id === "..") {
     throw new Error(`'${name}' must be an ID, not '${id}'.`);
   }
   return id;
-}
-
-function query(values) {
-  const params = {};
-  for (const name of Object.keys(LIST_OPTIONS)) {
-    if (values[name] !== undefined) params[name] = values[name];
-  }
-  return params;
 }
 
 async function get(apiClient, path, pathParams, queryParams) {
@@ -88,36 +68,29 @@ async function get(apiClient, path, pathParams, queryParams) {
   return response.data;
 }
 
-function requireClient(apiClient) {
-  if (typeof apiClient?.callApi !== "function") {
-    throw new TypeError("An NGWAF API needs the SDK's ApiClient.");
-  }
-  return apiClient;
-}
-
 export class NgwafRulesApi {
   #apiClient;
 
   constructor(apiClient) {
-    this.#apiClient = requireClient(apiClient);
+    this.#apiClient = apiClient;
   }
 
   async listAccountRules(options) {
-    const values = readOptions("listAccountRules", options, LIST_OPTIONS);
-    return get(this.#apiClient, "/ngwaf/v1/rules", {}, query(values));
+    const filters = readOptions("listAccountRules", options, LIST_PARAMS);
+    return get(this.#apiClient, "/ngwaf/v1/rules", {}, filters);
   }
 
   async listWorkspaceRules(options) {
-    const values = readOptions("listWorkspaceRules", options, {
-      workspace_id: "String",
-      ...LIST_OPTIONS,
-    });
-    const workspaceId = requireId(values, "workspace_id");
+    const { workspace_id, ...filters } = readOptions(
+      "listWorkspaceRules",
+      options,
+      [WORKSPACE_ID, ...LIST_PARAMS],
+    );
     return get(
       this.#apiClient,
       "/ngwaf/v1/workspaces/{workspace_id}/rules",
-      { workspace_id: workspaceId },
-      query(values),
+      { workspace_id: requireId("workspace_id", workspace_id) },
+      filters,
     );
   }
 }
@@ -126,39 +99,43 @@ export class NgwafWorkspacesApi {
   #apiClient;
 
   constructor(apiClient) {
-    this.#apiClient = requireClient(apiClient);
+    this.#apiClient = apiClient;
   }
 
   async getWorkspace(options) {
-    const values = readOptions("getWorkspace", options, {
-      workspace_id: "String",
-    });
-    const workspaceId = requireId(values, "workspace_id");
+    const { workspace_id } = readOptions("getWorkspace", options, [
+      WORKSPACE_ID,
+    ]);
     return get(
       this.#apiClient,
       "/ngwaf/v1/workspaces/{workspace_id}",
-      { workspace_id: workspaceId },
+      { workspace_id: requireId("workspace_id", workspace_id) },
       {},
     );
   }
 }
 
-/** The classes the sandbox registers next to the SDK's own. */
 export const NGWAF_API_CLASSES = { NgwafRulesApi, NgwafWorkspacesApi };
 
 const PAGING = [
-  "Each call returns one page as the complete response envelope: `data` holds the rules, and `meta.limit` and `meta.total` describe the collection.",
-  "A page is not the whole collection unless its distinct rule IDs already number `meta.total`.",
-  "Pages are numbered from 1, a call without `page` returns page 1, and `page: 0` is refused with a 400.",
+  "Each call returns one page with the rules in `data` and pagination metadata in `meta`.",
+  "`meta.limit` gives the page size and `meta.total` gives the collection's rule count.",
+  "Pages are numbered from 1, and omitting `page` returns page 1.",
+  "`page: 0` is refused with a 400.",
   "Request `page: 1`, `page: 2` and so on, adding every rule `id` to a Set.",
-  "The collection is complete only when the size of that Set equals `meta.total`, and a rule seen twice counts once.",
-  "Stop and report the list as incomplete if a page comes back empty before that, if `meta.total` changes between pages, or if a page adds no new ID.",
-  "Pass `enabled: true` to ask for enabled rules only, and pass `types` as one string, which is sent unchanged; a comma-separated string such as `'request,signal'` asks for several types.",
+  "The collection is complete only when that Set's size equals `meta.total`.",
+  "When counting IDs, a rule seen twice counts once.",
+  "Stop and report the list as incomplete if a page is empty before that count is reached.",
+  "Also stop if `meta.total` changes between pages or a page adds no new ID.",
+  "Pass `enabled: true` to ask for enabled rules only.",
+  "Pass `types` as one string, which is sent unchanged.",
+  "A comma-separated string such as `'request,signal'` asks for several types.",
   "Conditions can name lists and custom signals by ID, and these methods do not resolve them.",
 ];
 
 const WORKSPACE_LOOKUP =
-  "A service's workspace ID is `configuration.workspace_id` in the result of `productNgwafApi.getProductNgwafConfiguration({ service_id })`.";
+  "Get a service's workspace ID from `configuration.workspace_id` in the result of " +
+  "`productNgwafApi.getProductNgwafConfiguration({ service_id })`.";
 
 const LIST_PARAMS = [
   {
@@ -190,7 +167,8 @@ const LIST_PARAMS = [
     type: "String",
     required: false,
     description:
-      "Return rules with any of the given rule types. The string is sent unchanged, and arrays are refused.",
+      "Return rules with any of the given rule types. " +
+      "The string is sent unchanged, and arrays are refused.",
   },
 ];
 
@@ -202,8 +180,7 @@ const WORKSPACE_ID = {
 };
 
 /**
- * Discovery metadata for the classes above, in the shape the docs parser produces.
- * Each call returns fresh objects, so enriching one index never changes another.
+ * Returns fresh metadata, so enriching one index changes neither another index nor the parameters the adapters validate against.
  */
 export function ngwafMethods() {
   const entry = (apiClass, method, httpPath, sentences, params) => ({
@@ -224,12 +201,14 @@ export function ngwafMethods() {
       [
         "List one page of account-level NGWAF rules, which can apply to several workspaces.",
         ...PAGING,
-        "Whether this list's `meta.total` counts only the rules that match `enabled`, `types` or `action` is unverified.",
-        "To establish completeness, page through it without those filters and apply them to the collected rules; never report a filtered account listing as complete.",
-        "An account rule applies to a workspace when its `scope.applies_to` contains `'*'` or that workspace ID.",
+        "How `enabled`, `types` and `action` affect this list's `meta.total` is unverified.",
+        "Page without those filters to establish completeness, then apply them locally.",
+        "Until verified, never report a filtered account listing as complete.",
+        "Keep account rules whose `scope.applies_to` contains `'*'` or the target workspace ID.",
         "Count distinct IDs on the account collection first, then keep the rules that apply.",
-        "The API documents a `scope` query filter whose matching is unverified, and this method does not send it.",
-        "Do not assume the workspace list already includes account rules; when both lists are combined, deduplicate by rule ID.",
+        "The API's `scope` query filter is unverified, and this method does not send it.",
+        "Do not assume the workspace list includes account rules.",
+        "Deduplicate by rule ID when combining both lists.",
         WORKSPACE_LOOKUP,
       ],
       LIST_PARAMS,
@@ -241,8 +220,9 @@ export function ngwafMethods() {
       [
         "List one page of the NGWAF rules defined in one workspace.",
         ...PAGING,
-        "On this list `meta.total` counts only the rules that match `enabled`, `types` and `action`, so a filtered listing is complete when its distinct IDs reach that total.",
-        "Account rules can also apply to the workspace; list them with `ngwafRulesApi.listAccountRules()`.",
+        "Here `meta.total` counts only rules matching `enabled`, `types` and `action`.",
+        "With these filters, a filtered listing is complete when its distinct IDs reach that total.",
+        "Account rules can also apply; list them with `ngwafRulesApi.listAccountRules()`.",
         WORKSPACE_LOOKUP,
       ],
       [WORKSPACE_ID, ...LIST_PARAMS],
@@ -252,10 +232,12 @@ export function ngwafMethods() {
       "getWorkspace",
       "/ngwaf/v1/workspaces/{workspace_id}",
       [
-        "Get the settings of an NGWAF workspace, including its protection `mode` and `attack_signal_thresholds`.",
+        "Get an NGWAF workspace's settings, including protection `mode` and attack thresholds.",
+        "Attack thresholds are in `attack_signal_thresholds`.",
         WORKSPACE_LOOKUP,
-        "That configuration's `traffic_ramp` is the share of traffic inspected and does not establish the protection mode.",
-        "Whether an enabled rule blocks requests depends on the workspace mode and on the rule's actions, so report enablement and blocking separately.",
+        "The configuration's `traffic_ramp` gives the share of traffic inspected, not protection mode.",
+        "Whether a rule blocks requests depends on the workspace mode and the rule's actions.",
+        "When describing rules, report enablement and blocking separately.",
         "Report attack thresholds as workspace settings, not as rules.",
       ],
       [WORKSPACE_ID],

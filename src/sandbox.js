@@ -67,8 +67,6 @@ if (remote) {
   });
 }
 
-// The SDK version is pinned, so an SDK class named like one of ours means a deliberate upgrade or a packaging mistake.
-// Neither may silently replace the other, so every execution fails on it before any request goes out.
 const sdkCollisions = Object.keys(NGWAF_API_CLASSES).filter((name) =>
   Object.hasOwn(Fastly, name),
 );
@@ -87,13 +85,11 @@ for (const name of Object.keys(Fastly)) {
     // Construction failed, so it stays out of the sandbox facade.
   }
 }
-if (sdkCollisions.length === 0) {
-  for (const [name, Ctor] of Object.entries(NGWAF_API_CLASSES)) {
-    apiInstances.set(name, {
-      instance: new Ctor(Fastly.ApiClient.instance),
-      operations: operationsOf(Ctor),
-    });
-  }
+for (const [name, Ctor] of Object.entries(NGWAF_API_CLASSES)) {
+  apiInstances.set(name, {
+    instance: new Ctor(Fastly.ApiClient.instance),
+    operations: operationsOf(Ctor),
+  });
 }
 const apiClasses = [...apiInstances.keys()];
 

@@ -59,7 +59,6 @@ export function serializeResult(
   } = {},
 ) {
   let cappedDepth;
-  // The deepest level the first pass reached, counting leaves and capped values.
   let deepest = 0;
 
   function walkProp(obj, key, depth, seen, depthLimit) {
@@ -213,16 +212,15 @@ export function serializeResult(
       }
       fullBytes = jsonBytes;
       if (!shrink) break;
-      // Passes that still reach `deepest` would rebuild this same value, so only the first of them is checked, without walking it again.
-      if (deepest < depthLimit) {
-        if (depthLimit > 1 && jsonBytes <= reducedMaxSize) {
-          return {
-            value: normalized,
-            reduced: { bytes: fullBytes, depth: depthLimit - 1 },
-          };
-        }
-        depthLimit = deepest;
+      // Lower limits produce the same result until they cut a visited level.
+      if (deepest >= maxDepth) continue;
+      if (maxDepth > 1 && jsonBytes <= reducedMaxSize) {
+        return {
+          value: normalized,
+          reduced: { bytes: fullBytes, depth: maxDepth - 1 },
+        };
       }
+      depthLimit = deepest;
     } else if (jsonBytes <= reducedMaxSize) {
       return {
         value: normalized,

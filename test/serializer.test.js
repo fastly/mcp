@@ -464,8 +464,8 @@ describe("the sandbox depth budget", () => {
   });
 });
 
-// Every pass used to walk the whole value again, even when a shallow value came out the same each time.
 describe("shrinking a shallow oversized value", () => {
+  const budget = { maxDepth: SANDBOX_MAX_DEPTH, maxSize: 100 };
   const counted = (leaf) => {
     const counter = { reads: 0 };
     const holder = {};
@@ -481,19 +481,13 @@ describe("shrinking a shallow oversized value", () => {
 
   test("a flat value is walked once before it is described", () => {
     const { holder, counter } = counted("x".repeat(500));
-    const out = serializeResult(holder, {
-      maxDepth: SANDBOX_MAX_DEPTH,
-      maxSize: 100,
-    });
+    const out = serializeResult(holder, budget);
     expect(out.value._truncated).toBe(true);
     expect(out.value._previewKeys).toEqual(["big"]);
     expect(out.reduced).toEqual({ bytes: 510, depth: 0 });
     expect(counter.reads).toBe(1);
 
-    const flat = serializeResult(Array(300).fill(1), {
-      maxDepth: SANDBOX_MAX_DEPTH,
-      maxSize: 100,
-    });
+    const flat = serializeResult(Array(300).fill(1), budget);
     expect(flat.reduced).toEqual({ bytes: 601, depth: 0 });
   });
 
@@ -529,7 +523,6 @@ describe("shrinking a shallow oversized value", () => {
     });
     expect(counter.reads).toBe(1);
 
-    // With one level there is nothing to shrink to.
     expect(
       serializeResult("y".repeat(500), { ...options, maxDepth: 1 }).reduced,
     ).toEqual({ bytes: 502, depth: 0 });
@@ -537,13 +530,9 @@ describe("shrinking a shallow oversized value", () => {
 
   test("a value partway into the budget is cut from its own depth down", () => {
     const { holder, counter } = counted("x".repeat(500));
-    const out = serializeResult(
-      { a: holder },
-      { maxDepth: SANDBOX_MAX_DEPTH, maxSize: 100 },
-    );
+    const out = serializeResult({ a: holder }, budget);
     expect(out.value).toEqual({ a: { big: "[truncated: max depth]" } });
     expect(out.reduced).toEqual({ bytes: 516, depth: 1 });
-    // The first pass and the one at depth one, instead of all twelve.
     expect(counter.reads).toBe(2);
   });
 });
