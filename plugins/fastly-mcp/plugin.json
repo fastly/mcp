@@ -1,0 +1,31 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "fastly-mcp",
+  "version": "2.2.0",
+  "description": "Use the Fastly API through a local MCP server",
+  "author": {
+    "name": "Fastly",
+    "url": "https://www.fastly.com"
+  },
+  "homepage": "https://github.com/fastly/mcp",
+  "repository": "https://github.com/fastly/mcp",
+  "license": "MIT",
+  "keywords": ["fastly", "mcp", "cdn", "edge", "api"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Fastly MCP",
+        "shortDescription": "Work with the Fastly API",
+        "longDescription": "Find Fastly API methods, inspect their parameters, and run focused JavaScript with a preconfigured Fastly client.\nInvestigate services, backends, TLS, caching, and traffic, or make changes with a token that permits them.\nThe MCP server runs locally and uses the Fastly API token you configure in your client environment.\nInstall Bun and Node.js 24.12.0 or newer before connecting.\nFor production changes, review the planned call and approve it before execution.",
+        "developerName": "Fastly",
+        "category": "Developer Tools",
+        "websiteURL": "https://github.com/fastly/mcp",
+        "supportURL": "https://github.com/fastly/mcp/issues",
+        "privacyPolicyURL": "https://www.fastly.com/privacy",
+        "termsOfServiceURL": "https://www.fastly.com/terms",
+        "composerIcon": "./assets/fastly-icon.svg",
+        "logo": "./assets/fastly-icon.svg"
+      }
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "fastly-local",
+  "interface": {
+    "displayName": "Fastly local plugins"
+  },
+  "plugins": [
+    {
+      "name": "fastly-mcp",
+      "source": {
+        "source": "local",
+        "path": "./plugins/fastly-mcp"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

@@ -4,5 +4,7 @@
 *.swp
 *~
 coverage/
+dist/
 node_modules/
+tmp/
 LOG.md

@@ -1,0 +1,9 @@
+{
+  "name": "fastly-mcp",
+  "mcpServers": {
+    "fastly-js": {
+      "command": "bunx",
+      "env_vars": ["FASTLY_API_TOKEN"]
+    }
+  }
+}

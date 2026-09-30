@@ -7,7 +7,13 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "includes": ["src/**", "test/**"]
+    "includes": [
+      "src/**",
+      "test/**",
+      "scripts/package-plugin.js",
+      "plugins/fastly-mcp/**/*.json",
+      ".agents/plugins/marketplace.json"
+    ]
   },
   "formatter": {
     "enabled": true,

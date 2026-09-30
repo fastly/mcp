@@ -1,0 +1,17 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "fastly-js": {
+      "type": "stdio",
+      "command": "bunx",
+      "args": [
+        "-p",
+        "@fastly/mcp@2.2.0",
+        "fastly-mcp",
+        "--transport",
+        "stdio",
+        "--encrypt-secrets"
+      ]
+    }
+  }
+}
