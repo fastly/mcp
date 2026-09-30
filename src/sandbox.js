@@ -1,7 +1,11 @@
 import vm from "node:vm";
 import Fastly from "fastly";
 import { describeThrown, read } from "./errors.js";
-import { API_RESPONSE_BYTES, INLINE_RESULT_BYTES } from "./limits.js";
+import {
+  API_RESPONSE_BYTES,
+  INLINE_RESULT_BYTES,
+  SANDBOX_MAX_DEPTH,
+} from "./limits.js";
 import { operationsOf, remoteDenial } from "./method-policy.js";
 import { serializeResult } from "./serializer.js";
 import { truncateOutsideSecrets } from "./truncate.js";
@@ -27,6 +31,7 @@ const resultBytes = Number.isFinite(policy?.resultBytes)
   ? policy.resultBytes
   : INLINE_RESULT_BYTES;
 const serializeOptions = {
+  maxDepth: SANDBOX_MAX_DEPTH,
   maxSize: resultBytes,
   reducedMaxSize: Math.min(resultBytes, INLINE_RESULT_BYTES),
 };
@@ -138,6 +143,7 @@ async function callFastly(payload) {
   try {
     const result = await instance[method](...args);
     const { value, reduced } = serializeResult(result, {
+      maxDepth: SANDBOX_MAX_DEPTH,
       maxSize: API_RESPONSE_BYTES,
       shrink: false,
     });

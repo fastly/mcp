@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { getExecutionRuntime } from "../src/execution-runtime.js";
-import { PREVIEW_BYTES } from "../src/limits.js";
+import { PREVIEW_BYTES, SANDBOX_MAX_DEPTH } from "../src/limits.js";
 import { createResultStore } from "../src/result-files.js";
 import { SecretShield } from "../src/secrets.js";
 import { execute } from "../src/tools/execute.js";
@@ -792,13 +792,22 @@ describe("execute", () => {
 
   test("a small result beyond the depth cap is flagged as incomplete", async () => {
     const result = await execute(
-      "let value = { leaf: 42 }; for (let i = 0; i < 7; i++) value = { next: value }; return value;",
+      `let value = { leaf: 42 }; for (let i = 0; i < ${SANDBOX_MAX_DEPTH}; i++) value = { next: value }; return value;`,
     );
     expect(result.truncated).toBe(true);
     expect(result.resultBytes).toBeUndefined();
     expect(result.resultFile).toBeUndefined();
     expect(JSON.stringify(result.result)).toContain("[truncated: max depth]");
     expect(result.hint).toContain("complete size is unknown");
+    expect(result.hint).toContain(
+      `nested deeper than ${SANDBOX_MAX_DEPTH} levels`,
+    );
+
+    const whole = await execute(
+      `let value = { leaf: 42 }; for (let i = 1; i < ${SANDBOX_MAX_DEPTH}; i++) value = { next: value }; return value;`,
+    );
+    expect(whole.truncated).toBeUndefined();
+    expect(JSON.stringify(whole.result)).toContain('{"leaf":42}');
   }, 10000);
 
   // The hint has to name the remote budget, not the local one.

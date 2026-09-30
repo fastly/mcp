@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { runInNewContext } from "node:vm";
+import { SANDBOX_MAX_DEPTH } from "../src/limits.js";
 import { safeSerialize, serializeResult } from "../src/serializer.js";
 import { GITHUB_PAT } from "./helpers.js";
 
@@ -424,5 +425,125 @@ describe("safeSerialize", () => {
     expect(safeSerialize({ payload: big })).toEqual({
       payload: "[Uint8Array: 1048576 bytes]",
     });
+  });
+});
+
+describe("the sandbox depth budget", () => {
+  const nested = (levels, leaf) => {
+    let value = leaf;
+    for (let i = 0; i < levels; i++) value = { next: value };
+    return value;
+  };
+  const budget = { maxDepth: SANDBOX_MAX_DEPTH };
+
+  test("a leaf exactly at the budget comes back whole, one level deeper is capped", () => {
+    const fits = nested(SANDBOX_MAX_DEPTH, 42);
+    expect(serializeResult(fits, budget)).toEqual({ value: fits });
+
+    const capped = serializeResult(nested(SANDBOX_MAX_DEPTH + 1, 42), budget);
+    expect(JSON.stringify(capped.value)).toContain("[truncated: max depth]");
+    expect(capped.reduced).toMatchObject({
+      depth: SANDBOX_MAX_DEPTH,
+      cappedDepth: SANDBOX_MAX_DEPTH,
+    });
+  });
+
+  test("the default depth stays at six", () => {
+    expect(serializeResult(nested(6, 1)).reduced).toBeUndefined();
+    expect(serializeResult(nested(7, 1)).reduced.cappedDepth).toBe(6);
+  });
+
+  test("an oversized value deeper than the budget still reports its cap", () => {
+    const value = {
+      wide: "x".repeat(500),
+      deep: nested(SANDBOX_MAX_DEPTH + 3, 1),
+    };
+    const out = serializeResult(value, { ...budget, maxSize: 100 });
+    expect(out.reduced.cappedDepth).toBe(SANDBOX_MAX_DEPTH);
+    expect(out.reduced.depth).toBeLessThan(SANDBOX_MAX_DEPTH);
+  });
+});
+
+// Every pass used to walk the whole value again, even when a shallow value came out the same each time.
+describe("shrinking a shallow oversized value", () => {
+  const counted = (leaf) => {
+    const counter = { reads: 0 };
+    const holder = {};
+    Object.defineProperty(holder, "big", {
+      enumerable: true,
+      get() {
+        counter.reads++;
+        return leaf;
+      },
+    });
+    return { holder, counter };
+  };
+
+  test("a flat value is walked once before it is described", () => {
+    const { holder, counter } = counted("x".repeat(500));
+    const out = serializeResult(holder, {
+      maxDepth: SANDBOX_MAX_DEPTH,
+      maxSize: 100,
+    });
+    expect(out.value._truncated).toBe(true);
+    expect(out.value._previewKeys).toEqual(["big"]);
+    expect(out.reduced).toEqual({ bytes: 510, depth: 0 });
+    expect(counter.reads).toBe(1);
+
+    const flat = serializeResult(Array(300).fill(1), {
+      maxDepth: SANDBOX_MAX_DEPTH,
+      maxSize: 100,
+    });
+    expect(flat.reduced).toEqual({ bytes: 601, depth: 0 });
+  });
+
+  test("root scalars still reach the description", () => {
+    for (const maxDepth of [1, 2, SANDBOX_MAX_DEPTH]) {
+      const out = serializeResult("y".repeat(500), { maxDepth, maxSize: 100 });
+      expect(out.reduced).toEqual({ bytes: 502, depth: 0 });
+      expect(out.value._truncated).toBe(true);
+    }
+  });
+
+  test("a larger reduced budget still gets the first shrink level", () => {
+    const options = { maxSize: 100, reducedMaxSize: 1000 };
+    const scalar = serializeResult("y".repeat(500), {
+      ...options,
+      maxDepth: SANDBOX_MAX_DEPTH,
+    });
+    expect(scalar).toEqual({
+      value: "y".repeat(500),
+      reduced: { bytes: 502, depth: SANDBOX_MAX_DEPTH - 1 },
+    });
+
+    const { holder, counter } = counted("x".repeat(500));
+    holder.self = holder;
+    const cyclic = serializeResult(holder, {
+      ...options,
+      maxDepth: SANDBOX_MAX_DEPTH,
+    });
+    expect(cyclic.value.self).toBe("[circular]");
+    expect(cyclic.reduced).toEqual({
+      bytes: Buffer.byteLength(JSON.stringify(cyclic.value)),
+      depth: SANDBOX_MAX_DEPTH - 1,
+    });
+    expect(counter.reads).toBe(1);
+
+    // With one level there is nothing to shrink to.
+    expect(
+      serializeResult("y".repeat(500), { ...options, maxDepth: 1 }).reduced,
+    ).toEqual({ bytes: 502, depth: 0 });
+  });
+
+  test("a value partway into the budget is cut from its own depth down", () => {
+    const { holder, counter } = counted("x".repeat(500));
+    const out = serializeResult(
+      { a: holder },
+      { maxDepth: SANDBOX_MAX_DEPTH, maxSize: 100 },
+    );
+    expect(out.value).toEqual({ a: { big: "[truncated: max depth]" } });
+    expect(out.reduced).toEqual({ bytes: 516, depth: 1 });
+    // The first pass and the one at depth one, instead of all twelve.
+    expect(counter.reads).toBe(2);
   });
 });

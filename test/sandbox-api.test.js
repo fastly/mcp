@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
-import { API_RESPONSE_BYTES } from "../src/limits.js";
+import { API_RESPONSE_BYTES, SANDBOX_MAX_DEPTH } from "../src/limits.js";
 import { expectNoInternals, GITHUB_PAT, startLocalServer } from "./helpers.js";
 
 const ENTRY = join(import.meta.dir, "fixtures/sandbox-with-mock-fastly.mjs");
@@ -159,7 +159,7 @@ describe("large Fastly API responses through the sandbox bridge", () => {
 
   test("a deeply nested response is refused instead of returned incomplete", async () => {
     let body = { leaf: 42 };
-    for (let i = 0; i < 7; i++) body = { next: body };
+    for (let i = 0; i < SANDBOX_MAX_DEPTH; i++) body = { next: body };
     nextResponse = {
       status: 200,
       contentType: "application/json",
@@ -171,8 +171,73 @@ describe("large Fastly API responses through the sandbox bridge", () => {
       { fastlyApiToken: "token" },
     );
     expect(out.ok).toBe(false);
-    expect(out.error).toContain("nested deeper than 6 levels");
+    expect(out.error).toContain(
+      `nested deeper than ${SANDBOX_MAX_DEPTH} levels`,
+    );
     expect(JSON.stringify(out)).not.toContain("[truncated: max depth]");
+
+    nextResponse.body = JSON.stringify(body.next);
+    const whole = await runSandbox(
+      "return await iamPermissionsApi.listPermissions();",
+      { fastlyApiToken: "token" },
+    );
+    expect(whole.ok).toBe(true);
+    expect(whole.reduced).toBeUndefined();
+    expect(whole.result).toEqual(body.next);
+  }, 15000);
+
+  // Rule conditions nest a group, a multival and a single condition, which the old six-level budget refused.
+  test("the deepest rule conditions survive the bridge and a combined result", async () => {
+    const rule = {
+      id: "698650606232b4afcd5a47f7",
+      type: "request",
+      scope: { type: "workspace", applies_to: ["Am2qjXkgamuYp3u54rQkLD"] },
+      enabled: true,
+      group_operator: "any",
+      conditions: [
+        {
+          type: "group",
+          group_operator: "all",
+          conditions: [
+            { type: "single", field: "ip", operator: "in_list", value: "x" },
+            {
+              type: "multival",
+              field: "request_header",
+              operator: "exists",
+              group_operator: "all",
+              conditions: [
+                {
+                  type: "single",
+                  field: "name",
+                  operator: "equals",
+                  value: "x-something",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      actions: [{ type: "block" }],
+    };
+    const page = { data: [rule], meta: { limit: 100, total: 1 } };
+    nextResponse = {
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(page),
+    };
+
+    const out = await runSandbox(
+      `const workspace = await iamPermissionsApi.listPermissions();
+       const account = await iamPermissionsApi.listPermissions();
+       return { workspaceRules: [workspace], accountRules: [account] };`,
+      { fastlyApiToken: "token" },
+    );
+    expect(out.ok).toBe(true);
+    expect(out.reduced).toBeUndefined();
+    expect(out.result).toEqual({
+      workspaceRules: [page],
+      accountRules: [page],
+    });
   }, 15000);
 
   // What a snippet may receive is separate from what it may return.

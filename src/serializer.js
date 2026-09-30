@@ -59,6 +59,8 @@ export function serializeResult(
   } = {},
 ) {
   let cappedDepth;
+  // The deepest level the first pass reached, counting leaves and capped values.
+  let deepest = 0;
 
   function walkProp(obj, key, depth, seen, depthLimit) {
     const read = readProp(obj, key);
@@ -68,6 +70,7 @@ export function serializeResult(
   }
 
   function walk(val, depth, seen, depthLimit) {
+    if (depth > deepest) deepest = depth;
     if (depth > depthLimit) {
       if (depthLimit === maxDepth) cappedDepth = maxDepth;
       return "[truncated: max depth]";
@@ -209,6 +212,17 @@ export function serializeResult(
           : { value: normalized };
       }
       fullBytes = jsonBytes;
+      if (!shrink) break;
+      // Passes that still reach `deepest` would rebuild this same value, so only the first of them is checked, without walking it again.
+      if (deepest < depthLimit) {
+        if (depthLimit > 1 && jsonBytes <= reducedMaxSize) {
+          return {
+            value: normalized,
+            reduced: { bytes: fullBytes, depth: depthLimit - 1 },
+          };
+        }
+        depthLimit = deepest;
+      }
     } else if (jsonBytes <= reducedMaxSize) {
       return {
         value: normalized,
@@ -219,33 +233,31 @@ export function serializeResult(
         },
       };
     }
-
-    if (depthLimit === 1 || !shrink) {
-      // This re-enumerates the value, and a proxy that tolerated the first
-      // enumeration may still throw on this one.
-      let previewKeys;
-      if (typeof value === "object" && value !== null) {
-        try {
-          // Key names can be as long as anything else, and this stand-in has to stay small.
-          previewKeys = Object.keys(value)
-            .slice(0, 20)
-            .map((k) => truncateOutsideSecrets(k, 100, "..."));
-        } catch {}
-      }
-      return {
-        value: {
-          _truncated: true,
-          _message: `Result too large to serialize (${fullBytes} bytes). Return fewer fields, or page through the data and process it inside your code.`,
-          _previewKeys: previewKeys,
-        },
-        reduced: {
-          bytes: fullBytes,
-          depth: 0,
-          ...(cappedDepth === undefined ? {} : { cappedDepth }),
-        },
-      };
-    }
   }
+
+  // This re-enumerates the value, and a proxy that tolerated the first
+  // enumeration may still throw on this one.
+  let previewKeys;
+  if (typeof value === "object" && value !== null) {
+    try {
+      // Key names can be as long as anything else, and this stand-in has to stay small.
+      previewKeys = Object.keys(value)
+        .slice(0, 20)
+        .map((k) => truncateOutsideSecrets(k, 100, "..."));
+    } catch {}
+  }
+  return {
+    value: {
+      _truncated: true,
+      _message: `Result too large to serialize (${fullBytes} bytes). Return fewer fields, or page through the data and process it inside your code.`,
+      _previewKeys: previewKeys,
+    },
+    reduced: {
+      bytes: fullBytes,
+      depth: 0,
+      ...(cappedDepth === undefined ? {} : { cappedDepth }),
+    },
+  };
 }
 
 export function safeSerialize(value, options) {
