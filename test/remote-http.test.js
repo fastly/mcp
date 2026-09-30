@@ -137,6 +137,19 @@ for (const runtime of ["bun", "node"]) {
       const execute = result.tools.find((tool) => tool.name === "execute");
       expect(execute.description).toContain("This server is remote");
       expect(Object.keys(execute.inputSchema.properties)).toEqual(["code"]);
+      expect(execute.annotations).toEqual({
+        readOnlyHint: false,
+        destructiveHint: true,
+        openWorldHint: true,
+      });
+      for (const name of ["search", "inspect"]) {
+        const tool = result.tools.find((tool) => tool.name === name);
+        expect(tool.annotations).toEqual({
+          readOnlyHint: true,
+          destructiveHint: false,
+          openWorldHint: false,
+        });
+      }
       // The MCP cache hint is separate from the HTTP header and must stay.
       expect(result.cacheScope ?? result._meta).toBeDefined();
     }, 15000);
@@ -353,7 +366,7 @@ for (const runtime of ["bun", "node"]) {
       "a result that wrappers push past the inline limit comes back as an encrypted preview",
       async () => {
         const result = await callTool(server.url, TOKEN_A, "execute", {
-          code: `return Array(2200).fill(${JSON.stringify(UPSTREAM_SECRET)});`,
+          code: `return Array(250).fill(${JSON.stringify(UPSTREAM_SECRET)} + " ".repeat(350));`,
         });
         expect(Buffer.byteLength(result.text)).toBeLessThanOrEqual(
           INLINE_RESULT_BYTES,
@@ -361,12 +374,22 @@ for (const runtime of ["bun", "node"]) {
         expect(result.isError).toBe(false);
         expect(result.parsed.truncated).toBe(true);
         expect(result.parsed.hint).toContain("inline limit");
-        expect(result.parsed.result._total).toBe(2200);
+        expect(result.parsed.result._total).toBe(250);
         expect(result.text).toContain("{ENCRYPTED:");
         expect(result.text).not.toContain(UPSTREAM_SECRET);
       },
       30000,
     );
+
+    test("a result above the secret budget is withheld without exposing its tokens", async () => {
+      const result = await callTool(server.url, TOKEN_A, "execute", {
+        code: `return Array(251).fill(${JSON.stringify(UPSTREAM_SECRET)});`,
+      });
+      expect(result.isError).toBe(true);
+      expect(result.parsed.error).toContain("The result was withheld");
+      expect(result.parsed.result).toBeUndefined();
+      expect(result.text).not.toContain(UPSTREAM_SECRET);
+    }, 15000);
 
     test("package upload is hidden, explained and refused; package metadata still works", async () => {
       const found = await callTool(server.url, TOKEN_A, "search", {

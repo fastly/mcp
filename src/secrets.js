@@ -14,8 +14,8 @@ export const WITHHELD =
 /** Every encrypted value starts with this and ends at the next `}`. */
 export const WRAPPER_OPENER = "{ENCRYPTED:";
 const MAX_TOKEN_LENGTH = 512;
-// Keeps encrypting one remote result under about 300 ms.
-const REMOTE_OUTPUT_BUDGET = 100_000;
+// Short tokens cost more per character to wrap, so cap their total before encryption starts.
+const REMOTE_OUTPUT_BUDGET = 10_000;
 // Keeps decrypting one remote request under about 100 ms.
 // Decryption runs before any limit on the request applies, so it gets less time than encryption.
 const REMOTE_INPUT_BUDGET = 38_000;

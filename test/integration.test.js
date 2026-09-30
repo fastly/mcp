@@ -169,12 +169,27 @@ describe("MCP integration", () => {
 
     const searchTool = tools.find((t) => t.name === "search");
     expect(searchTool.inputSchema.properties.query).toBeDefined();
+    expect(searchTool.annotations).toEqual({
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: false,
+    });
 
     const executeTool = tools.find((t) => t.name === "execute");
     expect(executeTool.inputSchema.properties.code).toBeDefined();
+    expect(executeTool.annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: true,
+      openWorldHint: true,
+    });
 
     const inspectTool = tools.find((t) => t.name === "inspect");
     expect(inspectTool.inputSchema.properties.method).toBeDefined();
+    expect(inspectTool.annotations).toEqual({
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: false,
+    });
   }, 10000);
 
   test("search tool returns results for 'purge'", async () => {

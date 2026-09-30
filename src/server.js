@@ -234,7 +234,15 @@ export function registerTools(
 
   mcp.registerTool(
     "search",
-    { description: SEARCH_DESCRIPTION, inputSchema: SEARCH_INPUT_SCHEMA },
+    {
+      description: SEARCH_DESCRIPTION,
+      inputSchema: SEARCH_INPUT_SCHEMA,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        openWorldHint: false,
+      },
+    },
     shielded(
       async ({ query }, _extra, shield) =>
         shieldedJsonResult(search(index, query), shield),
@@ -249,6 +257,11 @@ export function registerTools(
         ? EXECUTE_DESCRIPTION + REMOTE_EXECUTE_NOTE
         : EXECUTE_DESCRIPTION,
       inputSchema: EXECUTE_INPUT_SCHEMA,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        openWorldHint: true,
+      },
     },
     shielded(async ({ code }, extra, shield) => {
       const { outcome: _internal, ...result } = runRemotely
@@ -266,7 +279,15 @@ export function registerTools(
 
   mcp.registerTool(
     "inspect",
-    { description: INSPECT_DESCRIPTION, inputSchema: INSPECT_INPUT_SCHEMA },
+    {
+      description: INSPECT_DESCRIPTION,
+      inputSchema: INSPECT_INPUT_SCHEMA,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        openWorldHint: false,
+      },
+    },
     shielded(
       async ({ method }, _extra, shield) =>
         shieldedJsonResult(

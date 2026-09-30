@@ -166,11 +166,26 @@ describe("remote budgets", () => {
   test("the output budget adds up across the strings of one call", () => {
     const shield = SecretShield.forCaller(TOKEN_A);
     try {
-      // 2,500 tokens of 40 characters use up the 100,000 characters.
-      for (let i = 0; i < 2500; i++) shield.encrypt(GITHUB_PAT);
+      // 250 tokens of 40 characters use up the 10,000 characters.
+      for (let i = 0; i < 250; i++) shield.encrypt(GITHUB_PAT);
       expect(() => shield.encrypt(GITHUB_PAT)).toThrow("Too many secrets");
     } finally {
       shield.destroy();
     }
+  });
+
+  test("short tokens fit at the output limit, and excess work is refused before encryption", () => {
+    const token = `AKIA${"B".repeat(16)}`;
+    const fitting = Array(500).fill(token).join(" ");
+    const encrypted = encryptWith(TOKEN_A, fitting);
+    expect(encrypted).not.toContain(token);
+    expect(decryptWith(TOKEN_A, encrypted)).toBe(fitting);
+
+    const over = refusal(() =>
+      encryptWith(TOKEN_A, `{ENCRYPTED:invalid} ${fitting} ${token}`),
+    );
+    expect(over.message).toBe(
+      "Too many secrets in one result to encrypt safely",
+    );
   });
 });
