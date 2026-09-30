@@ -38,10 +38,15 @@ function readOptions(method, options, params) {
   return values;
 }
 
-function requireId(name, id) {
-  if (id === undefined || id === "") {
+function requireValue(name, value) {
+  if (value === undefined || value === "") {
     throw new Error(`Missing the required parameter '${name}'.`);
   }
+  return value;
+}
+
+function requireId(name, id) {
+  requireValue(name, id);
   // Dots survive path encoding and can change which endpoint receives the request.
   if (id === "." || id === "..") {
     throw new Error(`'${name}' must be an ID, not '${id}'.`);
@@ -49,10 +54,22 @@ function requireId(name, id) {
   return id;
 }
 
-async function get(apiClient, path, pathParams, queryParams) {
+async function request(apiClient, operation, options) {
+  const { method, httpMethod, httpPath, params } = operation;
+  const values = readOptions(method, options, params);
+  const pathParams = {};
+  const queryParams = { ...values };
+  for (const { name, required } of params) {
+    if (httpPath.includes(`{${name}}`)) {
+      pathParams[name] = requireId(name, values[name]);
+      delete queryParams[name];
+    } else if (required) {
+      requireValue(name, values[name]);
+    }
+  }
   const response = await apiClient.callApi(
-    path,
-    "GET",
+    httpPath,
+    httpMethod,
     pathParams,
     {},
     queryParams,
@@ -68,50 +85,32 @@ async function get(apiClient, path, pathParams, queryParams) {
   return response.data;
 }
 
-export class NgwafRulesApi {
+// Methods on this base class are not the subclasses' own, so the sandbox never exposes them.
+class NgwafApi {
   #apiClient;
 
   constructor(apiClient) {
     this.#apiClient = apiClient;
   }
 
-  async listAccountRules(options) {
-    const filters = readOptions("listAccountRules", options, LIST_PARAMS);
-    return get(this.#apiClient, "/ngwaf/v1/rules", {}, filters);
-  }
-
-  async listWorkspaceRules(options) {
-    const { workspace_id, ...filters } = readOptions(
-      "listWorkspaceRules",
-      options,
-      [WORKSPACE_ID, ...LIST_PARAMS],
-    );
-    return get(
-      this.#apiClient,
-      "/ngwaf/v1/workspaces/{workspace_id}/rules",
-      { workspace_id: requireId("workspace_id", workspace_id) },
-      filters,
-    );
+  send(operation, options) {
+    return request(this.#apiClient, operation, options);
   }
 }
 
-export class NgwafWorkspacesApi {
-  #apiClient;
-
-  constructor(apiClient) {
-    this.#apiClient = apiClient;
+export class NgwafRulesApi extends NgwafApi {
+  listAccountRules(options) {
+    return this.send(OPERATIONS.listAccountRules, options);
   }
 
-  async getWorkspace(options) {
-    const { workspace_id } = readOptions("getWorkspace", options, [
-      WORKSPACE_ID,
-    ]);
-    return get(
-      this.#apiClient,
-      "/ngwaf/v1/workspaces/{workspace_id}",
-      { workspace_id: requireId("workspace_id", workspace_id) },
-      {},
-    );
+  listWorkspaceRules(options) {
+    return this.send(OPERATIONS.listWorkspaceRules, options);
+  }
+}
+
+export class NgwafWorkspacesApi extends NgwafApi {
+  getWorkspace(options) {
+    return this.send(OPERATIONS.getWorkspace, options);
   }
 }
 
@@ -179,26 +178,15 @@ const WORKSPACE_ID = {
   description: "The ID of the workspace.",
 };
 
-/**
- * Returns fresh metadata, so enriching one index changes neither another index nor the parameters the adapters validate against.
- */
-export function ngwafMethods() {
-  const entry = (apiClass, method, httpPath, sentences, params) => ({
-    apiClass,
-    method,
-    httpMethod: "GET",
-    httpPath,
-    description: sentences.join(" "),
-    params: params.map((param) => ({ ...param })),
-    constraints: [],
-    returnType: "Object",
-  });
-  return [
-    entry(
-      "NgwafRulesApi",
-      "listAccountRules",
-      "/ngwaf/v1/rules",
-      [
+// Keyed by method name, so method names must stay unique across classes.
+const OPERATIONS = Object.fromEntries(
+  [
+    {
+      apiClass: "NgwafRulesApi",
+      method: "listAccountRules",
+      httpPath: "/ngwaf/v1/rules",
+      params: LIST_PARAMS,
+      description: [
         "List one page of account-level NGWAF rules, which can apply to several workspaces.",
         ...PAGING,
         "How `enabled`, `types` and `action` affect this list's `meta.total` is unverified.",
@@ -211,13 +199,13 @@ export function ngwafMethods() {
         "Deduplicate by rule ID when combining both lists.",
         WORKSPACE_LOOKUP,
       ],
-      LIST_PARAMS,
-    ),
-    entry(
-      "NgwafRulesApi",
-      "listWorkspaceRules",
-      "/ngwaf/v1/workspaces/{workspace_id}/rules",
-      [
+    },
+    {
+      apiClass: "NgwafRulesApi",
+      method: "listWorkspaceRules",
+      httpPath: "/ngwaf/v1/workspaces/{workspace_id}/rules",
+      params: [WORKSPACE_ID, ...LIST_PARAMS],
+      description: [
         "List one page of the NGWAF rules defined in one workspace.",
         ...PAGING,
         "Here `meta.total` counts only rules matching `enabled`, `types` and `action`.",
@@ -225,13 +213,13 @@ export function ngwafMethods() {
         "Account rules can also apply; list them with `ngwafRulesApi.listAccountRules()`.",
         WORKSPACE_LOOKUP,
       ],
-      [WORKSPACE_ID, ...LIST_PARAMS],
-    ),
-    entry(
-      "NgwafWorkspacesApi",
-      "getWorkspace",
-      "/ngwaf/v1/workspaces/{workspace_id}",
-      [
+    },
+    {
+      apiClass: "NgwafWorkspacesApi",
+      method: "getWorkspace",
+      httpPath: "/ngwaf/v1/workspaces/{workspace_id}",
+      params: [WORKSPACE_ID],
+      description: [
         "Get an NGWAF workspace's settings, including protection `mode` and attack thresholds.",
         "Attack thresholds are in `attack_signal_thresholds`.",
         WORKSPACE_LOOKUP,
@@ -240,7 +228,24 @@ export function ngwafMethods() {
         "When describing rules, report enablement and blocking separately.",
         "Report attack thresholds as workspace settings, not as rules.",
       ],
-      [WORKSPACE_ID],
-    ),
-  ];
+    },
+  ].map((operation) => [operation.method, { httpMethod: "GET", ...operation }]),
+);
+
+/**
+ * Returns fresh metadata, so enriching one index changes neither another index nor the parameters the adapters validate against.
+ */
+export function ngwafMethods() {
+  return Object.values(OPERATIONS).map(
+    ({ apiClass, method, httpMethod, httpPath, description, params }) => ({
+      apiClass,
+      method,
+      httpMethod,
+      httpPath,
+      description: description.join(" "),
+      params: params.map((param) => ({ ...param })),
+      constraints: [],
+      returnType: "Object",
+    }),
+  );
 }
