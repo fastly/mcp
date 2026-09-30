@@ -425,6 +425,50 @@ for (const runtime of ["bun", "node"]) {
       expect(metadata.isError).toBeFalsy();
     }, 60000);
 
+    test("NGWAF methods go from search to inspect to execution with the caller's key", async () => {
+      const found = await callTool(server.url, TOKEN_A, "search", {
+        query: "ngwaf rules",
+      });
+      const match = found.parsed.matches.find(
+        (entry) => entry.method === "listWorkspaceRules",
+      );
+      expect(match.usage).toBe(
+        "return await ngwafRulesApi.listWorkspaceRules({ workspace_id: '...' });",
+      );
+      const inspected = await callTool(server.url, TOKEN_A, "inspect", {
+        method: `${match.apiClass}.${match.method}`,
+      });
+      expect(inspected.parsed.description).toContain("`meta.total`");
+      expect(inspected.parsed.example).toBe(match.usage);
+
+      const before = mock.calls.length;
+      const executed = await callTool(server.url, TOKEN_A, "execute", {
+        code: match.usage.replace("'...'", "'ws1'"),
+      });
+      expect(executed.isError).toBeFalsy();
+      expect(executed.parsed.result).toEqual({
+        data: [{ id: "rule-1", enabled: true, scope: { applies_to: ["*"] } }],
+        meta: { limit: 100, total: 1 },
+        requested: "/ngwaf/v1/workspaces/ws1/rules",
+      });
+      expect(mock.calls.slice(before)).toEqual([
+        { path: "/ngwaf/v1/workspaces/ws1/rules", key: TOKEN_A },
+      ]);
+    }, 60000);
+
+    // The mock routes every host to itself, so a client that followed the redirect would show up as a second call.
+    test("an NGWAF call refuses a redirect to another host", async () => {
+      const before = mock.calls.length;
+      const refused = await callTool(server.url, TOKEN_A, "execute", {
+        code: "return await ngwafWorkspacesApi.getWorkspace({ workspace_id: 'redirect' });",
+      });
+      expect(refused.isError).toBe(true);
+      expect(refused.parsed.status).toBe(302);
+      expect(mock.calls.slice(before)).toEqual([
+        { path: "/ngwaf/v1/workspaces/redirect", key: TOKEN_A },
+      ]);
+    }, 30000);
+
     test("a token without customer identity can discover but not execute", async () => {
       const token = "synthetic-token-restricted";
       const found = await callTool(server.url, token, "search", {

@@ -61,16 +61,24 @@ export const UPSTREAM_SECRET = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij";
 
 /**
  * Stand-in for api.fastly.com, as seen by execution children.
- * A path containing "hang" never gets an answer, "reject" gets a 401 and
- * "deny" gets a 403.
+ * A path containing "hang" never gets an answer, "reject" gets a 401,
+ * "deny" gets a 403 and "redirect" gets a 302 to another host.
  * The one service it knows carries a secret and echoes the requested path,
  * so a test can see exactly what the child sent.
+ * NGWAF paths get a one-rule page, or workspace settings, with the path echoed.
  */
 export async function startMockFastly() {
   const calls = [];
   const server = await startLocalServer((req, res) => {
     calls.push({ path: req.url, key: req.headers["fastly-key"] });
     if (req.url.includes("hang")) return;
+    if (req.url.includes("redirect")) {
+      res.writeHead(302, {
+        location: "https://elsewhere.example/ngwaf/v1/rules",
+      });
+      res.end();
+      return;
+    }
     for (const [marker, status] of [
       ["reject", 401],
       ["deny", 403],
@@ -81,6 +89,24 @@ export async function startMockFastly() {
       return;
     }
     res.writeHead(200, { "content-type": "application/json" });
+    const requested = decodeURIComponent(req.url);
+    if (
+      req.url.startsWith("/ngwaf/v1/workspaces/") &&
+      !req.url.includes("/rules")
+    ) {
+      res.end(JSON.stringify({ id: "ws1", mode: "block", requested }));
+      return;
+    }
+    if (req.url.startsWith("/ngwaf/")) {
+      res.end(
+        JSON.stringify({
+          data: [{ id: "rule-1", enabled: true, scope: { applies_to: ["*"] } }],
+          meta: { limit: 100, total: 1 },
+          requested,
+        }),
+      );
+      return;
+    }
     if (req.url.includes("/service/")) {
       res.end(
         JSON.stringify({

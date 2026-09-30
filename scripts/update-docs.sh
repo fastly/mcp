@@ -1,13 +1,28 @@
 #!/usr/bin/env bash
 #
-# Pull the latest API docs from fastly/fastly-js into docs/.
-# Usage: ./scripts/update-docs.sh [branch]
+# Pull the API docs of the pinned fastly SDK from fastly/fastly-js into docs/.
+# Usage: ./scripts/update-docs.sh [branch or tag]
+#
+# Without an argument, the ref is release/v<version> for the exact fastly
+# version in package.json, so the docs describe the SDK that actually runs.
 
 set -euo pipefail
 
 REPO="https://github.com/fastly/fastly-js.git"
-BRANCH="${1:-main}"
-DEST="$(cd "$(dirname "$0")/.." && pwd)/docs"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DEST="$ROOT/docs"
+
+if [ $# -gt 0 ]; then
+  BRANCH="$1"
+else
+  VERSION="$(node -p 'require(process.argv[1]).dependencies?.fastly ?? ""' "$ROOT/package.json")"
+  if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Error: package.json must pin fastly to an exact version, found '$VERSION'. Pin it, or pass a branch or tag." >&2
+    exit 1
+  fi
+  BRANCH="release/v$VERSION"
+fi
+
 TMP="$(mktemp -d)"
 
 trap 'rm -rf "$TMP"' EXIT

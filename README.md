@@ -209,6 +209,61 @@ Use `--result-dir <path>` to put them somewhere else, or `--result-dir off` to t
 
 A remote server never writes result files, because its callers could not read them.
 
+Results keep up to twelve levels of nesting.
+A deeper result is cut at that depth and flagged as incomplete, and a Fastly API response nested deeper fails that call with an error instead of arriving with pieces missing.
+
+### NGWAF rules
+
+The Fastly JavaScript client has no methods for Next-Gen WAF rules or workspaces, so the server adds three read-only ones: `ngwafRulesApi.listAccountRules()`, `ngwafRulesApi.listWorkspaceRules({ workspace_id })` and `ngwafWorkspacesApi.getWorkspace({ workspace_id })`.
+They return Fastly's responses unchanged.
+A service's workspace ID is `configuration.workspace_id` in the result of `productNgwafApi.getProductNgwafConfiguration({ service_id })`.
+
+Each list call returns one page, with `meta.total` describing the whole collection.
+Pages are numbered from 1, and `page: 0` is refused.
+A list is complete only when the distinct rule IDs collected from it number `meta.total`.
+Rows repeated across pages count once, and a page that comes back empty early, a total that changes, or a page that adds nothing new all mean the list is incomplete.
+On workspace lists, `meta.total` counts only the rules matching the `enabled`, `types` and `action` filters.
+That has not been verified for the account list yet, so the snippet below pages through both lists unfiltered and picks the enabled rules afterwards.
+
+Account rules apply to a workspace when their `scope.applies_to` contains `'*'` or that workspace's ID.
+Whether a rule blocks requests depends on the workspace's protection `mode` and on the rule's actions, not only on whether it is enabled.
+The configuration's `traffic_ramp` is the share of traffic inspected and says nothing about the mode.
+Rule conditions can refer to lists and custom signals by ID, and the JavaScript client cannot read those either, so such rules cannot be fully interpreted yet.
+
+This snippet reports the enabled rules that apply to one service, and says when either list is incomplete:
+
+```js
+const { configuration } = await productNgwafApi.getProductNgwafConfiguration({ service_id: 'SERVICE_ID' });
+const workspaceId = configuration.workspace_id;
+const workspace = await ngwafWorkspacesApi.getWorkspace({ workspace_id: workspaceId });
+
+async function collect(list) {
+  const rules = new Map();
+  let total;
+  for (let page = 1; ; page++) {
+    const { data, meta } = await list({ page });
+    if (total !== undefined && meta.total !== total) return { rules, incomplete: 'the total changed while paging' };
+    total = meta.total;
+    const before = rules.size;
+    for (const rule of data) rules.set(rule.id, rule);
+    if (rules.size === total) return { rules };
+    if (data.length === 0) return { rules, incomplete: 'a page came back empty' };
+    if (rules.size === before) return { rules, incomplete: 'a page added no new rule' };
+  }
+}
+
+const workspaceRules = await collect((options) => ngwafRulesApi.listWorkspaceRules({ workspace_id: workspaceId, ...options }));
+const accountRules = await collect((options) => ngwafRulesApi.listAccountRules(options));
+const applies = (rule) => ['*', workspaceId].some((id) => rule.scope?.applies_to?.includes(id));
+const rules = new Map([...workspaceRules.rules, ...[...accountRules.rules].filter(([, rule]) => applies(rule))]);
+return {
+  workspace: { id: workspace.id, name: workspace.name, mode: workspace.mode, attack_signal_thresholds: workspace.attack_signal_thresholds },
+  traffic_ramp: configuration.traffic_ramp,
+  incomplete: [workspaceRules.incomplete, accountRules.incomplete].filter(Boolean),
+  enabled_rules: [...rules.values()].filter((rule) => rule.enabled),
+};
+```
+
 ## Secret encryption
 
 Fastly API responses can contain credentials, keys, or other sensitive values.
@@ -318,11 +373,17 @@ Install both Bun and Node to run the tests.
 The known Bun 1.3.11 bug is marked as an expected failure so fixes in future versions get noticed.
 
 The API documentation in `docs/` is generated from the Fastly JavaScript client and is used to build the search index at startup.
-Regenerate it with:
+`package.json` pins that client to an exact version so the docs always describe the code that runs.
+Regenerate them with:
 
 ```sh
 bun run update-docs
 ```
+
+Without an argument, the script fetches the `release/v<version>` tag matching the pinned version.
+Pass a branch or tag to fetch something else, for instance while upgrading the client.
+An upgrade changes the pin in `package.json`, `package-lock.json` and `bun.lock` together.
+The NGWAF methods in `src/ngwaf.js` are implemented by this server rather than the client, and startup refuses a client whose docs define a class with the same name.
 
 ## Security
 

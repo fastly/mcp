@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { admissionLimits, createAdmission } from "./admission.js";
+import { buildApiIndex } from "./api-index.js";
 import { createAuditLog, fileSink, streamSink } from "./audit.js";
 import { createPrevalidationBudgets } from "./budgets.js";
 import { parseArgs } from "./cli.js";
@@ -18,7 +19,6 @@ import {
   resolvePrlimit,
 } from "./host-checks.js";
 import { resolveHttpOptions, resolveMode, startHttp } from "./http.js";
-import { buildIndex } from "./indexer.js";
 import { projectRemoteIndex } from "./method-policy.js";
 import { createTokenValidator } from "./remote-auth.js";
 import { resolveResultStore } from "./result-files.js";
@@ -372,7 +372,7 @@ export async function main({
       );
     }
     const shield = mode.remote ? null : localShield(cliArgs, env);
-    const index = await buildIndex();
+    const index = await buildApiIndex();
     if (mode.transport === "http") resolveHttpOptions({ cliArgs, env });
 
     if (mode.remote) {

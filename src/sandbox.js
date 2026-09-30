@@ -7,6 +7,7 @@ import {
   SANDBOX_MAX_DEPTH,
 } from "./limits.js";
 import { operationsOf, remoteDenial } from "./method-policy.js";
+import { NGWAF_API_CLASSES } from "./ngwaf.js";
 import { serializeResult } from "./serializer.js";
 import { truncateOutsideSecrets } from "./truncate.js";
 
@@ -66,6 +67,12 @@ if (remote) {
   });
 }
 
+// The SDK version is pinned, so an SDK class named like one of ours means a deliberate upgrade or a packaging mistake.
+// Neither may silently replace the other, so every execution fails on it before any request goes out.
+const sdkCollisions = Object.keys(NGWAF_API_CLASSES).filter((name) =>
+  Object.hasOwn(Fastly, name),
+);
+
 const apiInstances = new Map();
 for (const name of Object.keys(Fastly)) {
   if (!/Api$/.test(name)) continue;
@@ -78,6 +85,14 @@ for (const name of Object.keys(Fastly)) {
     });
   } catch {
     // Construction failed, so it stays out of the sandbox facade.
+  }
+}
+if (sdkCollisions.length === 0) {
+  for (const [name, Ctor] of Object.entries(NGWAF_API_CLASSES)) {
+    apiInstances.set(name, {
+      instance: new Ctor(Fastly.ApiClient.instance),
+      operations: operationsOf(Ctor),
+    });
   }
 }
 const apiClasses = [...apiInstances.keys()];
@@ -810,6 +825,11 @@ try {
   }
   if (remote && process.versions.bun) {
     throw new Error("Remote executions require Node.js");
+  }
+  if (sdkCollisions.length > 0) {
+    throw new Error(
+      `The installed fastly SDK exports ${sdkCollisions.join(", ")}, which this server also implements. Install the SDK version pinned in package.json.`,
+    );
   }
   const denyImport = installFacade(
     hostBridge,

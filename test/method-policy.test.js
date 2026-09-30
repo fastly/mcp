@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import Fastly from "fastly";
-import { buildIndex } from "../src/indexer.js";
+import { buildApiIndex } from "../src/api-index.js";
 import {
   operationsOf,
   projectRemoteIndex,
@@ -62,7 +62,7 @@ describe("remote operation policy", () => {
   });
 
   test("the remote index hides denied operations and nothing else", async () => {
-    const index = await buildIndex();
+    const index = await buildApiIndex();
     const remote = projectRemoteIndex(index);
     const local = index.filter((entry) => entry.apiClass === "PackageApi");
     expect(local.map((entry) => entry.method).sort()).toEqual([
