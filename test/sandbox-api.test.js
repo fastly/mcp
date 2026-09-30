@@ -8,6 +8,7 @@ import {
   INLINE_RESULT_BYTES,
   SANDBOX_MAX_DEPTH,
 } from "../src/limits.js";
+import { ngwafMethods } from "../src/ngwaf.js";
 import { createResultStore } from "../src/result-files.js";
 import { execute } from "../src/tools/execute.js";
 import {
@@ -558,6 +559,37 @@ describe("NGWAF adapters through the sandbox bridge", () => {
       },
       { ...common, path: "/ngwaf/v1/workspaces/ws1", query: {} },
     ]);
+  }, 15000);
+
+  test("every owned method sends its options to its endpoint", async () => {
+    nextResponse = json({ data: [], meta: { total: 0 } });
+    const samples = { String: "a/b ?#", Number: 7, Boolean: false };
+    const expected = [];
+    const calls = ngwafMethods().map(
+      ({ apiClass, method, httpPath, params }) => {
+        const options = Object.fromEntries(
+          params.map((p) => [p.name, samples[p.type]]),
+        );
+        const query = {};
+        let path = httpPath;
+        for (const [name, value] of Object.entries(options)) {
+          if (path.includes(`{${name}}`)) {
+            path = path.replace(`{${name}}`, encodeURIComponent(value));
+          } else {
+            query[name] = String(value);
+          }
+        }
+        expected.push({ host: "api.fastly.com", key: "token", path, query });
+        const global = apiClass[0].toLowerCase() + apiClass.slice(1);
+        return `await ${global}.${method}(${JSON.stringify(options)});`;
+      },
+    );
+    const start = requests.length;
+    const out = await runSandbox(`${calls.join("\n")}\nreturn "done";`, {
+      fastlyApiToken: "token",
+    });
+    expect(out.result).toBe("done");
+    expect(requestsSince(start)).toEqual(expected);
   }, 15000);
 
   test("invalid options and a missing ID fail before any request", async () => {

@@ -209,4 +209,50 @@ describe("NGWAF discovery", () => {
       "return await ngwafWorkspacesApi.getWorkspace({ workspace_id: '...' });",
     );
   });
+
+  test("signals and lists come first in search and explain `reference_id`", () => {
+    for (const [query, apiClass, methods] of [
+      [
+        "ngwaf signals",
+        "NgwafSignalsApi",
+        ["listAccountSignals", "listWorkspaceSignals"],
+      ],
+      [
+        "ngwaf lists",
+        "NgwafListsApi",
+        ["listAccountLists", "listWorkspaceLists"],
+      ],
+    ]) {
+      const { matches } = search(index, query);
+      expect(
+        matches.slice(0, 2).map((m) => `${m.apiClass}.${m.method}`),
+      ).toEqual(methods.map((method) => `${apiClass}.${method}`));
+    }
+    const accountLists = search(index, "ngwaf lists").matches[0];
+    expect(accountLists.usage).toBe(
+      "return await ngwafListsApi.listAccountLists();",
+    );
+    expect(accountLists.summary).toBe(
+      "List the account's NGWAF lists with their entries, whose names start with `corp.`.",
+    );
+
+    for (const method of ["listAccountSignals", "listWorkspaceSignals"]) {
+      const doc = inspect(index, `NgwafSignalsApi.${method}`);
+      expect(doc.description).toContain("never against `id`");
+      expect(doc.description).toContain("`limit: 200`");
+      expect(doc.description).toContain("`data.length` equals `meta.total`");
+      expect(doc.params.find((p) => p.name === "limit").required).toBe(false);
+    }
+    for (const method of ["listAccountLists", "listWorkspaceLists"]) {
+      const doc = inspect(index, `NgwafListsApi.${method}`);
+      expect(doc.description).toContain("operator: 'in_list'");
+      expect(doc.description).toContain("never by its `id`");
+    }
+    expect(inspect(index, "listWorkspaceLists").example).toBe(
+      "return await ngwafListsApi.listWorkspaceLists({ workspace_id: '...' });",
+    );
+    expect(inspect(index, "listWorkspaceRules").description).toContain(
+      "matching on `reference_id`, never on `id`",
+    );
+  });
 });

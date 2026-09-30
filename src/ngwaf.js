@@ -21,9 +21,10 @@ function readOptions(method, options, params) {
   for (const [name, value] of Object.entries(options)) {
     const param = params.find((p) => p.name === name);
     if (param === undefined) {
-      throw new TypeError(
-        `${method} does not accept '${name}'. Its options are ${params.map((p) => p.name).join(", ")}.`,
-      );
+      const accepted = params.length
+        ? `Its options are ${params.map((p) => p.name).join(", ")}.`
+        : "It takes no options.";
+      throw new TypeError(`${method} does not accept '${name}'. ${accepted}`);
     }
     if (value === undefined || value === null) continue;
     if (!isType(value, param.type)) {
@@ -114,7 +115,32 @@ export class NgwafWorkspacesApi extends NgwafApi {
   }
 }
 
-export const NGWAF_API_CLASSES = { NgwafRulesApi, NgwafWorkspacesApi };
+export class NgwafSignalsApi extends NgwafApi {
+  listAccountSignals(options) {
+    return this.send(OPERATIONS.listAccountSignals, options);
+  }
+
+  listWorkspaceSignals(options) {
+    return this.send(OPERATIONS.listWorkspaceSignals, options);
+  }
+}
+
+export class NgwafListsApi extends NgwafApi {
+  listAccountLists(options) {
+    return this.send(OPERATIONS.listAccountLists, options);
+  }
+
+  listWorkspaceLists(options) {
+    return this.send(OPERATIONS.listWorkspaceLists, options);
+  }
+}
+
+export const NGWAF_API_CLASSES = {
+  NgwafRulesApi,
+  NgwafWorkspacesApi,
+  NgwafSignalsApi,
+  NgwafListsApi,
+};
 
 const PAGING = [
   "Each call returns one page with the rules in `data` and pagination metadata in `meta`.",
@@ -129,14 +155,15 @@ const PAGING = [
   "Pass `enabled: true` to ask for enabled rules only.",
   "Pass `types` as one string, which is sent unchanged.",
   "A comma-separated string such as `'request,signal'` asks for several types.",
-  "Conditions can name lists and custom signals by ID, and these methods do not resolve them.",
+  "Conditions name lists and custom signals by `reference_id`, such as `site.blocklist`, and these methods do not resolve them.",
+  "Look them up with `ngwafListsApi` and `ngwafSignalsApi`, matching on `reference_id`, never on `id`.",
 ];
 
 const WORKSPACE_LOOKUP =
   "Get a service's workspace ID from `configuration.workspace_id` in the result of " +
   "`productNgwafApi.getProductNgwafConfiguration({ service_id })`.";
 
-const LIST_PARAMS = [
+const RULE_FILTERS = [
   {
     name: "action",
     type: "String",
@@ -178,6 +205,30 @@ const WORKSPACE_ID = {
   description: "The ID of the workspace.",
 };
 
+const SIGNAL_LIMIT = {
+  name: "limit",
+  type: "Number",
+  required: false,
+  description:
+    "Limit how many signals are returned. The default is 100, and a scope holds up to 200.",
+};
+
+const SIGNAL_NAMES = [
+  "Events, requests and rules name a custom signal by its `reference_id`, such as `corp.bad-bot` or `site.bad-bot`.",
+  "Match those names against `reference_id`, never against `id`, which for a workspace signal is an unrelated opaque string.",
+  "System signals such as `SQLI`, `XSS` and `HTTP404` are built in and never appear here.",
+  "There is no `page` option, so pass `limit: 200` to ask for every signal a scope can hold in one call.",
+  "Whether the API accepts a `limit` above 100 is unverified.",
+  "The list is complete only when `data.length` equals `meta.total`; otherwise report it as incomplete.",
+];
+
+const LIST_NAMES = [
+  "Each list carries its `type` and all its `entries`, such as IPs, countries or strings.",
+  "Rule conditions name a list by its `reference_id`, as in `{ operator: 'in_list', value: 'site.blocklist' }`, never by its `id`.",
+  "A scope holds at most 25 lists, and the API has no paging options for them.",
+  "The list is complete only when `data.length` equals `meta.total`; otherwise report it as incomplete.",
+];
+
 // Keyed by method name, so method names must stay unique across classes.
 const OPERATIONS = Object.fromEntries(
   [
@@ -185,7 +236,7 @@ const OPERATIONS = Object.fromEntries(
       apiClass: "NgwafRulesApi",
       method: "listAccountRules",
       httpPath: "/ngwaf/v1/rules",
-      params: LIST_PARAMS,
+      params: RULE_FILTERS,
       description: [
         "List one page of account-level NGWAF rules, which can apply to several workspaces.",
         ...PAGING,
@@ -204,7 +255,7 @@ const OPERATIONS = Object.fromEntries(
       apiClass: "NgwafRulesApi",
       method: "listWorkspaceRules",
       httpPath: "/ngwaf/v1/workspaces/{workspace_id}/rules",
-      params: [WORKSPACE_ID, ...LIST_PARAMS],
+      params: [WORKSPACE_ID, ...RULE_FILTERS],
       description: [
         "List one page of the NGWAF rules defined in one workspace.",
         ...PAGING,
@@ -227,6 +278,51 @@ const OPERATIONS = Object.fromEntries(
         "Whether a rule blocks requests depends on the workspace mode and the rule's actions.",
         "When describing rules, report enablement and blocking separately.",
         "Report attack thresholds as workspace settings, not as rules.",
+      ],
+    },
+    {
+      apiClass: "NgwafSignalsApi",
+      method: "listAccountSignals",
+      httpPath: "/ngwaf/v1/signals",
+      params: [SIGNAL_LIMIT],
+      description: [
+        "List the account's custom NGWAF signals, whose names start with `corp.`.",
+        ...SIGNAL_NAMES,
+        "An account signal applies to the workspaces in its `scope.applies_to`, where `'*'` means all of them.",
+      ],
+    },
+    {
+      apiClass: "NgwafSignalsApi",
+      method: "listWorkspaceSignals",
+      httpPath: "/ngwaf/v1/workspaces/{workspace_id}/signals",
+      params: [WORKSPACE_ID, SIGNAL_LIMIT],
+      description: [
+        "List one workspace's custom NGWAF signals, whose names start with `site.`.",
+        ...SIGNAL_NAMES,
+        "Account signals can also apply; list them with `ngwafSignalsApi.listAccountSignals({ limit: 200 })`.",
+        WORKSPACE_LOOKUP,
+      ],
+    },
+    {
+      apiClass: "NgwafListsApi",
+      method: "listAccountLists",
+      httpPath: "/ngwaf/v1/lists",
+      params: [],
+      description: [
+        "List the account's NGWAF lists with their entries, whose names start with `corp.`.",
+        ...LIST_NAMES,
+      ],
+    },
+    {
+      apiClass: "NgwafListsApi",
+      method: "listWorkspaceLists",
+      httpPath: "/ngwaf/v1/workspaces/{workspace_id}/lists",
+      params: [WORKSPACE_ID],
+      description: [
+        "List one workspace's NGWAF lists with their entries, whose names start with `site.`.",
+        ...LIST_NAMES,
+        "Rules can also use account lists; list them with `ngwafListsApi.listAccountLists()`.",
+        WORKSPACE_LOOKUP,
       ],
     },
   ].map((operation) => [operation.method, { httpMethod: "GET", ...operation }]),
