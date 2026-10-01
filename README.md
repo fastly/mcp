@@ -1,11 +1,33 @@
 # Fastly MCP Server
 
 The Fastly MCP server lets MCP clients work with the Fastly API.
-Connect it to an assistant such as Claude Desktop, Claude Code, Gemini CLI, Opencode, Qwen Code, Cline, or Swival, give it a Fastly API token, and the assistant can look up services, inspect domains and TLS settings, check traffic and usage, manage dictionaries and ACLs, purge content, and make configuration changes when you ask it to.
+
+Connect it to an assistant such as Claude Desktop, Claude Code, Gemini CLI, Opencode, Qwen Code, Cline, or Swival, and give it a Fastly API token.
+The assistant can then:
+
+- Look up services and inspect domains and TLS settings.
+- Check traffic and usage.
+- Manage dictionaries and ACLs.
+- Purge content and make configuration changes when you ask it to.
 
 This project is actively developed and has Tier 1 Fastly open-source support.
 The support policy is described in Fastly's [open-source documentation](https://www.fastly.com/documentation/developers/community/open-source/#understanding-topics-and-support-levels).
+
 Questions and feedback are welcome on the [Fastly developer tools community forum](https://community.fastly.com/c/developer-tools/25).
+
+## Contents
+
+- [How it works](#how-it-works)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Running over HTTP](#running-over-http)
+- [Running a remote service for several users](#running-a-remote-service-for-several-users)
+- [Using the server well](#using-the-server-well)
+- [Secret encryption](#secret-encryption)
+- [Troubleshooting](#troubleshooting)
+- [Local development](#local-development)
+- [Security](#security)
+- [License](#license)
 
 ## How it works
 
@@ -13,32 +35,48 @@ Most MCP servers expose one tool for each operation.
 Because Fastly's API is large, this server uses a smaller set of tools that an assistant can use together.
 
 1. Start with `search` to find API methods by keyword, method name, API class, or HTTP path.
+
 2. Then use `inspect` to get a method's documentation, including its parameters, return type, and an example.
+
 3. Once you have the details, use `execute` to run a short JavaScript snippet with the `Fastly` client already set up with your API token.
 
 This keeps the tool list small while still covering every method documented in the bundled Fastly client docs.
 
 ## Requirements
 
+### Runtime
+
 Install either [Bun](https://bun.sh/) or Node.js 24.12.0 or newer; you do not need both to run the server.
 Node.js is recommended for [remote mode](REMOTE-HTTP.md).
+
 The examples use `bunx`, which downloads and runs the package without a global install.
 With Node.js, use `npx` instead.
 
-Use the full command, `bunx -p @fastly/mcp fastly-mcp`, because the package's command is named `fastly-mcp`.
-This prevents `bunx` from picking up an unrelated `mcp` command on your `PATH`.
-If you use `npx`, run `npx -p @fastly/mcp fastly-mcp` for the same reason.
-To explicitly run with Bun rather than following the package's Node.js shebang, use `bunx --bun -p @fastly/mcp fastly-mcp`.
+Use the full package and command names to avoid picking up an unrelated `mcp` command on your `PATH`:
+
+- **With `bunx`:** `bunx -p @fastly/mcp fastly-mcp`
+- **With `npx`:** `npx -p @fastly/mcp fastly-mcp`
+- **Explicitly using Bun:** `bunx --bun -p @fastly/mcp fastly-mcp`
+
+The `--bun` option runs the package with Bun rather than following its Node.js shebang.
+
+### Fastly API token
 
 You also need a [Fastly API token](https://docs.fastly.com/en/guides/using-api-tokens).
-For everyday use, create the narrowest token that fits the work you expect the assistant to do.
-Start with a read-only token for investigation and reporting.
-Use a token with write access only when you actually want the assistant to make changes.
+For everyday use, create the narrowest token that fits the work you expect the assistant to do:
+
+- Start with a read-only token for investigation and reporting.
+- Use a token with write access only when you actually want the assistant to make changes.
 
 Keep the token in your MCP client configuration or shell environment as `FASTLY_API_TOKEN`.
-Do not paste production tokens into prompts or commit them into a repository.
+
+**Do not paste production tokens into prompts or commit them into a repository.**
 
 ## Installation
+
+Choose your client:
+
+[Codex](#codex) · [Claude Code](#claude-code) · [Claude Desktop](#claude-desktop) · [Gemini CLI](#gemini-cli) · [Opencode](#opencode) · [Qwen Code](#qwen-code) · [Cline](#cline) · [Swival](#swival)
 
 Most MCP clients accept a JSON block that describes how to start a server.
 For example, this configuration runs the server with `bunx` and passes the API token through the environment:
@@ -58,14 +96,19 @@ For example, this configuration runs the server with `bunx` and passes the API t
 ```
 
 If you already export `FASTLY_API_TOKEN` in the shell that starts your MCP client, you can generally omit the `env` block (some agents may still require it, though).
+
 Keeping the token in the client configuration is often simpler for desktop apps, while shell environment variables are often cleaner for terminal tools.
 
 ### Codex
 
 Either runtime works for the local server.
-The bundled plugin launches through `bunx`; for a Node.js-only setup, use `npx` as the MCP launch command with the same arguments.
-For a Bun-only setup, add `--bun` before `-p` in the launch arguments.
+The bundled plugin launches through `bunx`:
+
+- **Node.js-only setup:** use `npx` as the MCP launch command with the same arguments.
+- **Bun-only setup:** add `--bun` before `-p` in the launch arguments.
+
 Make sure your chosen launcher is available on Codex's `PATH`.
+
 Add the repository as a plugin marketplace, then install the plugin:
 
 ```sh
@@ -74,7 +117,9 @@ codex plugin add fastly-mcp@fastly-local
 ```
 
 The `add` command installs and enables the plugin.
+
 Set `FASTLY_API_TOKEN` in the environment that starts Codex, then restart Codex so the local server receives it.
+
 The plugin runs over stdio with secret encryption enabled; it does not require OAuth or a hosted MCP endpoint.
 
 Check that the plugin is installed and enabled:
@@ -106,11 +151,13 @@ Restart Claude Desktop after changing the file.
 ### Gemini CLI
 
 Add the generic JSON block to `~/.gemini/settings.json`.
+
 If Gemini CLI is started from a shell that already exports `FASTLY_API_TOKEN`, you can leave the token out of the JSON.
 
 ### Opencode
 
 Opencode uses a slightly different shape.
+
 Put this in `opencode.json` in your project, or in `~/.config/opencode/opencode.json` for a global server:
 
 ```json
@@ -147,11 +194,13 @@ env = { FASTLY_API_TOKEN = "your-token-here" }
 ```
 
 If `FASTLY_API_TOKEN` is already set in the environment where Swival runs, the `env` line is optional.
+
 Swival can also read the generic JSON block from `.swival/mcp.json`.
 
 ## Running over HTTP
 
 By default the server speaks MCP over stdio, which is what every desktop and CLI client expects.
+
 To share one Fastly API token across trusted clients, start the server in HTTP mode:
 
 ```sh
@@ -174,11 +223,13 @@ Then configure your client with the server's URL:
 ```
 
 The exact shape varies by client; check your client's documentation for the streamable-http entry format.
+
 Nothing is kept between requests, so the server sits behind a load balancer without any sticky-session configuration.
 
 ### `Authorization: Bearer` on the loopback
 
 You can set `FASTLY_MCP_HTTP_AUTH_TOKEN` even on a loopback bind.
+
 There is no security harm in doing so, and it makes the configuration portable to a non-loopback deploy later.
 
 ### Run `--help` for the full flag list
@@ -188,70 +239,91 @@ Every flag described above shows up in `bunx -p @fastly/mcp fastly-mcp --help`.
 ## Running a remote service for several users
 
 Use `--remote-http` when each caller should supply their own Fastly API token.
+
 The [remote HTTP deployment guide](REMOTE-HTTP.md) covers credentials, client configuration, HTTPS proxies, Docker, systemd, sizing, logging, and deployment tests.
 
 ## Using the server well
 
 A Fastly API token can expose real production configuration, and write-capable tokens can change it.
+
 The server does not guess your intent, so the safest workflow is to be explicit about whether the assistant may change anything.
 
+### Read-only work
+
 For read-only work, say that directly.
+
 For example, ask the assistant to list services, find the active version for a service, summarize backends, check TLS status, inspect logging endpoints, or report recent traffic without making changes.
 
-For changes, start by naming the service, domain, version, dictionary, ACL, or backend the assistant should work on.
-Then ask it to show the method it plans to call before making the change.
+### Making changes
+
+1. Start by naming the service, domain, version, dictionary, ACL, or backend the assistant should work on.
+
+2. Ask it to show the method it plans to call before making the change.
+
 If the change affects service configuration, it is often better to clone a service version, edit the clone, show you the diff or summary, and activate only after you approve.
+
+### Example prompts
 
 Good first prompts look like this:
 
-```text
-List my Fastly services and show the active version for each one. Do not make changes.
+> List my Fastly services and show the active version for each one. Do not make changes.
 
-Find the service serving www.example.com and summarize its domains, backends, and health checks.
+> Find the service serving www.example.com and summarize its domains, backends, and health checks.
 
-Inspect the API method for purging one URL, then show me the exact call you would make before running it.
+> Inspect the API method for purging one URL, then show me the exact call you would make before running it.
 
-Clone the active version of service ABC123, add a backend named origin-api, and stop before activation.
-```
+> Clone the active version of service ABC123, add a backend named origin-api, and stop before activation.
 
 If an answer looks too broad, ask the assistant to narrow the result in code before returning it.
+
 Targeted calls are easier to review and less likely to leak irrelevant information.
 
 ### Next-Gen WAF investigations
 
-The server adds read-only NGWAF methods.
+The server adds read-only NGWAF methods covering:
 
-They cover account and workspace rules, signals and lists; workspace settings and top attacks; event listing and detail; stored request search and detail; and workspace time series.
+- Account and workspace rules, signals, and lists.
+- Workspace settings and top attacks.
+- Event listing and detail.
+- Stored request search and detail.
+- Workspace time series.
 
 ### Large results
 
 A result is returned in full whenever it fits in one response, no matter how many records it holds: a list of several hundred users comes back complete.
 
 A result too large for one response is still not thrown away.
-
 The server writes all of it to a JSON file, and the response carries the path in `resultFile` together with a short preview in `result`.
+
 Ask the assistant to read that file when you want every record, instead of running the query again.
 
-Files are written to `fastly-mcp-results` under the system temporary directory, one result per file, readable only by the account running the server.
+#### Storage and limits
 
-A single file holds at most 4 MB; a result larger than that is described in the response and the assistant is asked to return less.
-The same ceiling applies to what one Fastly API call may hand to the code: a larger response fails that call with an error asking for paging or filtering, rather than arriving with pieces silently missing.
+- **Location:** files are written to `fastly-mcp-results` under the system temporary directory, one result per file, readable only by the account running the server.
 
-The newest twenty files are kept, and every file is removed after six hours whether or not the server has been busy since.
+- **Size:** a single file holds at most 4 MB; a result larger than that is described in the response and the assistant is asked to return less.
+  The same ceiling applies to what one Fastly API call may hand to the code: a larger response fails that call with an error asking for paging or filtering, rather than arriving with pieces silently missing.
+
+- **Retention:** the newest twenty files are kept, and every file is removed after six hours whether or not the server has been busy since.
+
+- **Configuration:** use `--result-dir <path>` to put them somewhere else, or `--result-dir off` to turn the feature off and have oversized results described rather than stored.
+
 When secret encryption is enabled, secrets are encrypted in the whole result before it is stored or cut down to a preview.
 Reading the file cannot reveal a value the response would have hidden, and neither can a preview that happens to stop in the middle of a token.
 
-Use `--result-dir <path>` to put them somewhere else, or `--result-dir off` to turn the feature off and have oversized results described rather than stored.
-
-A remote server never writes result files, because its callers could not read them.
+**A remote server never writes result files**, because its callers could not read them.
 
 ## Secret encryption
 
 Fastly API responses can contain credentials, keys, or other sensitive values.
 In local mode, the server returns API output to the MCP client as it came back from Fastly by default.
+
 Remote mode always encrypts recognized secrets with a key derived from the caller's token, as described in the [remote HTTP guide](REMOTE-HTTP.md#connect-your-client).
 
+### How encryption works
+
 If you want an additional layer of protection before tool output reaches the model, enable secret encryption.
+
 When encryption is enabled, each recognized token is replaced with an encrypted value that looks like `{ENCRYPTED:...}` before it reaches the assistant.
 The same token always gets the same encrypted value, so the assistant can refer to it in later calls.
 
@@ -260,6 +332,8 @@ If the value was changed, cut short, or made with a different key, the server re
 
 If a result can't be encrypted safely, the whole result is withheld.
 This happens when it contains a token longer than 512 characters, or text that already looks like an encrypted value.
+
+### Enable encryption
 
 To enable encryption in an MCP configuration that uses `bunx`, add `--encrypt-secrets` after the binary name:
 
@@ -294,19 +368,26 @@ You can also enable it with an environment variable:
 }
 ```
 
+### Keys and limitations
+
 For local encryption, a new key is generated each time the server starts, so encrypted values stop working after a restart.
 
 Setting `FASTLY_MCP_ENCRYPT_KEY` to exactly 32 hex characters, which is a 16-byte key, keeps the same key across restarts, so older encrypted values keep working.
+
 You can also set `FASTLY_MCP_ENCRYPT_TWEAK` if you want a separate tweak value for domain separation.
 Encrypted values only work with the tweak they were made with.
 
 Secret encryption is a safety feature, not a complete data classification system.
 It only encrypts values that match known token patterns.
+
 You should still use least-privilege Fastly tokens and avoid asking the assistant to retrieve secrets unless the task requires it.
 
 ## Troubleshooting
 
+### API calls fail
+
 For a local server, if Fastly API calls fail, check that `FASTLY_API_TOKEN` is set in the environment seen by the MCP server.
+
 Search and inspect still work without a token because they use bundled documentation, but real API calls need one.
 
 A failed call reports what the API said, so the answer is usually in the tool output itself:
@@ -320,21 +401,39 @@ A failed call reports what the API said, so the answer is usually in the tool ou
 }
 ```
 
-The hint on a 401 or 403 distinguishes the three cases that need different fixes: no token reached the server, Fastly refused the token it got, or the token is valid but not allowed to perform that operation.
+The hint on a 401 or 403 distinguishes the three cases that need different fixes:
+
+- No token reached the server.
+- Fastly refused the token it got.
+- The token is valid but not allowed to perform that operation.
+
 These fields are also available inside `execute`, so a snippet can catch a failure and read `e.status` or `e.body` itself.
+
+### Cannot find a method
 
 If the assistant cannot find the right method, ask it to use broader search terms such as `service`, `domain`, `backend`, `purge`, `tls`, `logging`, `dictionary`, `acl`, `vcl`, `stats`, or a fragment of the HTTP path from Fastly's API docs.
 
+### Unexpectedly empty results
+
 If a result is unexpectedly empty, ask the assistant to return the raw API response first.
+
 Fastly client methods return values directly, not inside a `.result` wrapper.
 
+### Preview instead of complete data
+
 If a response contains a preview instead of the data, look for a `resultFile` path in the same response: the complete result was written there because it did not fit in one response.
+
 Ask the assistant to read that file, or to filter, page, or select fields in the JavaScript code it runs.
+
 If `resultFile` is missing, result files are either disabled (`--result-dir off`) or the server could not write one, and the `hint` field says which.
+
+### Execution times out
 
 Since each `execute` call has a 30-second limit, split the work into smaller calls if it times out.
 
 ## Local development
+
+### Run the server
 
 The server entry point is `src/index.js`.
 Bun is the primary development runtime:
@@ -342,6 +441,8 @@ Bun is the primary development runtime:
 ```sh
 bun run src/index.js
 ```
+
+### Run the checks
 
 The main checks are:
 
@@ -351,11 +452,16 @@ bun run lint
 ```
 
 Install both Bun and Node to run the tests.
+
 The known Bun 1.3.11 bug is marked as an expected failure so fixes in future versions get noticed.
+
+### Update the API documentation
 
 The API documentation in `docs/` comes from the Fastly JavaScript client.
 The server uses it to build the search index at startup.
+
 `package.json` pins that client to an exact version so the docs always describe the code that runs.
+
 Regenerate them with:
 
 ```sh
@@ -363,6 +469,7 @@ bun run update-docs
 ```
 
 Without an argument, the script fetches the `release/v<version>` tag matching the pinned version.
+
 Pass a branch or tag to fetch something else, for instance while upgrading the client.
 An upgrade changes the pin in `package.json`, `package-lock.json` and `bun.lock` together.
 
