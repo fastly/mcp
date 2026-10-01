@@ -1,6 +1,6 @@
 {
   "name": "@fastly/mcp",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "MCP server that gives AI agents full access to the Fastly API",
   "type": "module",
   "main": "src/index.js",
@@ -44,14 +44,14 @@
   },
   "dependencies": {
     "@modelcontextprotocol/node": "^2.1.0",
-    "@modelcontextprotocol/server": "^2.1.0",
+    "@modelcontextprotocol/server": "^2.2.0",
     "fast-cipher": "0.3.1",
-    "fastly": "16.1.0",
+    "fastly": "16.2.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.14",
-    "@modelcontextprotocol/client": "^2.1.0",
+    "@biomejs/biome": "2.5.14",
+    "@modelcontextprotocol/client": "^2.2.0",
     "semver": "^7.8.5"
   }
 }

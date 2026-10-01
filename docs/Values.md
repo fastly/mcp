@@ -137,6 +137,7 @@ Name | Type | Description | Notes
 **tls_v11** | **Number** | Number of requests received over TLS 1.1. | [optional]
 **tls_v12** | **Number** | Number of requests received over TLS 1.2. | [optional]
 **tls_v13** | **Number** | Number of requests received over TLS 1.3. | [optional]
+**status_499** | **Number** | Number of responses sent with status code 499 (Client Disconnected). | [optional]
 
 
 [[Back to API list]](../../README.md#endpoints) [[Back to README]](../../README.md)

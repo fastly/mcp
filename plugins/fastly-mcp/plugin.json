@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "fastly-mcp",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Use the Fastly API through a local MCP server",
   "author": {
     "name": "Fastly",

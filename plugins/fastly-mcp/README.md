@@ -4,7 +4,7 @@ This plugin connects your assistant to the Fastly API through an MCP server runn
 It provides three tools: `search` finds API methods, `inspect` explains a method's parameters, and `execute` runs a short JavaScript snippet with the Fastly client already configured.
 
 Install [Bun](https://bun.sh/) and Node.js 24.12.0 or newer, and make sure `bunx` and `node` are available to your MCP client.
-The launch configuration downloads the pinned `@fastly/mcp@2.2.0` package through `bunx`.
+The launch configuration downloads the pinned `@fastly/mcp@2.3.0` package through `bunx`.
 An initial download and Fastly API calls require network access.
 
 ## Connect your account

@@ -6,7 +6,7 @@
       "command": "bunx",
       "args": [
         "-p",
-        "@fastly/mcp@2.2.0",
+        "@fastly/mcp@2.3.0",
         "fastly-mcp",
         "--transport",
         "stdio",
