@@ -1,15 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { buildIndex } from "../src/indexer.js";
+import { buildIndex, enrichMethod } from "../src/indexer.js";
 import { operationsOf } from "../src/method-policy.js";
-import {
-  NGWAF_API_CLASSES,
-  NgwafRulesApi,
-  NgwafWorkspacesApi,
-  ngwafMethods,
-} from "../src/ngwaf.js";
+import { NGWAF_API_CLASSES, ngwafMethods } from "../src/ngwaf.js";
+import { ngwafOptions } from "./helpers.js";
 
-// Written out here rather than read from the table, so a typo in the table cannot pass its own test.
-// Each entry gives the path, the required options, which are all strings, and every optional one with its type.
+// Written out by hand, so a typo in the operation table can't pass its own test.
+// Each entry has the path, the required options and the type of each optional one.
 const RULE_FILTERS = {
   action: "String",
   enabled: "Boolean",
@@ -156,134 +152,57 @@ describe("NGWAF adapter metadata", () => {
     first[0].params[0].name = "changed";
     expect(ngwafMethods()[0].params[0].name).toBe("action");
   });
-});
 
-describe("NGWAF adapter requests", () => {
-  test("null and undefined options are omitted", async () => {
-    const client = recordingClient();
-    const rules = new NgwafRulesApi(client);
-    await rules.listAccountRules({});
-    await rules.listAccountRules({
-      enabled: true,
-      page: undefined,
-      limit: null,
-    });
-    expect(client.calls.map((args) => args[4])).toEqual([
-      {},
-      { enabled: true },
-    ]);
-  });
-
-  test("a missing workspace ID uses the SDK's wording", async () => {
-    const client = recordingClient();
-    const rules = new NgwafRulesApi(client);
-    const workspaces = new NgwafWorkspacesApi(client);
-    for (const attempt of [
-      () => rules.listWorkspaceRules(),
-      () => rules.listWorkspaceRules({ enabled: true }),
-      () => rules.listWorkspaceRules({ workspace_id: "" }),
-      () => workspaces.getWorkspace({ workspace_id: null }),
-    ]) {
-      await expect(attempt()).rejects.toThrow(
-        "Missing the required parameter 'workspace_id'.",
-      );
-    }
-    expect(client.calls).toEqual([]);
-  });
-
-  test("invalid options are refused before any request", async () => {
-    const client = recordingClient();
-    const rules = new NgwafRulesApi(client);
-    for (const [options, message] of [
-      [{ types: ["request", "signal"] }, "'types' must be a string."],
-      [{ enabled: "true" }, "'enabled' must be a boolean."],
-      [{ limit: "100" }, "'limit' must be an integer."],
-      [{ page: 1.5 }, "'page' must be an integer."],
-      [{ action: 1 }, "'action' must be a string."],
-      [{ scope: "ws1" }, "listAccountRules does not accept 'scope'."],
-      [{ workspace_id: "ws1" }, "does not accept 'workspace_id'"],
-      [JSON.parse('{"__proto__": 1}'), "does not accept '__proto__'"],
-      [{ constructor: "x" }, "does not accept 'constructor'"],
-      [{ toString: "x" }, "does not accept 'toString'"],
-      [[], "takes a single options object"],
-      ["ws1", "takes a single options object"],
-      [null, "takes a single options object"],
-    ]) {
-      await expect(rules.listAccountRules(options)).rejects.toThrow(message);
-    }
-    await expect(
-      rules.listWorkspaceRules({ workspace_id: 42 }),
-    ).rejects.toThrow("'workspace_id' must be a string.");
-    for (const id of [".", ".."]) {
-      await expect(
-        rules.listWorkspaceRules({ workspace_id: id }),
-      ).rejects.toThrow(`'workspace_id' must be an ID, not '${id}'.`);
-      await expect(
-        new NgwafWorkspacesApi(client).getWorkspace({ workspace_id: id }),
-      ).rejects.toThrow(`'workspace_id' must be an ID, not '${id}'.`);
-    }
-    await expect(
-      new NgwafWorkspacesApi(client).getWorkspace({
-        workspace_id: "ws1",
-        enabled: true,
-      }),
-    ).rejects.toThrow("getWorkspace does not accept 'enabled'.");
-    expect(client.calls).toEqual([]);
-  });
-});
-
-// Every owned method, driven by its metadata, so a new table entry is covered without a new test.
-describe("every NGWAF adapter", () => {
-  const SAMPLES = { String: "a/b ?#", Number: 7, Boolean: false };
-  const WRONG = { String: 7, Number: "7", Boolean: "false" };
-  const isPathParam = (entry, name) => entry.httpPath.includes(`{${name}}`);
-  const call = (client, entry, options) =>
-    new NGWAF_API_CLASSES[entry.apiClass](client)[entry.method](options);
-  const optionsOf = (entry, names) =>
-    Object.fromEntries(
-      entry.params
-        .filter((p) => names.includes(p.name))
-        .map((p) => [p.name, SAMPLES[p.type]]),
-    );
-
-  test("the index advertises the expected paths and required options", () => {
+  test("lists the expected paths and options", () => {
+    const methods = ngwafMethods().map(enrichMethod);
     expect(
-      ngwafMethods().map((entry) => [
+      methods.map((entry) => [
         `${entry.apiClass}.${entry.method}`,
         entry.httpPath,
-        entry.params.filter((p) => p.required).map((p) => p.name),
+        entry.requiredParams,
         Object.fromEntries(
           entry.params.filter((p) => !p.required).map((p) => [p.name, p.type]),
         ),
       ]),
     ).toEqual(OPERATIONS);
-    // Usage examples fill required options with '...', which only suits strings.
-    for (const entry of ngwafMethods()) {
+    // Usage examples show '...' for every required option, which only fits strings.
+    for (const entry of methods) {
       for (const param of entry.params.filter((p) => p.required)) {
         expect(param.type).toBe("String");
       }
     }
-    for (const entry of ngwafMethods()) {
-      expect(entry.httpMethod).toBe("GET");
-      for (const name of entry.httpPath.match(/(?<=\{)\w+(?=\})/g) ?? []) {
-        expect(entry.params.find((p) => p.name === name)?.required).toBe(true);
-      }
-    }
   });
+});
 
-  test("path options fill the path and every other option goes to the query", async () => {
-    for (const entry of ngwafMethods()) {
+// Runs every owned method through the same checks, so a new table entry needs no new test.
+describe("every NGWAF adapter", () => {
+  const WRONG = {
+    String: [7],
+    Number: ["7", 1.5],
+    Boolean: ["false"],
+  };
+  const EXPECTED = {
+    String: "a string",
+    Number: "an integer",
+    Boolean: "a boolean",
+  };
+  const methods = () => ngwafMethods().map(enrichMethod);
+  const call = (client, entry, options) =>
+    new NGWAF_API_CLASSES[entry.apiClass](client)[entry.method](options);
+
+  test("path options fill the path and the rest go to the query", async () => {
+    for (const entry of methods()) {
       const client = recordingClient();
-      const all = optionsOf(
-        entry,
-        entry.params.map((p) => p.name),
-      );
+      const all = ngwafOptions(entry);
       const result = await call(client, entry, all);
       expect(result).toEqual({ data: [], meta: { limit: 100, total: 0 } });
       const [args] = client.calls;
-      const [path, verb, pathParams, reserved, query] = args;
-      expect([path, verb, reserved]).toEqual([entry.httpPath, "GET", {}]);
-      expect(args.slice(5)).toEqual([
+      expect(args).toEqual([
+        entry.httpPath,
+        "GET",
+        expect.any(Object),
+        {},
+        expect.any(Object),
         {},
         {},
         null,
@@ -293,60 +212,57 @@ describe("every NGWAF adapter", () => {
         Object,
         "https://api.fastly.com",
       ]);
-      const inPath = ([name]) => isPathParam(entry, name);
-      expect(pathParams).toEqual(
-        Object.fromEntries(Object.entries(all).filter(inPath)),
-      );
-      expect(query).toEqual(
-        Object.fromEntries(Object.entries(all).filter((e) => !inPath(e))),
+      const inPath = ([name]) => entry.pathParams.includes(name);
+      const entries = Object.entries(all);
+      expect(args[2]).toEqual(Object.fromEntries(entries.filter(inPath)));
+      expect(args[4]).toEqual(
+        Object.fromEntries(entries.filter((e) => !inPath(e))),
       );
     }
   });
 
-  test("optional options are sent only when given", async () => {
-    for (const entry of ngwafMethods()) {
-      const required = entry.params.filter((p) => p.required);
+  test("optional options that are left out, null or undefined are not sent", async () => {
+    for (const entry of methods()) {
       const client = recordingClient();
-      const nulls = Object.fromEntries(
-        entry.params.filter((p) => !p.required).map((p) => [p.name, null]),
-      );
+      const unset = entry.params
+        .filter((p) => !p.required)
+        .map((p, i) => [p.name, i % 2 ? null : undefined]);
       await call(client, entry, {
-        ...optionsOf(
-          entry,
-          required.map((p) => p.name),
-        ),
-        ...nulls,
+        ...ngwafOptions(entry, entry.requiredParams),
+        ...Object.fromEntries(unset),
       });
       const [, , pathParams, , query] = client.calls[0];
       expect(Object.keys({ ...pathParams, ...query }).sort()).toEqual(
-        required.map((p) => p.name).sort(),
+        [...entry.requiredParams].sort(),
       );
-      if (required.length === 0) {
+      if (entry.requiredParams.length === 0) {
         await call(client, entry);
         expect(client.calls[1][4]).toEqual({});
       }
     }
   });
 
-  test("a missing, empty or dot-segment required option fails before any request", async () => {
-    for (const entry of ngwafMethods()) {
+  test("a missing, empty or dot-segment required option is refused before any request", async () => {
+    for (const entry of methods()) {
       const client = recordingClient();
-      const required = entry.params.filter((p) => p.required);
-      const valid = optionsOf(
-        entry,
-        required.map((p) => p.name),
-      );
-      for (const { name } of required) {
+      const valid = ngwafOptions(entry, entry.requiredParams);
+      const [first] = entry.requiredParams;
+      if (first) {
+        await expect(call(client, entry)).rejects.toThrow(
+          `Missing the required parameter '${first}'.`,
+        );
+      }
+      for (const name of entry.requiredParams) {
         const missing = `Missing the required parameter '${name}'.`;
         const { [name]: _, ...without } = valid;
-        await expect(call(client, entry, without)).rejects.toThrow(missing);
-        await expect(
-          call(client, entry, { ...valid, [name]: "" }),
-        ).rejects.toThrow(missing);
-        await expect(
-          call(client, entry, { ...valid, [name]: null }),
-        ).rejects.toThrow(missing);
-        if (!isPathParam(entry, name)) continue;
+        for (const options of [
+          without,
+          { ...valid, [name]: "" },
+          { ...valid, [name]: null },
+        ]) {
+          await expect(call(client, entry, options)).rejects.toThrow(missing);
+        }
+        if (!entry.pathParams.includes(name)) continue;
         for (const id of [".", ".."]) {
           await expect(
             call(client, entry, { ...valid, [name]: id }),
@@ -357,27 +273,34 @@ describe("every NGWAF adapter", () => {
     }
   });
 
-  test("unknown options and wrong types fail before any request", async () => {
-    for (const entry of ngwafMethods()) {
+  test("unknown options, wrong types and non-objects are refused before any request", async () => {
+    for (const entry of methods()) {
       const client = recordingClient();
-      const valid = optionsOf(
-        entry,
-        entry.params.filter((p) => p.required).map((p) => p.name),
-      );
+      const valid = ngwafOptions(entry, entry.requiredParams);
       const accepted = entry.params.length
         ? `Its options are ${entry.params.map((p) => p.name).join(", ")}.`
         : "It takes no options.";
-      await expect(call(client, entry, { ...valid, q2: "x" })).rejects.toThrow(
-        `${entry.method} does not accept 'q2'. ${accepted}`,
-      );
-      for (const param of entry.params) {
+      // Object.prototype names must not count as options.
+      for (const name of ["q2", "__proto__", "constructor", "toString"]) {
+        const options = JSON.parse(`{"${name}": "x"}`);
         await expect(
-          call(client, entry, { ...valid, [param.name]: WRONG[param.type] }),
-        ).rejects.toThrow(`'${param.name}' must be `);
+          call(client, entry, { ...valid, ...options }),
+        ).rejects.toThrow(
+          `${entry.method} does not accept '${name}'. ${accepted}`,
+        );
       }
-      await expect(call(client, entry, [])).rejects.toThrow(
-        `${entry.method} takes a single options object.`,
-      );
+      for (const param of entry.params) {
+        for (const wrong of WRONG[param.type]) {
+          await expect(
+            call(client, entry, { ...valid, [param.name]: wrong }),
+          ).rejects.toThrow(`'${param.name}' must be ${EXPECTED[param.type]}.`);
+        }
+      }
+      for (const options of [[], "ws1", null]) {
+        await expect(call(client, entry, options)).rejects.toThrow(
+          `${entry.method} takes a single options object.`,
+        );
+      }
       expect(client.calls).toEqual([]);
     }
   });

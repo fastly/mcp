@@ -50,3 +50,15 @@ export function expectNoInternals(expect, stack) {
     expect(stack ?? "").not.toContain(marker);
   }
 }
+
+// One value per option type; the string needs encoding when it is used as an ID.
+const NGWAF_SAMPLES = { String: "a/b ?#", Number: 7, Boolean: false };
+
+/** Sample values for an owned NGWAF method's options, all of them by default. */
+export function ngwafOptions(entry, names = entry.params.map((p) => p.name)) {
+  return Object.fromEntries(
+    entry.params
+      .filter((p) => names.includes(p.name))
+      .map((p) => [p.name, NGWAF_SAMPLES[p.type]]),
+  );
+}

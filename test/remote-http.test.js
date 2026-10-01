@@ -443,36 +443,22 @@ for (const runtime of ["bun", "node"]) {
 
       const before = mock.calls.length;
       const executed = await callTool(server.url, TOKEN_A, "execute", {
-        code: match.usage.replace("'...'", "'ws1'"),
+        code: `${match.usage.replace("return await", "const rules = await").replace("'...'", "'ws1'")}
+          const search = await ngwafRequestsApi.searchWorkspaceRequests({ workspace_id: 'ws1', q: 'from:-1h tag:SQLI', page: 1 });
+          return { rules, searched: search.requested };`,
       });
       expect(executed.isError).toBeFalsy();
       expect(executed.parsed.result).toEqual({
-        data: [{ id: "rule-1", enabled: true, scope: { applies_to: ["*"] } }],
-        meta: { limit: 100, total: 1 },
-        requested: "/ngwaf/v1/workspaces/ws1/rules",
+        rules: {
+          data: [{ id: "rule-1", enabled: true, scope: { applies_to: ["*"] } }],
+          meta: { limit: 100, total: 1 },
+          requested: "/ngwaf/v1/workspaces/ws1/rules",
+        },
+        searched:
+          "/ngwaf/v1/workspaces/ws1/requests?q=from:-1h tag:SQLI&page=1",
       });
       expect(mock.calls.slice(before)).toEqual([
         { path: "/ngwaf/v1/workspaces/ws1/rules", key: TOKEN_A },
-      ]);
-    }, 60000);
-
-    test("an NGWAF request search is found and runs with the caller's key", async () => {
-      const found = await callTool(server.url, TOKEN_A, "search", {
-        query: "blocked requests",
-      });
-      expect(found.parsed.matches[0].usage).toBe(
-        "return await ngwafRequestsApi.searchWorkspaceRequests({ workspace_id: '...' });",
-      );
-
-      const before = mock.calls.length;
-      const executed = await callTool(server.url, TOKEN_A, "execute", {
-        code: "return (await ngwafRequestsApi.searchWorkspaceRequests({ workspace_id: 'ws1', q: 'from:-1h tag:SQLI', page: 1 })).requested;",
-      });
-      expect(executed.isError).toBeFalsy();
-      expect(executed.parsed.result).toBe(
-        "/ngwaf/v1/workspaces/ws1/requests?q=from:-1h tag:SQLI&page=1",
-      );
-      expect(mock.calls.slice(before)).toEqual([
         {
           path: "/ngwaf/v1/workspaces/ws1/requests?q=from%3A-1h%20tag%3ASQLI&page=1",
           key: TOKEN_A,

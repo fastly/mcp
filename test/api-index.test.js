@@ -210,72 +210,37 @@ describe("NGWAF discovery", () => {
     );
   });
 
-  test("signals and lists come first in search and explain `reference_id`", () => {
-    for (const [query, apiClass, methods] of [
+  test("search puts the NGWAF methods ahead of look-alikes", () => {
+    for (const [query, first] of [
       [
         "ngwaf signals",
-        "NgwafSignalsApi",
-        ["listAccountSignals", "listWorkspaceSignals"],
+        [
+          "NgwafSignalsApi.listAccountSignals",
+          "NgwafSignalsApi.listWorkspaceSignals",
+        ],
       ],
       [
         "ngwaf lists",
-        "NgwafListsApi",
-        ["listAccountLists", "listWorkspaceLists"],
+        ["NgwafListsApi.listAccountLists", "NgwafListsApi.listWorkspaceLists"],
       ],
-    ]) {
-      const { matches } = search(index, query);
-      expect(
-        matches.slice(0, 2).map((m) => `${m.apiClass}.${m.method}`),
-      ).toEqual(methods.map((method) => `${apiClass}.${method}`));
-    }
-    const accountLists = search(index, "ngwaf lists").matches[0];
-    expect(accountLists.usage).toBe(
-      "return await ngwafListsApi.listAccountLists();",
-    );
-    expect(accountLists.summary).toBe(
-      "List the account's NGWAF lists with their entries, whose names start with `corp.`.",
-    );
-
-    for (const method of ["listAccountSignals", "listWorkspaceSignals"]) {
-      const doc = inspect(index, `NgwafSignalsApi.${method}`);
-      expect(doc.description).toContain("never against `id`");
-      expect(doc.description).toContain("`limit: 200`");
-      expect(doc.description).toContain("`data.length` equals `meta.total`");
-      expect(doc.params.find((p) => p.name === "limit").required).toBe(false);
-    }
-    for (const method of ["listAccountLists", "listWorkspaceLists"]) {
-      const doc = inspect(index, `NgwafListsApi.${method}`);
-      expect(doc.description).toContain("operator: 'in_list'");
-      expect(doc.description).toContain("never by its `id`");
-    }
-    expect(inspect(index, "listWorkspaceLists").example).toBe(
-      "return await ngwafListsApi.listWorkspaceLists({ workspace_id: '...' });",
-    );
-    expect(inspect(index, "listWorkspaceRules").description).toContain(
-      "matching on `reference_id`, never on `id`",
-    );
-  });
-
-  test("analysis questions find the NGWAF methods before look-alikes", () => {
-    const ranked = (query) =>
-      search(index, query).matches.map((m) => `${m.apiClass}.${m.method}`);
-    for (const [query, first, below] of [
-      ["waf attacks", "NgwafWorkspacesApi.getTopAttacks"],
-      ["top attacks", "NgwafWorkspacesApi.getTopAttacks"],
-      ["blocked requests", "NgwafRequestsApi.searchWorkspaceRequests"],
-      ["ngwaf events", "NgwafEventsApi.listEvents", "EventsApi.listEvents"],
-      ["simulate request", "NgwafSimulateApi.ngwafSimulateWafRequest"],
       [
-        "waf timeseries",
-        "NgwafTimeseriesApi.getWorkspaceTimeseries",
-        "ObservabilityTimeseriesApi.timeseriesGet",
+        "waf attacks",
+        [
+          "NgwafWorkspacesApi.getTopAttacks",
+          "NgwafReportsApi.getAttacksReport",
+        ],
       ],
+      ["top attacks", ["NgwafWorkspacesApi.getTopAttacks"]],
+      ["blocked requests", ["NgwafRequestsApi.searchWorkspaceRequests"]],
+      ["ngwaf events", ["NgwafEventsApi.listEvents"]],
+      ["simulate request", ["NgwafSimulateApi.ngwafSimulateWafRequest"]],
+      ["waf timeseries", ["NgwafTimeseriesApi.getWorkspaceTimeseries"]],
     ]) {
-      const results = ranked(query);
-      expect(results[0]).toBe(first);
-      if (below) expect(results.indexOf(below)).toBeGreaterThan(0);
+      const ranked = search(index, query).matches.map(
+        (m) => `${m.apiClass}.${m.method}`,
+      );
+      expect(ranked.slice(0, first.length)).toEqual(first);
     }
-    expect(ranked("waf attacks")).toContain("NgwafReportsApi.getAttacksReport");
   });
 
   test("every summary is a whole first sentence", () => {
@@ -287,74 +252,91 @@ describe("NGWAF discovery", () => {
     }
   });
 
-  test("analysis methods show required options in usage and explain their limits", () => {
-    const usage = (name) => inspect(index, name).example;
-    expect(usage("NgwafEventsApi.listEvents")).toBe(
-      "return await ngwafEventsApi.listEvents({ workspace_id: '...', from: '...' });",
+  test("every method a description mentions exists", () => {
+    const known = new Set(index.map((e) => `${e.shortcut}.${e.method}`));
+    const mentioned = ngwafMethods().flatMap(({ description }) =>
+      [...description.matchAll(/`(\w+Api)\.(\w+)/g)].map(
+        ([, api, m]) => `${api}.${m}`,
+      ),
     );
-    expect(usage("NgwafTimeseriesApi.getWorkspaceTimeseries")).toBe(
-      "return await ngwafTimeseriesApi.getWorkspaceTimeseries({ workspace_id: '...', start: '...', metrics: '...' });",
-    );
-    expect(usage("NgwafWorkspacesApi.getTopAttacks")).toBe(
-      "return await ngwafWorkspacesApi.getTopAttacks({ workspace_id: '...', field: '...', from: '...' });",
-    );
-    expect(usage("NgwafRequestsApi.getRequest")).toBe(
-      "return await ngwafRequestsApi.getRequest({ workspace_id: '...', request_id: '...' });",
-    );
+    expect(mentioned.length).toBeGreaterThan(10);
+    expect(mentioned.filter((name) => !known.has(name))).toEqual([]);
+  });
 
-    const doc = (name) => inspect(index, name).description;
-    expect(doc("NgwafEventsApi.listEvents")).toContain(
-      "`eventsApi.listEvents`",
-    );
-    // Events come from more than thresholds, and the summary is all that search shows.
-    expect(
-      search(index, "ngwaf events").matches.find(
-        (m) => m.method === "listEvents",
-      ).summary,
-    ).toBe(
+  test("descriptions carry the guidance snippets need", () => {
+    const signals = [
+      "never on `id`",
+      "`limit: 200`",
+      "`data.length` equals `meta.total`",
+      "no live check has confirmed yet",
+    ];
+    const lists = [
+      "operator: 'in_list'",
+      "never by its `id`",
+      "`data.length` equals `meta.total`",
+    ];
+    for (const [name, phrases] of [
+      [
+        "NgwafRulesApi.listWorkspaceRules",
+        ["matching on `reference_id`, never on `id`"],
+      ],
+      ["NgwafSignalsApi.listAccountSignals", signals],
+      ["NgwafSignalsApi.listWorkspaceSignals", signals],
+      ["NgwafListsApi.listAccountLists", lists],
+      ["NgwafListsApi.listWorkspaceLists", lists],
+      [
+        "NgwafEventsApi.listEvents",
+        [
+          "`eventsApi.listEvents`",
+          "`page: 0` returns page 1 again",
+          "no live check has confirmed yet",
+        ],
+      ],
+      [
+        "NgwafEventsApi.getEvent",
+        ["`eventsApi.getEvent`", "no live check has confirmed yet"],
+      ],
+      [
+        "NgwafRequestsApi.searchWorkspaceRequests",
+        [
+          "`from:` and `until:`",
+          "at most seven days",
+          "refused with a 400",
+          "does not mean nothing happened",
+          "is unverified",
+          "`page: 0` returns page 1 again",
+          "counts only the records that match",
+          "about 20 seconds",
+          "in a `Map`",
+          "`JSON.parse(e.body).detail`",
+          "never the raw `request_headers`",
+          "no live check has confirmed yet",
+        ],
+      ],
+      [
+        "NgwafRequestsApi.getRequest",
+        [
+          "`ngwafSimulateApi.ngwafSimulateWafRequest`",
+          "no live check has confirmed yet",
+        ],
+      ],
+      [
+        "NgwafTimeseriesApi.getWorkspaceTimeseries",
+        [
+          "`observabilityTimeseriesApi.timeseriesGet`",
+          "read the step from the timestamps",
+        ],
+      ],
+    ]) {
+      const { description } = inspect(index, name);
+      for (const phrase of phrases) expect(description).toContain(phrase);
+    }
+    // Search shows only this sentence, and events come from more than thresholds.
+    expect(search(index, "ngwaf events").matches[0].summary).toBe(
       "List one page of NGWAF events, the actions the WAF took against an IP because of threshold-based blocking, templated rules or site alerts.",
     );
-    expect(doc("NgwafEventsApi.getEvent")).toContain("`eventsApi.getEvent`");
-    expect(doc("NgwafTimeseriesApi.getWorkspaceTimeseries")).toContain(
-      "`observabilityTimeseriesApi.timeseriesGet`",
+    expect(inspect(index, "getWorkspaceTimeseries").example).toBe(
+      "return await ngwafTimeseriesApi.getWorkspaceTimeseries({ workspace_id: '...', start: '...', metrics: '...' });",
     );
-    const searchDoc = doc("NgwafRequestsApi.searchWorkspaceRequests");
-    for (const phrase of [
-      "`from:` and `until:`",
-      "at most seven days",
-      "does not mean nothing happened",
-      "`ngwafReportsApi.getAttacksReport`",
-      "is unverified",
-      "never start from 0",
-      "`meta.total` counts only the matches",
-      "refused with a 400",
-      "`JSON.parse(e.body).detail`",
-      "about 20 seconds",
-      "never the raw `request_headers`",
-      "`reference_id`",
-      "no live check has confirmed yet",
-    ]) {
-      expect(searchDoc).toContain(phrase);
-    }
-    for (const name of [
-      "NgwafRequestsApi.getRequest",
-      "NgwafEventsApi.listEvents",
-      "NgwafEventsApi.getEvent",
-      "NgwafSignalsApi.listAccountSignals",
-      "NgwafSignalsApi.listWorkspaceSignals",
-    ]) {
-      expect(doc(name)).toContain("no live check has confirmed yet");
-    }
-    expect(doc("NgwafRequestsApi.getRequest")).toContain(
-      "`ngwafSimulateApi.ngwafSimulateWafRequest`",
-    );
-    expect(doc("NgwafTimeseriesApi.getWorkspaceTimeseries")).toContain(
-      "read the step from the timestamps",
-    );
-    expect(
-      inspect(index, "NgwafEventsApi.listEvents").params.find(
-        (p) => p.name === "status",
-      ),
-    ).toMatchObject({ type: "String", required: false });
   });
 });

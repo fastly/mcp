@@ -1,5 +1,7 @@
 // Discovery imports this module in the server process, so keep the SDK import in the sandbox.
 
+import { API_RESPONSE_BYTES, INLINE_RESULT_BYTES } from "./limits.js";
+
 const BASE_PATH = "https://api.fastly.com";
 
 function isType(value, type) {
@@ -7,7 +9,7 @@ function isType(value, type) {
   return typeof value === type.toLowerCase();
 }
 
-// Refuse unsupported filters so callers cannot mistake them for applied filters.
+// Refuse unknown options, so callers never mistake them for filters that were applied.
 function readOptions(method, options, params) {
   if (options === undefined) return {};
   if (
@@ -43,7 +45,6 @@ function requireValue(name, value) {
   if (value === undefined || value === "") {
     throw new Error(`Missing the required parameter '${name}'.`);
   }
-  return value;
 }
 
 function requireId(name, id) {
@@ -86,7 +87,7 @@ async function request(apiClient, operation, options) {
   return response.data;
 }
 
-// Methods on this base class are not the subclasses' own, so the sandbox never exposes them.
+// Snippets can only call a class's own methods, so nothing on this base class is reachable.
 class NgwafApi {
   #apiClient;
 
@@ -210,13 +211,12 @@ const WORKSPACE_ID = param(
   "The ID of the workspace.",
 );
 
-const FROM = (required) =>
-  param(
-    "from",
-    "String",
-    required,
-    "The start of the date-time range, the older of the two dates, in RFC 3339 format.",
-  );
+const FROM = param(
+  "from",
+  "String",
+  true,
+  "The start of the date-time range, the older of the two dates, in RFC 3339 format.",
+);
 
 const TO = param(
   "to",
@@ -273,18 +273,18 @@ const SIGNAL_LIMIT = param(
 const TIMES =
   "Times are RFC 3339 strings, such as `new Date(Date.now() - 24 * 3600e3).toISOString()` for a day ago.";
 
+const bytes = (n) => n.toLocaleString("en-US");
+
 const RECORD_PAGES = [
   "Each call returns one page, with the records in `data` and their count in `meta.total`.",
   "Fix both ends of the time range before paging, since a range that ends now keeps growing and changes `meta.total`.",
-  "Page in a loop from `page: 1`, adding every record `id` to a Set, and aggregate in the snippet as pages arrive.",
-  "The listing is complete only when that Set's size equals `meta.total`.",
-  "Stop and report it as incomplete on an empty page, a page that adds no new ID, or a change in `meta.total`.",
-  "Pages are numbered from 1, and `page: 0` returns page 1 again, so never start from 0.",
-  "When `ip`, `signal`, `status` or `q` filters the records, `meta.total` counts only the matches.",
-  "Return the aggregate rather than raw records, since the result shown to the model is limited to 100,000 bytes.",
-  "Count values that clients control, such as paths and user agents, in a `Map` rather than a plain object, which silently drops a key like `__proto__`.",
+  "Page in a loop from `page: 1`, since `page: 0` returns page 1 again, and add every record `id` to a Set.",
+  "The listing is complete only when that Set's size equals `meta.total`, which counts only the records that match the filters.",
+  "Report it as incomplete on an empty page, a page that adds no new ID, or a change in `meta.total`.",
+  `Return a summary rather than raw records, since the result shown to the model is limited to ${bytes(INLINE_RESULT_BYTES)} bytes.`,
+  "Count values that clients choose, such as paths and user agents, in a `Map`, since a plain object silently drops a key like `__proto__`.",
   "A page took one to three seconds in testing and an execution stops after 30 seconds, so check `Date.now()` between pages and stop after about 20 seconds.",
-  "When stopping early, return the partial aggregate, say that it is incomplete, and give the page to continue from.",
+  "When stopping early, return what you have, say that it is incomplete, and give the page to continue from.",
 ];
 
 const STORED = [
@@ -294,10 +294,13 @@ const STORED = [
   "Stored requests are kept for 30 days at most.",
 ];
 
+const CUSTOM_TAGS =
+  "Custom tags look like a signal's `reference_id`, but no live check has confirmed yet that they match, so say so when a custom tag finds no signal.";
+
 const SIGNAL_TAGS = [
   "Signals are named by tag: system signals use names such as `SQLI`, `XSS` or `HTTP404`, and custom ones `site.<name>` or `corp.<name>`.",
-  "Resolve a custom tag against `reference_id` in `ngwafSignalsApi.listWorkspaceSignals` and `listAccountSignals`, never against `id`.",
-  "Custom tags have the same form as `reference_id`, but no live check has confirmed yet that they match, so say so when a custom tag finds no signal.",
+  "Look up a custom tag by `reference_id` in `ngwafSignalsApi.listWorkspaceSignals` and `listAccountSignals`, never by `id`.",
+  CUSTOM_TAGS,
 ];
 
 const DETECTORS =
@@ -311,21 +314,23 @@ const PRIVACY = [
   "Return only the fields the question needs, and never the raw `request_headers` or `response_headers`.",
 ];
 
+const COMPLETE_LIST =
+  "The list is complete only when `data.length` equals `meta.total`; otherwise report it as incomplete.";
+
 const SIGNAL_NAMES = [
-  "Events, requests and rules name a custom signal by its `reference_id`, such as `corp.bad-bot` or `site.bad-bot`.",
-  "Match those names against `reference_id`, never against `id`, which for a workspace signal is an unrelated opaque string.",
-  "Custom tags have the same form as `reference_id`, but no live check has confirmed yet that they match, so say so when a custom tag finds no signal.",
-  "System signals such as `SQLI`, `XSS` and `HTTP404` are built in and never appear here.",
-  "There is no `page` option, so pass `limit: 200` to ask for every signal a scope can hold in one call.",
-  "The API accepts a `limit` of up to 1,000.",
-  "The list is complete only when `data.length` equals `meta.total`; otherwise report it as incomplete.",
+  "Rules name a custom signal by its `reference_id`, such as `corp.bad-bot` or `site.bad-bot`, and tags in events and requests have the same form.",
+  "Match on `reference_id`, never on `id`, which for a workspace signal is an unrelated string.",
+  CUSTOM_TAGS,
+  "Built-in signals such as `SQLI` or `XSS` never appear here.",
+  "There is no `page` option, so pass `limit: 200` to get every signal a scope can hold in one call.",
+  COMPLETE_LIST,
 ];
 
 const LIST_NAMES = [
   "Each list carries its `type` and all its `entries`, such as IPs, countries or strings.",
   "Rule conditions name a list by its `reference_id`, as in `{ operator: 'in_list', value: 'site.blocklist' }`, never by its `id`.",
   "A scope holds at most 25 lists, and the API has no paging options for them.",
-  "The list is complete only when `data.length` equals `meta.total`; otherwise report it as incomplete.",
+  COMPLETE_LIST,
 ];
 
 // Keyed by method name, so method names must stay unique across classes.
@@ -391,16 +396,14 @@ const OPERATIONS = Object.fromEntries(
           true,
           "What to rank: `server_name_and_path`, `path`, `remote_ip` or `remote_country_code`.",
         ),
-        FROM(true),
+        FROM,
         TO,
         LIMIT,
       ],
       description: [
         "Get a workspace's most attacked URLs or paths, or its top attacking IPs or countries, over up to seven days.",
-        "`field` is required and takes `server_name_and_path`, `path`, `remote_ip` or `remote_country_code`.",
-        "The API reference also lists `user_agent`, but the API refuses it.",
-        "`from` is required, and `to` defaults to now.",
-        "The range may be at most seven days, so pass `to` as well when `from` is seven days back, or the few seconds until the request arrives push it over.",
+        "The API reference also lists `user_agent` for `field`, but the API refuses it.",
+        "`to` defaults to now, so pass it too when `from` is seven days back, or the few seconds until the request arrives make the range too long.",
         "Older weeks work, such as a `from` 37 days back with a `to` 30 days back.",
         TIMES,
         "Each entry in `data` has a `value`, a `display_name` and a `count`, sorted by request count.",
@@ -460,7 +463,7 @@ const OPERATIONS = Object.fromEntries(
       httpPath: "/ngwaf/v1/workspaces/{workspace_id}/events",
       params: [
         WORKSPACE_ID,
-        FROM(true),
+        FROM,
         TO,
         param("ip", "String", false, "Return only events for this IP."),
         param(
@@ -481,7 +484,6 @@ const OPERATIONS = Object.fromEntries(
       description: [
         "List one page of NGWAF events, the actions the WAF took against an IP because of threshold-based blocking, templated rules or site alerts.",
         "This is not the account's activity log, which is `eventsApi.listEvents`.",
-        "`from` is required and `to` is optional.",
         TIMES,
         "Filter with `ip`, `signal`, or `status`, which takes `active` or `expired`; any other `status` returns nothing rather than an error.",
         "`signal` matches a tag exactly, so `TRAVERSAL` finds events and `traversal` does not.",
@@ -531,12 +533,12 @@ const OPERATIONS = Object.fromEntries(
         "Other keys include `httpcode`, `method`, `country`, `useragent`, `server`, `payload` and `sort:time-asc`, and `-key:value` negates.",
         "Put the time range in `q` as `from:` and `until:`, with values such as `-1h`, `-7d`, Unix timestamps or `YYYYMMDD`.",
         "Always include `from:`: a query without it covered only the last six hours in testing.",
-        "Before paging, turn relative times into Unix timestamps computed once from `Math.floor(Date.now() / 1000)`, as in `from:1790000000 until:1790604800`, so the window stays put.",
-        "One query covers at most seven days, and a longer range is refused with a 400, so split older periods into windows such as `from:-14d until:-7d`.",
+        "When paging, use Unix timestamps computed once from `Math.floor(Date.now() / 1000)`, as in `from:1790000000 until:1790604800`.",
+        "One query covers at most seven days, and a longer range is refused with a 400, so split longer periods into seven-day windows.",
         "The older Signal Sciences API capped a search at 10,000 requests; whether this one does is unverified, so treat a `meta.total` of exactly 10,000 as possibly capped and narrow the window.",
         ...STORED,
         ...RECORD_PAGES,
-        "`limit` goes up to 1,000, but 1,000 requests with their headers passed the 4,000,000-byte response limit in testing while 500 came to 2.6 MB, so pages of 250 are a safe choice.",
+        `\`limit\` goes up to 1,000, but 1,000 requests with their headers passed the ${bytes(API_RESPONSE_BYTES)}-byte response limit in testing while 500 came to 2.6 MB, so pages of 250 are a safe choice.`,
         "At that size, a week of 2,734 requests took 11 pages and 17 seconds, so one execution reads roughly 3,000 requests.",
         "Each request has `timestamp`, `remote_ip`, `country`, `method`, `server_name`, `path`, `user_agent`, `response_code` and `signals`, where each signal has its tag in `id`, a `location`, the matched `value` and a `detector`.",
         DETECTORS,
@@ -600,7 +602,7 @@ const OPERATIONS = Object.fromEntries(
       description: [
         "Get NGWAF metric counts over time for one workspace, such as attacks, blocked requests or a signal.",
         "This is not `observabilityTimeseriesApi.timeseriesGet`, which returns general observability data.",
-        "`start` and `metrics` are required and `end` is optional; this method uses `start` and `end` where events and top attacks use `from` and `to`.",
+        "This method takes `start` and `end`, where events and top attacks take `from` and `to`.",
         TIMES,
         "`metrics` is one comma-separated string, such as `'requests_total,requests_attack,requests_total_blocked'`, and also takes signal names such as `SQLI`, `XSS` or `HTTP404`.",
         "Each point in `data` has a `timestamp` and a count under each metric's name.",
@@ -616,7 +618,7 @@ const OPERATIONS = Object.fromEntries(
 );
 
 /**
- * Returns fresh metadata, so enriching one index changes neither another index nor the parameters the adapters validate against.
+ * Returns copies, so enriching the index never changes the parameters the adapters check against.
  */
 export function ngwafMethods() {
   return Object.values(OPERATIONS).map(

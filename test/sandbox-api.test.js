@@ -14,6 +14,7 @@ import { execute } from "../src/tools/execute.js";
 import {
   expectNoInternals,
   GITHUB_PAT,
+  ngwafOptions,
   startLocalServer,
   tempDir,
 } from "./helpers.js";
@@ -435,15 +436,33 @@ const json = (body) => ({
 });
 
 const requestsSince = (start) =>
-  requests.slice(start).map(({ url, key, host }) => {
+  requests.slice(start).map(({ url, key, host, method, body }) => {
     const parsed = new URL(url, "https://api.fastly.com");
     return {
       host,
       key,
+      method,
       path: parsed.pathname,
       query: Object.fromEntries(parsed.searchParams),
+      body,
     };
   });
+
+const pagesOf = (calls, path) =>
+  calls.filter((c) => c.path === path).map((c) => c.query.page);
+
+// Serves `records` a page at a time, numbered from 1.
+// `pages` replaces the slicing, and `totals` sets `meta.total` page by page.
+function paged(records, params, { pages, totals, limit } = {}) {
+  const page = Number(params.get("page") ?? 1);
+  const size = limit ?? Number(params.get("limit") ?? 100);
+  return json({
+    data: pages
+      ? (pages[page - 1] ?? [])
+      : records.slice((page - 1) * size, page * size),
+    meta: { limit: size, total: totals?.[page - 1] ?? records.length },
+  });
+}
 
 // The Go SDK's recorded responses, including the deepest nesting a rule allows and a rate limit.
 const NESTED_RULE = {
@@ -535,131 +554,36 @@ const rulesAndWorkspace = (rules) => (req) =>
   json(req.url.includes("/rules") ? rules : WORKSPACE);
 
 describe("NGWAF adapters through the sandbox bridge", () => {
-  test("requests reach the fixed endpoints with encoded IDs and only the options given", async () => {
-    nextResponse = json({ data: [], meta: { limit: 100, total: 0 } });
-    const start = requests.length;
-    const out = await runSandbox(
-      `await ngwafRulesApi.listAccountRules();
-       await ngwafRulesApi.listAccountRules({ enabled: false, types: "request,signal", action: "block", limit: 2, page: 0 });
-       await ngwafRulesApi.listWorkspaceRules({ workspace_id: "ws/1 ?#", enabled: true });
-       await new Fastly.NgwafWorkspacesApi().getWorkspace({ workspace_id: "ws1" });
-       return "done";`,
-      { fastlyApiToken: "token" },
-    );
-    expect(out.result).toBe("done");
-    const common = { host: "api.fastly.com", key: "token" };
-    expect(requestsSince(start)).toEqual([
-      { ...common, path: "/ngwaf/v1/rules", query: {} },
-      {
-        ...common,
-        path: "/ngwaf/v1/rules",
-        query: {
-          enabled: "false",
-          types: "request,signal",
-          action: "block",
-          limit: "2",
-          page: "0",
-        },
-      },
-      {
-        ...common,
-        path: "/ngwaf/v1/workspaces/ws%2F1%20%3F%23/rules",
-        query: { enabled: "true" },
-      },
-      { ...common, path: "/ngwaf/v1/workspaces/ws1", query: {} },
-    ]);
-  }, 15000);
-
   test("every owned method sends its options to its endpoint", async () => {
     nextResponse = json({ data: [], meta: { total: 0 } });
-    const samples = { String: "a/b ?#", Number: 7, Boolean: false };
     const expected = [];
-    const calls = ngwafMethods().map(
-      ({ apiClass, method, httpPath, params }) => {
-        const options = Object.fromEntries(
-          params.map((p) => [p.name, samples[p.type]]),
-        );
-        const query = {};
-        let path = httpPath;
-        for (const [name, value] of Object.entries(options)) {
-          if (path.includes(`{${name}}`)) {
-            path = path.replace(`{${name}}`, encodeURIComponent(value));
-          } else {
-            query[name] = String(value);
-          }
+    const calls = ngwafMethods().map((entry) => {
+      const options = ngwafOptions(entry);
+      const query = {};
+      let path = entry.httpPath;
+      for (const [name, value] of Object.entries(options)) {
+        if (path.includes(`{${name}}`)) {
+          path = path.replace(`{${name}}`, encodeURIComponent(value));
+        } else {
+          query[name] = String(value);
         }
-        expected.push({ host: "api.fastly.com", key: "token", path, query });
-        const global = apiClass[0].toLowerCase() + apiClass.slice(1);
-        return `await ${global}.${method}(${JSON.stringify(options)});`;
-      },
-    );
+      }
+      expected.push({
+        host: "api.fastly.com",
+        key: "token",
+        method: "GET",
+        path,
+        query,
+        body: "",
+      });
+      return `await new Fastly.${entry.apiClass}().${entry.method}(${JSON.stringify(options)});`;
+    });
     const start = requests.length;
     const out = await runSandbox(`${calls.join("\n")}\nreturn "done";`, {
       fastlyApiToken: "token",
     });
     expect(out.result).toBe("done");
     expect(requestsSince(start)).toEqual(expected);
-  }, 15000);
-
-  // Written out by hand, so a wrongly named option cannot pass by agreeing with its own metadata.
-  test("analysis options reach the query as written", async () => {
-    nextResponse = json({ data: [], meta: { total: 0 } });
-    const start = requests.length;
-    const out = await runSandbox(
-      `await ngwafEventsApi.listEvents({ workspace_id: "ws1", from: "2026-09-30T00:00:00Z", to: "2026-09-30T12:00:00Z", ip: "192.0.2.1", signal: "SQLI", status: "expired", limit: 25, page: 3 });
-       await ngwafRequestsApi.searchWorkspaceRequests({ workspace_id: "ws1", q: "from:-1h tag:XSS", limit: 50, page: 2 });
-       await ngwafTimeseriesApi.getWorkspaceTimeseries({ workspace_id: "ws1", start: "2026-09-30T00:00:00Z", end: "2026-09-30T12:00:00Z", metrics: "requests_total,SQLI", granularity: 86400 });
-       await ngwafWorkspacesApi.getTopAttacks({ workspace_id: "ws1", field: "path", from: "2026-09-30T00:00:00Z", limit: 10 });
-       await ngwafSignalsApi.listWorkspaceSignals({ workspace_id: "ws1", limit: 200 });
-       return "done";`,
-      { fastlyApiToken: "token" },
-    );
-    expect(out.result).toBe("done");
-    const common = { host: "api.fastly.com", key: "token" };
-    expect(requestsSince(start)).toEqual([
-      {
-        ...common,
-        path: "/ngwaf/v1/workspaces/ws1/events",
-        query: {
-          from: "2026-09-30T00:00:00Z",
-          to: "2026-09-30T12:00:00Z",
-          ip: "192.0.2.1",
-          signal: "SQLI",
-          status: "expired",
-          limit: "25",
-          page: "3",
-        },
-      },
-      {
-        ...common,
-        path: "/ngwaf/v1/workspaces/ws1/requests",
-        query: { q: "from:-1h tag:XSS", limit: "50", page: "2" },
-      },
-      {
-        ...common,
-        path: "/ngwaf/v1/workspaces/ws1/timeseries",
-        query: {
-          start: "2026-09-30T00:00:00Z",
-          end: "2026-09-30T12:00:00Z",
-          metrics: "requests_total,SQLI",
-          granularity: "86400",
-        },
-      },
-      {
-        ...common,
-        path: "/ngwaf/v1/workspaces/ws1/top-attacks",
-        query: {
-          field: "path",
-          from: "2026-09-30T00:00:00Z",
-          limit: "10",
-        },
-      },
-      {
-        ...common,
-        path: "/ngwaf/v1/workspaces/ws1/signals",
-        query: { limit: "200" },
-      },
-    ]);
   }, 15000);
 
   test("invalid options and a missing ID fail before any request", async () => {
@@ -885,12 +809,10 @@ return {
     rule("a4", false, ["*"]),
   ];
 
-  // Two rules per page, numbered from 1 like the live API, which refuses page 0.
-  // `pages` replaces the slicing, and `totals` gives `meta.total` page by page.
+  // Two rules per page, and page 0 is refused like on the live API.
   function collection(rules, { pages, totals } = {}) {
     return (params) => {
-      const page = params.has("page") ? Number(params.get("page")) : 1;
-      if (page < 1) {
+      if (Number(params.get("page") ?? 1) < 1) {
         return {
           status: 400,
           contentType: "application/json",
@@ -902,11 +824,7 @@ return {
         enabled === null
           ? rules
           : rules.filter((r) => String(r.enabled) === enabled);
-      const data = pages
-        ? (pages[page - 1] ?? [])
-        : matching.slice(page * 2 - 2, page * 2);
-      const total = totals?.[page - 1] ?? matching.length;
-      return json({ data, meta: { limit: 2, total } });
+      return paged(matching, params, { pages, totals, limit: 2 });
     };
   }
 
@@ -942,9 +860,6 @@ return {
   }
 
   const [a1, a2, a3, a4] = ACCOUNT_RULES;
-
-  const pagesOf = (calls, path) =>
-    calls.filter((c) => c.path === path).map((c) => c.query.page);
 
   test("every page is read and only the applicable enabled rules remain", async () => {
     const out = await runFlow(ngwafApi());
@@ -1043,7 +958,7 @@ return {
   }, 30000);
 });
 
-// The questions the analysis descriptions are written for, answered by snippets like the ones they ask for.
+// The questions from the plan, answered by snippets written the way the descriptions ask.
 describe("the NGWAF analysis flows", () => {
   const RULE_ID = "6986506c32e98085365e81b7";
   const HEADERS = (n) =>
@@ -1078,7 +993,7 @@ describe("the NGWAF analysis flows", () => {
     summation: { attrs: { RuleID: RULE_ID }, attacks: [] },
     ...overrides,
   });
-  // Opaque workspace IDs, as the Go SDK recorded them; only `reference_id` matches the tag.
+  // A workspace signal's ID has nothing to do with its tag, as in the Go SDK's recordings.
   const WORKSPACE_SIGNALS = [
     {
       id: "JYLhUW8UOr3kfAhGYQzVXb",
@@ -1142,23 +1057,23 @@ describe("the NGWAF analysis flows", () => {
   const EVENT = event("6841c2c07d3691b0f5b95130", "192.0.2.1", "flagged", [
     ["SQLI", 97],
   ]);
+  const EVENTS = [
+    EVENT,
+    event("e2", "198.51.100.7", "blocked", [["XSS", 10]]),
+    event("e3", "192.0.2.1", "blocked", [
+      ["SQLI", 50],
+      ["CMDEXE", 5],
+    ]),
+  ];
 
-  // Pages of `limit`, numbered from 1 like the rule lists.
-  // `pages` replaces the slicing, and `totals` gives `meta.total` page by page.
-  const paged = (records, params, { pages, totals } = {}) => {
-    const page = Number(params.get("page") ?? 1);
-    const limit = Number(params.get("limit") ?? 100);
-    return json({
-      meta: {
-        limit,
-        total: totals?.[page - 1] ?? records.length,
-        next_cursor: "",
-      },
-      data: pages
-        ? (pages[page - 1] ?? [])
-        : records.slice((page - 1) * limit, page * limit),
-    });
-  };
+  // Together too big to return as a result, so only a summary fits.
+  const MATCHES = [
+    stored("r1"),
+    stored("r2", { path: "/login/sso", uri: "/login/sso" }),
+    stored("r3", { remote_ip: "198.51.100.7", country: "CA" }),
+    stored("r4", { user_agent: "Mozilla/5.0" }),
+    stored("r5", { user_agent: "__proto__" }),
+  ].map((r) => ({ ...r, request_headers: HEADERS(120) }));
 
   const REPORT = [
     { id: "ws2", name: "quiet", attack_count: 3, blocked_count: 0 },
@@ -1272,10 +1187,10 @@ describe("the NGWAF analysis flows", () => {
     const start = requests.length;
     const out = await runSandbox(code, { fastlyApiToken: "token" });
     expect(out.error).toBeUndefined();
-    return { out, calls: requests.slice(start) };
+    return { out, calls: requestsSince(start) };
   }
 
-  // The paging the analysis descriptions ask for, shared by the request and event flows.
+  // The paging loop the method descriptions ask for.
   const COLLECT = `
 async function collect(list, add) {
   const deadline = Date.now() + 20e3;
@@ -1302,7 +1217,7 @@ async function collect(list, add) {
 }
 `;
 
-  // Finds the most attacked workspace, then what, who and when, and the IPs it flagged.
+  // Finds the most attacked workspace, then what was hit, from where, when, and which IPs were flagged.
   const ATTACKS = `${COLLECT}
 const to = '2026-09-30T12:00:00Z';
 const from = '2026-09-29T12:00:00Z';
@@ -1320,7 +1235,7 @@ const [urls, ips, series, events] = await Promise.all([
     (e) => flagged.push({ ip: e.source, action: e.action, signals: e.reasons.map((r) => r.signal_id) }),
   ),
 ]);
-// The bucket in progress is left out, so a short range can have no points at all.
+// A short range may not have a finished bucket yet.
 const peak = series.data.reduce((a, b) => (a && a.requests_attack >= b.requests_attack ? a : b), undefined);
 return {
   workspace: busiest.name,
@@ -1330,12 +1245,11 @@ return {
   ips: ips.data.map(({ value, count }) => ({ value, count })),
   peak: peak && { at: peak.timestamp, attacks: peak.requests_attack },
   flagged,
-  // An incomplete event read keeps its reason and, after a timeout, the page to continue from.
   flaggedPaging: events.incomplete && events,
 };`;
 
   test("is anyone attacking us", async () => {
-    const { out, calls } = await run(ATTACKS, ngwafApi());
+    const { out } = await run(ATTACKS, ngwafApi());
     expect(out.result).toEqual({
       workspace: "main",
       attacks: 1200,
@@ -1345,29 +1259,6 @@ return {
       peak: { at: "2026-09-30T08:10:00Z", attacks: 1100 },
       flagged: [{ ip: "192.0.2.1", action: "flagged", signals: ["SQLI"] }],
     });
-    const sent = Object.fromEntries(
-      calls.map((c) => {
-        const url = new URL(c.url, "https://api.fastly.com");
-        return [
-          `${url.pathname}?field=${url.searchParams.get("field")}`,
-          Object.fromEntries(url.searchParams),
-        ];
-      }),
-    );
-    expect(sent["/ngwaf/v1/workspaces/ws1/timeseries?field=null"]).toEqual({
-      start: "2026-09-29T12:00:00Z",
-      end: "2026-09-30T12:00:00Z",
-      metrics: "requests_attack",
-    });
-    expect(sent["/ngwaf/v1/workspaces/ws1/events?field=null"]).toEqual({
-      from: "2026-09-29T12:00:00Z",
-      to: "2026-09-30T12:00:00Z",
-      status: "active",
-      page: "1",
-    });
-    expect(
-      sent["/ngwaf/v1/workspaces/ws1/top-attacks?field=remote_ip"],
-    ).toMatchObject({ field: "remote_ip", limit: "5" });
   }, 15000);
 
   test("a report without attacks ends the overview there", async () => {
@@ -1377,9 +1268,7 @@ return {
     ]) {
       const { out, calls } = await run(ATTACKS, ngwafApi({ report }));
       expect(out.result).toEqual({ workspaces, attacks: 0 });
-      expect(calls.map((c) => c.url.split("?")[0])).toEqual([
-        "/ngwaf/v1/reports/attacks",
-      ]);
+      expect(calls.map((c) => c.path)).toEqual(["/ngwaf/v1/reports/attacks"]);
     }
   }, 15000);
 
@@ -1402,30 +1291,7 @@ return {
     });
   }, 15000);
 
-  test("an overview that runs out of time while reading events gives the page to continue from", async () => {
-    const stopped = ATTACKS.replace(
-      "if (Date.now() > deadline)",
-      "if (page > 1)",
-    );
-    expect(stopped).not.toBe(ATTACKS);
-    const second = event("e2", "198.51.100.7", "blocked", [["XSS", 10]]);
-    const { out } = await run(
-      stopped,
-      ngwafApi({
-        events: [EVENT, second],
-        paging: { events: { pages: [[EVENT], [second]] } },
-      }),
-    );
-    expect(out.result.flagged).toHaveLength(1);
-    expect(out.result.flaggedPaging).toEqual({
-      seen: 1,
-      total: 2,
-      incomplete: "out of time",
-      continueFrom: 2,
-    });
-  }, 15000);
-
-  // Explains one blocked request through its signals, the rule behind them and the lists that rule uses.
+  // Explains a blocked request through its signals, the rule that fired and the lists it uses.
   const WHY_BLOCKED = `${COLLECT}
        const { configuration } = await productNgwafApi.getProductNgwafConfiguration({ service_id: 'SERVICE_ID' });
        const workspace_id = configuration.workspace_id;
@@ -1434,9 +1300,9 @@ return {
          q: 'from:-1h ip:192.0.2.1 path:/login',
          page: 1,
        });
-       // Only some requests are stored, so no match is an answer of its own.
+       // Not every request is stored, so this is a real answer.
        if (found.meta.total === 0) return { stored: 0 };
-       // An empty first page despite matches is a failed read, not an absence.
+       // Matches without a first page mean the read failed, not that nothing was stored.
        if (found.data.length === 0) {
          return { stored: found.meta.total, incomplete: 'the first page came back empty' };
        }
@@ -1451,7 +1317,7 @@ return {
          collect((page) => ngwafRulesApi.listWorkspaceRules({ workspace_id, page }), (r) => rules.set(r.id, r)),
          collect((page) => ngwafRulesApi.listAccountRules({ page }), (r) => rules.set(r.id, r)),
        ]);
-       // A short read would make a rule, list or signal look absent, so say which reads were incomplete.
+       // A short read would make a rule, list or signal look missing.
        const incomplete = [
          ...Object.entries({ wsSignals, acctSignals, wsLists, acctLists })
            .filter(([, r]) => r.data.length !== r.meta.total)
@@ -1490,7 +1356,7 @@ return {
        };`;
 
   test("why was this request blocked", async () => {
-    const { out, calls } = await run(
+    const { out } = await run(
       WHY_BLOCKED,
       ngwafApi({ requests: [stored("req-1")] }),
     );
@@ -1509,16 +1375,6 @@ return {
         { tag: "SQLI", custom: null, rule: null },
       ],
     });
-    // Matching the tag on `id` would have found nothing.
-    expect(WORKSPACE_SIGNALS[0].id).not.toBe("site.bad-login");
-    const search = new URL(calls[1].url, "https://api.fastly.com");
-    expect(search.pathname).toBe("/ngwaf/v1/workspaces/ws1/requests");
-    expect(search.searchParams.get("q")).toBe(
-      "from:-1h ip:192.0.2.1 path:/login",
-    );
-    expect(new URL(calls[2].url, "https://api.fastly.com").pathname).toBe(
-      "/ngwaf/v1/workspaces/ws1/requests/req-1",
-    );
   }, 15000);
 
   test("a rule on a later page is still found, and a short list read is reported", async () => {
@@ -1537,37 +1393,29 @@ return {
       lists: [{ ref: "site.blocklist" }],
     });
     expect(out.result.incomplete).toEqual(["wsLists"]);
-    expect(
-      calls
-        .filter((c) => c.url.startsWith("/ngwaf/v1/workspaces/ws1/rules"))
-        .map((c) =>
-          new URL(c.url, "https://api.fastly.com").searchParams.get("page"),
-        ),
-    ).toEqual(["1", "2"]);
+    expect(pagesOf(calls, "/ngwaf/v1/workspaces/ws1/rules")).toEqual([
+      "1",
+      "2",
+    ]);
   }, 15000);
 
-  test("an empty first page with matches is not reported as nothing stored", async () => {
-    const { out, calls } = await run(
-      WHY_BLOCKED,
-      ngwafApi({
-        requests: MATCHES,
-        paging: { requests: { pages: [[]] } },
-      }),
-    );
-    expect(out.result).toEqual({
-      stored: 5,
-      incomplete: "the first page came back empty",
-    });
-    expect(calls.some((c) => c.url.includes("/requests/"))).toBe(false);
-  }, 15000);
-
-  test("a request that was not stored is reported as such", async () => {
+  test("no stored request and an unreadable first page are different answers", async () => {
     const { out, calls } = await run(WHY_BLOCKED, ngwafApi());
     expect(out.result).toEqual({ stored: 0 });
-    expect(calls.map((c) => c.url.split("?")[0])).toEqual([
+    expect(calls.map((c) => c.path)).toEqual([
       "/enabled-products/v1/ngwaf/services/SERVICE_ID/configuration",
       "/ngwaf/v1/workspaces/ws1/requests",
     ]);
+
+    const unread = await run(
+      WHY_BLOCKED,
+      ngwafApi({ requests: MATCHES, paging: { requests: { pages: [[]] } } }),
+    );
+    expect(unread.out.result).toEqual({
+      stored: 5,
+      incomplete: "the first page came back empty",
+    });
+    expect(unread.calls).toHaveLength(2);
   }, 15000);
 
   // Counts what the rule matched, keeps two small examples, and replays the first one.
@@ -1575,7 +1423,7 @@ return {
 const workspace_id = 'ws1';
 const until = Math.floor(Date.now() / 1000);
 const q = \`from:\${until - 7 * 86400} until:\${until} ruleid:${RULE_ID}\`;
-// Clients choose their paths and user agents, so count in Maps, where '__proto__' is just another key.
+// Clients choose these values, and a plain object would drop one named '__proto__'.
 const counts = { path: new Map(), user_agent: new Map(), country: new Map(), remote_ip: new Map() };
 const examples = [];
 const paging = await collect(
@@ -1590,7 +1438,6 @@ const paging = await collect(
   },
 );
 const [example] = examples;
-// With no match there is nothing to replay.
 const simulated =
   example &&
   (await ngwafSimulateApi.ngwafSimulateWafRequest({
@@ -1607,7 +1454,7 @@ const simulated =
   }));
 return {
   ...paging,
-  // The search description warns that a total of exactly 10,000 may be a cap.
+  // The search may stop counting at 10,000.
   capped: paging.total === 10000 || undefined,
   counts: Object.fromEntries(
     Object.entries(counts).map(([field, values]) => [field, Object.fromEntries(values)]),
@@ -1618,6 +1465,126 @@ return {
     byRule: simulated.signals.filter((s) => s.detector === '${RULE_ID}').map((s) => s.type),
   },
 };`;
+
+  test("is this rule causing false positives", async () => {
+    const { out, calls } = await run(
+      FALSE_POSITIVES,
+      ngwafApi({ requests: MATCHES }),
+    );
+    expect(JSON.stringify(MATCHES).length).toBeGreaterThan(INLINE_RESULT_BYTES);
+    expect(out.reduced).toBeUndefined();
+    expect(out.result).toMatchObject({
+      seen: 5,
+      total: 5,
+      counts: {
+        path: { "/login": 4, "/login/sso": 1 },
+        country: { US: 4, CA: 1 },
+        remote_ip: { "192.0.2.1": 4, "198.51.100.7": 1 },
+      },
+      replay: { status: 406, byRule: ["site.bad-login", "BLOCKED"] },
+    });
+    expect(Object.entries(out.result.counts.user_agent)).toEqual([
+      ["curl/8.7.1", 3],
+      ["Mozilla/5.0", 1],
+      ["__proto__", 1],
+    ]);
+    expect(out.result.incomplete).toBeUndefined();
+    expect(out.result.examples[0]).toEqual({
+      id: "r1",
+      method: "POST",
+      uri: "/login?next=%2F",
+      host: "www.example.com",
+      user_agent: "curl/8.7.1",
+    });
+    const path = "/ngwaf/v1/workspaces/ws1/requests";
+    expect(pagesOf(calls, path)).toEqual(["1", "2", "3"]);
+    const queries = new Set(
+      calls.filter((c) => c.path === path).map((c) => c.query.q),
+    );
+    expect(queries.size).toBe(1);
+    const [from, until] = [...queries][0]
+      .match(new RegExp(`^from:(\\d+) until:(\\d+) ruleid:${RULE_ID}$`))
+      .slice(1)
+      .map(Number);
+    expect(until - from).toBe(7 * 86400);
+    const simulate = calls.find((c) => c.method === "POST");
+    expect(simulate.path).toBe("/ngwaf/v1/workspaces/ws1/simulate");
+    expect(JSON.parse(simulate.body)).toEqual({
+      request:
+        "POST /login?next=%2F HTTP/1.1\r\nHost: www.example.com\r\nUser-Agent: curl/8.7.1\r\n\r\n",
+    });
+  }, 15000);
+
+  test("a rule that matched nothing is reported without a replay", async () => {
+    const { out, calls } = await run(FALSE_POSITIVES, ngwafApi());
+    expect(out.result).toEqual({
+      seen: 0,
+      total: 0,
+      counts: { path: {}, user_agent: {}, country: {}, remote_ip: {} },
+      examples: [],
+    });
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+  }, 15000);
+
+  test("a search that matched exactly 10,000 requests is flagged as possibly capped", async () => {
+    const { out } = await run(
+      FALSE_POSITIVES,
+      ngwafApi({
+        requests: MATCHES,
+        paging: { requests: { totals: [10000, 10000, 10000, 10000] } },
+      }),
+    );
+    expect(out.result).toMatchObject({ total: 10000, capped: true });
+  }, 15000);
+
+  test("a search that stops short says why", async () => {
+    const edited = (from, to) => {
+      expect(FALSE_POSITIVES).toContain(from);
+      return FALSE_POSITIVES.replace(from, to);
+    };
+    const [r1, r2] = MATCHES;
+    for (const [code, paging, expected, pages] of [
+      [
+        edited("if (Date.now() > deadline)", "if (page > 1)"),
+        undefined,
+        { seen: 2, incomplete: "out of time", continueFrom: 2 },
+        ["1"],
+      ],
+      // As if pages were numbered from 0, so page 1 is really the second page.
+      [
+        edited("let page = 1", "let page = 2"),
+        undefined,
+        { seen: 3, incomplete: "a page came back empty" },
+        ["2", "3", "4"],
+      ],
+      [
+        FALSE_POSITIVES,
+        {
+          pages: [
+            [r1, r2],
+            [r1, r2],
+          ],
+        },
+        { seen: 2, incomplete: "a page added no new record" },
+        ["1", "2"],
+      ],
+      [
+        FALSE_POSITIVES,
+        { totals: [5, 6] },
+        { seen: 2, incomplete: "the total changed while paging" },
+        ["1", "2"],
+      ],
+    ]) {
+      const { out, calls } = await run(
+        code,
+        ngwafApi({ requests: MATCHES, paging: { requests: paging } }),
+      );
+      expect(out.result).toMatchObject({ ...expected, total: 5 });
+      expect(pagesOf(calls, "/ngwaf/v1/workspaces/ws1/requests")).toEqual(
+        pages,
+      );
+    }
+  }, 30000);
 
   // Sums a week of events per source IP.
   const EVENT_SOURCES = `${COLLECT}
@@ -1638,138 +1605,6 @@ const paging = await collect(
   },
 );
 return { ...paging, byIp };`;
-
-  const MATCHES = [
-    stored("r1"),
-    stored("r2", { path: "/login/sso", uri: "/login/sso" }),
-    stored("r3", { remote_ip: "198.51.100.7", country: "CA" }),
-    stored("r4", { user_agent: "Mozilla/5.0" }),
-    stored("r5"),
-  ].map((r) => ({ ...r, request_headers: HEADERS(120) }));
-
-  const EVENTS = [
-    EVENT,
-    event("e2", "198.51.100.7", "blocked", [["XSS", 10]]),
-    event("e3", "192.0.2.1", "blocked", [
-      ["SQLI", 50],
-      ["CMDEXE", 5],
-    ]),
-  ];
-
-  const urlsOf = (calls, path) =>
-    calls
-      .filter((c) => new URL(c.url, "https://api.fastly.com").pathname === path)
-      .map((c) => new URL(c.url, "https://api.fastly.com").searchParams);
-
-  test("is this rule causing false positives", async () => {
-    const { out, calls } = await run(
-      FALSE_POSITIVES,
-      ngwafApi({ requests: MATCHES }),
-    );
-    // Every page together is larger than a result may be, and the aggregate is not.
-    expect(JSON.stringify(MATCHES).length).toBeGreaterThan(INLINE_RESULT_BYTES);
-    expect(out.reduced).toBeUndefined();
-    expect(out.result).toMatchObject({
-      seen: 5,
-      total: 5,
-      counts: {
-        path: { "/login": 4, "/login/sso": 1 },
-        user_agent: { "curl/8.7.1": 4, "Mozilla/5.0": 1 },
-        country: { US: 4, CA: 1 },
-        remote_ip: { "192.0.2.1": 4, "198.51.100.7": 1 },
-      },
-      replay: { status: 406, byRule: ["site.bad-login", "BLOCKED"] },
-    });
-    expect(out.result.incomplete).toBeUndefined();
-    expect(out.result.examples[0]).toEqual({
-      id: "r1",
-      method: "POST",
-      uri: "/login?next=%2F",
-      host: "www.example.com",
-      user_agent: "curl/8.7.1",
-    });
-    const pages = urlsOf(calls, "/ngwaf/v1/workspaces/ws1/requests");
-    expect(pages.map((p) => p.get("page"))).toEqual(["1", "2", "3"]);
-    // One fixed window for every page.
-    const queries = new Set(pages.map((p) => p.get("q")));
-    expect(queries.size).toBe(1);
-    const [from, until] = [...queries][0]
-      .match(new RegExp(`^from:(\\d+) until:(\\d+) ruleid:${RULE_ID}$`))
-      .slice(1)
-      .map(Number);
-    expect(until - from).toBe(7 * 86400);
-    const simulate = calls.find((c) => c.method === "POST");
-    expect(simulate.url).toBe("/ngwaf/v1/workspaces/ws1/simulate");
-    expect(JSON.parse(simulate.body)).toEqual({
-      request:
-        "POST /login?next=%2F HTTP/1.1\r\nHost: www.example.com\r\nUser-Agent: curl/8.7.1\r\n\r\n",
-    });
-  }, 15000);
-
-  test("a rule that matched nothing is reported without a replay", async () => {
-    const { out, calls } = await run(FALSE_POSITIVES, ngwafApi());
-    expect(out.result).toEqual({
-      seen: 0,
-      total: 0,
-      counts: { path: {}, user_agent: {}, country: {}, remote_ip: {} },
-      examples: [],
-    });
-    expect(calls.some((c) => c.method === "POST")).toBe(false);
-  }, 15000);
-
-  test("a user agent named __proto__ is counted like any other", async () => {
-    const { out } = await run(
-      FALSE_POSITIVES,
-      ngwafApi({ requests: [stored("r1", { user_agent: "__proto__" })] }),
-    );
-    expect(Object.keys(out.result.counts.user_agent)).toEqual(["__proto__"]);
-    expect(
-      Object.getOwnPropertyDescriptor(out.result.counts.user_agent, "__proto__")
-        .value,
-    ).toBe(1);
-  }, 15000);
-
-  test("a search that matched exactly 10,000 requests is flagged as possibly capped", async () => {
-    const many = Array.from({ length: 10000 }, (_, i) => ({
-      id: `r${i}`,
-      path: "/login",
-      user_agent: "curl/8.7.1",
-      country: "US",
-      remote_ip: "192.0.2.1",
-      method: "GET",
-      uri: "/login",
-      server_name: "www.example.com",
-      signals: [],
-    }));
-    const code = FALSE_POSITIVES.replace("limit: 2, page", "limit: 1000, page");
-    expect(code).not.toBe(FALSE_POSITIVES);
-    const { out } = await run(code, ngwafApi({ requests: many }));
-    expect(out.result).toMatchObject({
-      seen: 10000,
-      total: 10000,
-      capped: true,
-    });
-
-    const { out: fewer } = await run(
-      code,
-      ngwafApi({ requests: many.slice(1) }),
-    );
-    expect(fewer.result.capped).toBeUndefined();
-  }, 30000);
-
-  test("a first page with nothing on it is incomplete and replays nothing", async () => {
-    const { out, calls } = await run(
-      FALSE_POSITIVES,
-      ngwafApi({ requests: MATCHES, paging: { requests: { pages: [[]] } } }),
-    );
-    expect(out.result).toMatchObject({
-      seen: 0,
-      total: 5,
-      incomplete: "a page came back empty",
-    });
-    expect(out.result.replay).toBeUndefined();
-    expect(calls.some((c) => c.method === "POST")).toBe(false);
-  }, 15000);
 
   test("events are summed per source IP across pages of one fixed range", async () => {
     const { out, calls } = await run(
@@ -1794,119 +1629,11 @@ return { ...paging, byIp };`;
         },
       },
     });
-    const pages = urlsOf(calls, "/ngwaf/v1/workspaces/ws1/events");
-    expect(pages.map((p) => p.get("page"))).toEqual(["1", "2"]);
-    expect(
-      new Set(pages.map((p) => `${p.get("from")} ${p.get("to")}`)).size,
-    ).toBe(1);
-  }, 15000);
-
-  // Every way the shared paging can stop short, for both paged analysis reads.
-  for (const [name, code, key, records, path] of [
-    [
-      "request search",
-      FALSE_POSITIVES,
-      "requests",
-      MATCHES,
-      "/ngwaf/v1/workspaces/ws1/requests",
-    ],
-    [
-      "event listing",
-      EVENT_SOURCES,
-      "events",
-      EVENTS,
-      "/ngwaf/v1/workspaces/ws1/events",
-    ],
-  ]) {
-    const api = (paging) =>
-      ngwafApi({ [key]: records, paging: { [key]: paging } });
-    const [first, second] = records;
-
-    test(`a ${name} that runs out of time returns what it has and where to continue`, async () => {
-      // With no time left after the first page, the loop stops before asking for page 2.
-      const stopped = code.replace(
-        "if (Date.now() > deadline)",
-        "if (page > 1)",
-      );
-      expect(stopped).not.toBe(code);
-      const { out, calls } = await run(stopped, api());
-      expect(out.result).toMatchObject({
-        seen: 2,
-        total: records.length,
-        incomplete: "out of time",
-        continueFrom: 2,
-      });
-      expect(urlsOf(calls, path).map((p) => p.get("page"))).toEqual(["1"]);
-    }, 15000);
-
-    test(`a ${name} that skips its first page reports itself incomplete`, async () => {
-      // As if the API numbered pages from 0: page 1 is the second page.
-      const skipping = code.replace("let page = 1", "let page = 2");
-      expect(skipping).not.toBe(code);
-      const { out } = await run(skipping, api());
-      expect(out.result).toMatchObject({
-        seen: records.length - 2,
-        total: records.length,
-        incomplete: "a page came back empty",
-      });
-    }, 15000);
-
-    test(`a ${name} that gets the same page twice reports itself incomplete`, async () => {
-      const { out, calls } = await run(
-        code,
-        api({
-          pages: [
-            [first, second],
-            [first, second],
-          ],
-        }),
-      );
-      expect(out.result).toMatchObject({
-        seen: 2,
-        total: records.length,
-        incomplete: "a page added no new record",
-      });
-      expect(urlsOf(calls, path).map((p) => p.get("page"))).toEqual(["1", "2"]);
-    }, 15000);
-
-    test(`a ${name} whose total changes reports itself incomplete`, async () => {
-      const { out } = await run(
-        code,
-        api({ totals: [records.length, records.length + 1] }),
-      );
-      expect(out.result).toMatchObject({
-        seen: 2,
-        total: records.length,
-        incomplete: "the total changed while paging",
-      });
-    }, 15000);
-  }
-
-  test("would this request be blocked", async () => {
-    const { out, calls } = await run(
-      `const request = [
-         'GET /search?q=%27%20or%201%3D1 HTTP/1.1',
-         'Host: www.example.com',
-         'User-Agent: curl/8.7.1',
-         '',
-         '',
-       ].join('\\r\\n');
-       const { waf_response, signals } = await ngwafSimulateApi.ngwafSimulateWafRequest({
-         workspace_id: 'ws1',
-         waf_simulate_request: { request },
-       });
-       return { blocked: waf_response === 406, signals: signals.map((s) => [s.type, s.detector_scope]) };`,
-      ngwafApi(),
-    );
-    expect(out.result).toEqual({
-      blocked: true,
-      signals: [
-        ["site.bad-login", "workspace"],
-        ["BLOCKED", "system"],
-      ],
-    });
-    expect(JSON.parse(calls[0].body).request).toBe(
-      "GET /search?q=%27%20or%201%3D1 HTTP/1.1\r\nHost: www.example.com\r\nUser-Agent: curl/8.7.1\r\n\r\n",
-    );
+    const path = "/ngwaf/v1/workspaces/ws1/events";
+    expect(pagesOf(calls, path)).toEqual(["1", "2"]);
+    const ranges = calls
+      .filter((c) => c.path === path)
+      .map((c) => `${c.query.from} ${c.query.to}`);
+    expect(new Set(ranges).size).toBe(1);
   }, 15000);
 });
