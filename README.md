@@ -20,12 +20,15 @@ This keeps the tool list small while still covering every method documented in t
 
 ## Requirements
 
-The examples use [Bun](https://bun.sh/) and `bunx`, which downloads and runs the package without a global install.
-You can also use Node.js 24.12 or newer.
+Install either [Bun](https://bun.sh/) or Node.js 24.12.0 or newer; you do not need both to run the server.
+Node.js is recommended for [remote mode](REMOTE-HTTP.md).
+The examples use `bunx`, which downloads and runs the package without a global install.
+With Node.js, use `npx` instead.
 
 Use the full command, `bunx -p @fastly/mcp fastly-mcp`, because the package's command is named `fastly-mcp`.
 This prevents `bunx` from picking up an unrelated `mcp` command on your `PATH`.
 If you use `npx`, run `npx -p @fastly/mcp fastly-mcp` for the same reason.
+To explicitly run with Bun rather than following the package's Node.js shebang, use `bunx --bun -p @fastly/mcp fastly-mcp`.
 
 You also need a [Fastly API token](https://docs.fastly.com/en/guides/using-api-tokens).
 For everyday use, create the narrowest token that fits the work you expect the assistant to do.
@@ -56,6 +59,29 @@ For example, this configuration runs the server with `bunx` and passes the API t
 
 If you already export `FASTLY_API_TOKEN` in the shell that starts your MCP client, you can generally omit the `env` block (some agents may still require it, though).
 Keeping the token in the client configuration is often simpler for desktop apps, while shell environment variables are often cleaner for terminal tools.
+
+### Codex
+
+Either runtime works for the local server.
+The bundled plugin launches through `bunx`; for a Node.js-only setup, use `npx` as the MCP launch command with the same arguments.
+For a Bun-only setup, add `--bun` before `-p` in the launch arguments.
+Make sure your chosen launcher is available on Codex's `PATH`.
+Add the repository as a plugin marketplace, then install the plugin:
+
+```sh
+codex plugin marketplace add https://github.com/fastly/mcp
+codex plugin add fastly-mcp@fastly-local
+```
+
+The `add` command installs and enables the plugin.
+Set `FASTLY_API_TOKEN` in the environment that starts Codex, then restart Codex so the local server receives it.
+The plugin runs over stdio with secret encryption enabled; it does not require OAuth or a hosted MCP endpoint.
+
+Check that the plugin is installed and enabled:
+
+```sh
+codex plugin list --marketplace fastly-local
+```
 
 ### Claude Code
 

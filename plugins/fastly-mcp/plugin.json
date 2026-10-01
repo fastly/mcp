@@ -16,7 +16,7 @@
       "interface": {
         "displayName": "Fastly MCP",
         "shortDescription": "Work with the Fastly API",
-        "longDescription": "Find Fastly API methods, inspect their parameters, and run focused JavaScript with a preconfigured Fastly client.\nInvestigate services, backends, TLS, caching, and traffic, or make changes with a token that permits them.\nThe MCP server runs locally and uses the Fastly API token you configure in your client environment.\nInstall Bun and Node.js 24.12.0 or newer before connecting.\nFor production changes, review the planned call and approve it before execution.",
+        "longDescription": "Find Fastly API methods, inspect their parameters, and run focused JavaScript with a preconfigured Fastly client.\nInvestigate services, backends, TLS, caching, and traffic, or make changes with a token that permits them.\nThe MCP server runs locally and uses the Fastly API token you configure in your client environment.\nInstall either Bun or Node.js 24.12.0 or newer before connecting.\nThe bundled launcher uses bunx; see the README for Bun-only and Node.js-only launch settings.\nNode.js is recommended for remote mode.\nFor production changes, review the planned call and approve it before execution.",
         "developerName": "Fastly",
         "category": "Developer Tools",
         "websiteURL": "https://github.com/fastly/mcp",
