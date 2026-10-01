@@ -1249,7 +1249,7 @@ return {
 };`;
 
   test("is anyone attacking us", async () => {
-    const { out } = await run(ATTACKS, ngwafApi());
+    const { out, calls } = await run(ATTACKS, ngwafApi());
     expect(out.result).toEqual({
       workspace: "main",
       attacks: 1200,
@@ -1259,6 +1259,29 @@ return {
       peak: { at: "2026-09-30T08:10:00Z", attacks: 1100 },
       flagged: [{ ip: "192.0.2.1", action: "flagged", signals: ["SQLI"] }],
     });
+    // The mock ignores these options, so only the requests show the snippet asked for the right records.
+    const from = "2026-09-29T12:00:00Z";
+    const to = "2026-09-30T12:00:00Z";
+    expect(calls.map(({ path, query }) => [path, query])).toEqual(
+      expect.arrayContaining([
+        [
+          "/ngwaf/v1/workspaces/ws1/top-attacks",
+          { field: "server_name_and_path", from, to, limit: "5" },
+        ],
+        [
+          "/ngwaf/v1/workspaces/ws1/top-attacks",
+          { field: "remote_ip", from, to, limit: "5" },
+        ],
+        [
+          "/ngwaf/v1/workspaces/ws1/timeseries",
+          { start: from, end: to, metrics: "requests_attack" },
+        ],
+        [
+          "/ngwaf/v1/workspaces/ws1/events",
+          { from, to, status: "active", page: "1" },
+        ],
+      ]),
+    );
   }, 15000);
 
   test("a report without attacks ends the overview there", async () => {
@@ -1273,22 +1296,35 @@ return {
   }, 15000);
 
   test("an overview with no finished bucket and more flagged IPs than it could read says so", async () => {
-    const { out } = await run(
-      ATTACKS,
-      ngwafApi({
-        series: [],
-        paging: { events: { pages: [[EVENT]], totals: [2, 2] } },
-      }),
+    const second = event("e2", "198.51.100.7", "blocked", [["XSS", 10]]);
+    const stopped = ATTACKS.replace(
+      "if (Date.now() > deadline)",
+      "if (page > 1)",
     );
-    expect(out.result.peak).toBeUndefined();
-    expect(out.result.flagged).toEqual([
-      { ip: "192.0.2.1", action: "flagged", signals: ["SQLI"] },
-    ]);
-    expect(out.result.flaggedPaging).toEqual({
-      seen: 1,
-      total: 2,
-      incomplete: "a page came back empty",
-    });
+    expect(stopped).not.toBe(ATTACKS);
+    for (const [code, events, flaggedPaging] of [
+      [
+        ATTACKS,
+        { pages: [[EVENT]], totals: [2, 2] },
+        { seen: 1, total: 2, incomplete: "a page came back empty" },
+      ],
+      // Out of time after the first page, so the page to continue from must come through.
+      [
+        stopped,
+        { pages: [[EVENT], [second]], totals: [2, 2] },
+        { seen: 1, total: 2, incomplete: "out of time", continueFrom: 2 },
+      ],
+    ]) {
+      const { out } = await run(
+        code,
+        ngwafApi({ series: [], paging: { events } }),
+      );
+      expect(out.result.peak).toBeUndefined();
+      expect(out.result.flagged).toEqual([
+        { ip: "192.0.2.1", action: "flagged", signals: ["SQLI"] },
+      ]);
+      expect(out.result.flaggedPaging).toEqual(flaggedPaging);
+    }
   }, 15000);
 
   // Explains a blocked request through its signals, the rule that fired and the lists it uses.

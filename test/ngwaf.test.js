@@ -224,20 +224,19 @@ describe("every NGWAF adapter", () => {
   test("optional options that are left out, null or undefined are not sent", async () => {
     for (const entry of methods()) {
       const client = recordingClient();
-      const unset = entry.params
-        .filter((p) => !p.required)
-        .map((p, i) => [p.name, i % 2 ? null : undefined]);
-      await call(client, entry, {
-        ...ngwafOptions(entry, entry.requiredParams),
-        ...Object.fromEntries(unset),
-      });
-      const [, , pathParams, , query] = client.calls[0];
-      expect(Object.keys({ ...pathParams, ...query }).sort()).toEqual(
-        [...entry.requiredParams].sort(),
-      );
-      if (entry.requiredParams.length === 0) {
-        await call(client, entry);
-        expect(client.calls[1][4]).toEqual({});
+      const required = ngwafOptions(entry, entry.requiredParams);
+      const optional = entry.params.filter((p) => !p.required);
+      for (const unset of [null, undefined]) {
+        await call(client, entry, {
+          ...required,
+          ...Object.fromEntries(optional.map((p) => [p.name, unset])),
+        });
+      }
+      if (entry.requiredParams.length === 0) await call(client, entry);
+      for (const [, , pathParams, , query] of client.calls) {
+        expect(Object.keys({ ...pathParams, ...query }).sort()).toEqual(
+          [...entry.requiredParams].sort(),
+        );
       }
     }
   });
