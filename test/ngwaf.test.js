@@ -9,29 +9,89 @@ import {
 } from "../src/ngwaf.js";
 
 // Written out here rather than read from the table, so a typo in the table cannot pass its own test.
+// Each entry gives the path, the required options, which are all strings, and every optional one with its type.
+const RULE_FILTERS = {
+  action: "String",
+  enabled: "Boolean",
+  limit: "Number",
+  page: "Number",
+  types: "String",
+};
 const OPERATIONS = [
-  ["NgwafRulesApi.listAccountRules", "/ngwaf/v1/rules", []],
+  ["NgwafRulesApi.listAccountRules", "/ngwaf/v1/rules", [], RULE_FILTERS],
   [
     "NgwafRulesApi.listWorkspaceRules",
     "/ngwaf/v1/workspaces/{workspace_id}/rules",
     ["workspace_id"],
+    RULE_FILTERS,
   ],
   [
     "NgwafWorkspacesApi.getWorkspace",
     "/ngwaf/v1/workspaces/{workspace_id}",
     ["workspace_id"],
+    {},
   ],
-  ["NgwafSignalsApi.listAccountSignals", "/ngwaf/v1/signals", []],
+  [
+    "NgwafWorkspacesApi.getTopAttacks",
+    "/ngwaf/v1/workspaces/{workspace_id}/top-attacks",
+    ["workspace_id", "field", "from"],
+    { to: "String", limit: "Number" },
+  ],
+  [
+    "NgwafSignalsApi.listAccountSignals",
+    "/ngwaf/v1/signals",
+    [],
+    { limit: "Number" },
+  ],
   [
     "NgwafSignalsApi.listWorkspaceSignals",
     "/ngwaf/v1/workspaces/{workspace_id}/signals",
     ["workspace_id"],
+    { limit: "Number" },
   ],
-  ["NgwafListsApi.listAccountLists", "/ngwaf/v1/lists", []],
+  ["NgwafListsApi.listAccountLists", "/ngwaf/v1/lists", [], {}],
   [
     "NgwafListsApi.listWorkspaceLists",
     "/ngwaf/v1/workspaces/{workspace_id}/lists",
     ["workspace_id"],
+    {},
+  ],
+  [
+    "NgwafEventsApi.listEvents",
+    "/ngwaf/v1/workspaces/{workspace_id}/events",
+    ["workspace_id", "from"],
+    {
+      to: "String",
+      ip: "String",
+      signal: "String",
+      status: "String",
+      limit: "Number",
+      page: "Number",
+    },
+  ],
+  [
+    "NgwafEventsApi.getEvent",
+    "/ngwaf/v1/workspaces/{workspace_id}/events/{event_id}",
+    ["workspace_id", "event_id"],
+    {},
+  ],
+  [
+    "NgwafRequestsApi.searchWorkspaceRequests",
+    "/ngwaf/v1/workspaces/{workspace_id}/requests",
+    ["workspace_id"],
+    { q: "String", limit: "Number", page: "Number" },
+  ],
+  [
+    "NgwafRequestsApi.getRequest",
+    "/ngwaf/v1/workspaces/{workspace_id}/requests/{request_id}",
+    ["workspace_id", "request_id"],
+    {},
+  ],
+  [
+    "NgwafTimeseriesApi.getWorkspaceTimeseries",
+    "/ngwaf/v1/workspaces/{workspace_id}/timeseries",
+    ["workspace_id", "start", "metrics"],
+    { end: "String", granularity: "Number" },
   ],
 ];
 
@@ -192,8 +252,17 @@ describe("every NGWAF adapter", () => {
         `${entry.apiClass}.${entry.method}`,
         entry.httpPath,
         entry.params.filter((p) => p.required).map((p) => p.name),
+        Object.fromEntries(
+          entry.params.filter((p) => !p.required).map((p) => [p.name, p.type]),
+        ),
       ]),
     ).toEqual(OPERATIONS);
+    // Usage examples fill required options with '...', which only suits strings.
+    for (const entry of ngwafMethods()) {
+      for (const param of entry.params.filter((p) => p.required)) {
+        expect(param.type).toBe("String");
+      }
+    }
     for (const entry of ngwafMethods()) {
       expect(entry.httpMethod).toBe("GET");
       for (const name of entry.httpPath.match(/(?<=\{)\w+(?=\})/g) ?? []) {

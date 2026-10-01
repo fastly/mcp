@@ -255,4 +255,96 @@ describe("NGWAF discovery", () => {
       "matching on `reference_id`, never on `id`",
     );
   });
+
+  test("analysis questions find the NGWAF methods before look-alikes", () => {
+    const ranked = (query) =>
+      search(index, query).matches.map((m) => `${m.apiClass}.${m.method}`);
+    for (const [query, first, below] of [
+      ["waf attacks", "NgwafWorkspacesApi.getTopAttacks"],
+      ["top attacks", "NgwafWorkspacesApi.getTopAttacks"],
+      ["blocked requests", "NgwafRequestsApi.searchWorkspaceRequests"],
+      ["ngwaf events", "NgwafEventsApi.listEvents", "EventsApi.listEvents"],
+      ["simulate request", "NgwafSimulateApi.ngwafSimulateWafRequest"],
+      [
+        "waf timeseries",
+        "NgwafTimeseriesApi.getWorkspaceTimeseries",
+        "ObservabilityTimeseriesApi.timeseriesGet",
+      ],
+    ]) {
+      const results = ranked(query);
+      expect(results[0]).toBe(first);
+      if (below) expect(results.indexOf(below)).toBeGreaterThan(0);
+    }
+    expect(ranked("waf attacks")).toContain("NgwafReportsApi.getAttacksReport");
+  });
+
+  test("every summary is a whole first sentence", () => {
+    for (const { apiClass, method, description } of ngwafMethods()) {
+      const [match] = search(index, `${apiClass} ${method}`).matches;
+      expect(`${match.apiClass}.${match.method}`).toBe(`${apiClass}.${method}`);
+      expect(description.startsWith(match.summary)).toBe(true);
+      expect(match.summary.endsWith(".")).toBe(true);
+    }
+  });
+
+  test("analysis methods show required options in usage and explain their limits", () => {
+    const usage = (name) => inspect(index, name).example;
+    expect(usage("NgwafEventsApi.listEvents")).toBe(
+      "return await ngwafEventsApi.listEvents({ workspace_id: '...', from: '...' });",
+    );
+    expect(usage("NgwafTimeseriesApi.getWorkspaceTimeseries")).toBe(
+      "return await ngwafTimeseriesApi.getWorkspaceTimeseries({ workspace_id: '...', start: '...', metrics: '...' });",
+    );
+    expect(usage("NgwafWorkspacesApi.getTopAttacks")).toBe(
+      "return await ngwafWorkspacesApi.getTopAttacks({ workspace_id: '...', field: '...', from: '...' });",
+    );
+    expect(usage("NgwafRequestsApi.getRequest")).toBe(
+      "return await ngwafRequestsApi.getRequest({ workspace_id: '...', request_id: '...' });",
+    );
+
+    const doc = (name) => inspect(index, name).description;
+    expect(doc("NgwafEventsApi.listEvents")).toContain(
+      "`eventsApi.listEvents`",
+    );
+    // Events come from more than thresholds, and the summary is all that search shows.
+    expect(
+      search(index, "ngwaf events").matches.find(
+        (m) => m.method === "listEvents",
+      ).summary,
+    ).toBe(
+      "List one page of NGWAF events, the actions the WAF took against an IP because of threshold-based blocking, templated rules or site alerts.",
+    );
+    expect(doc("NgwafEventsApi.getEvent")).toContain("`eventsApi.getEvent`");
+    expect(doc("NgwafTimeseriesApi.getWorkspaceTimeseries")).toContain(
+      "`observabilityTimeseriesApi.timeseriesGet`",
+    );
+    const searchDoc = doc("NgwafRequestsApi.searchWorkspaceRequests");
+    for (const phrase of [
+      "`from:` and `until:`",
+      "at most seven days",
+      "does not mean nothing happened",
+      "`ngwafReportsApi.getAttacksReport`",
+      "is unverified",
+      "never start from 0",
+      "`meta.total` counts only the matches",
+      "refused with a 400",
+      "`JSON.parse(e.body).detail`",
+      "about 20 seconds",
+      "never the raw `request_headers`",
+      "`reference_id`",
+    ]) {
+      expect(searchDoc).toContain(phrase);
+    }
+    expect(doc("NgwafRequestsApi.getRequest")).toContain(
+      "`ngwafSimulateApi.ngwafSimulateWafRequest`",
+    );
+    expect(doc("NgwafTimeseriesApi.getWorkspaceTimeseries")).toContain(
+      "read the step from the timestamps",
+    );
+    expect(
+      inspect(index, "NgwafEventsApi.listEvents").params.find(
+        (p) => p.name === "status",
+      ),
+    ).toMatchObject({ type: "String", required: false });
+  });
 });
