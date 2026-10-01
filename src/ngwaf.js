@@ -297,6 +297,7 @@ const STORED = [
 const SIGNAL_TAGS = [
   "Signals are named by tag: system signals use names such as `SQLI`, `XSS` or `HTTP404`, and custom ones `site.<name>` or `corp.<name>`.",
   "Resolve a custom tag against `reference_id` in `ngwafSignalsApi.listWorkspaceSignals` and `listAccountSignals`, never against `id`.",
+  "Custom tags have the same form as `reference_id`, but no live check has confirmed yet that they match, so say so when a custom tag finds no signal.",
 ];
 
 const DETECTORS =
@@ -313,6 +314,7 @@ const PRIVACY = [
 const SIGNAL_NAMES = [
   "Events, requests and rules name a custom signal by its `reference_id`, such as `corp.bad-bot` or `site.bad-bot`.",
   "Match those names against `reference_id`, never against `id`, which for a workspace signal is an unrelated opaque string.",
+  "Custom tags have the same form as `reference_id`, but no live check has confirmed yet that they match, so say so when a custom tag finds no signal.",
   "System signals such as `SQLI`, `XSS` and `HTTP404` are built in and never appear here.",
   "There is no `page` option, so pass `limit: 200` to ask for every signal a scope can hold in one call.",
   "The API accepts a `limit` of up to 1,000.",

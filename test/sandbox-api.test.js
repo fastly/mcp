@@ -1330,7 +1330,8 @@ return {
   ips: ips.data.map(({ value, count }) => ({ value, count })),
   peak: peak && { at: peak.timestamp, attacks: peak.requests_attack },
   flagged,
-  flaggedIncomplete: events.incomplete,
+  // An incomplete event read keeps its reason and, after a timeout, the page to continue from.
+  flaggedPaging: events.incomplete && events,
 };`;
 
   test("is anyone attacking us", async () => {
@@ -1394,7 +1395,34 @@ return {
     expect(out.result.flagged).toEqual([
       { ip: "192.0.2.1", action: "flagged", signals: ["SQLI"] },
     ]);
-    expect(out.result.flaggedIncomplete).toBe("a page came back empty");
+    expect(out.result.flaggedPaging).toEqual({
+      seen: 1,
+      total: 2,
+      incomplete: "a page came back empty",
+    });
+  }, 15000);
+
+  test("an overview that runs out of time while reading events gives the page to continue from", async () => {
+    const stopped = ATTACKS.replace(
+      "if (Date.now() > deadline)",
+      "if (page > 1)",
+    );
+    expect(stopped).not.toBe(ATTACKS);
+    const second = event("e2", "198.51.100.7", "blocked", [["XSS", 10]]);
+    const { out } = await run(
+      stopped,
+      ngwafApi({
+        events: [EVENT, second],
+        paging: { events: { pages: [[EVENT], [second]] } },
+      }),
+    );
+    expect(out.result.flagged).toHaveLength(1);
+    expect(out.result.flaggedPaging).toEqual({
+      seen: 1,
+      total: 2,
+      incomplete: "out of time",
+      continueFrom: 2,
+    });
   }, 15000);
 
   // Explains one blocked request through its signals, the rule behind them and the lists that rule uses.
@@ -1407,7 +1435,11 @@ return {
          page: 1,
        });
        // Only some requests are stored, so no match is an answer of its own.
-       if (found.data.length === 0) return { stored: 0 };
+       if (found.meta.total === 0) return { stored: 0 };
+       // An empty first page despite matches is a failed read, not an absence.
+       if (found.data.length === 0) {
+         return { stored: found.meta.total, incomplete: 'the first page came back empty' };
+       }
        const request = await ngwafRequestsApi.getRequest({ workspace_id, request_id: found.data[0].id });
        const rules = new Map();
        const [workspace, wsSignals, acctSignals, wsLists, acctLists, wsRules, acctRules] = await Promise.all([
@@ -1512,6 +1544,21 @@ return {
           new URL(c.url, "https://api.fastly.com").searchParams.get("page"),
         ),
     ).toEqual(["1", "2"]);
+  }, 15000);
+
+  test("an empty first page with matches is not reported as nothing stored", async () => {
+    const { out, calls } = await run(
+      WHY_BLOCKED,
+      ngwafApi({
+        requests: MATCHES,
+        paging: { requests: { pages: [[]] } },
+      }),
+    );
+    expect(out.result).toEqual({
+      stored: 5,
+      incomplete: "the first page came back empty",
+    });
+    expect(calls.some((c) => c.url.includes("/requests/"))).toBe(false);
   }, 15000);
 
   test("a request that was not stored is reported as such", async () => {

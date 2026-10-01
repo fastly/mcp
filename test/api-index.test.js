@@ -332,8 +332,18 @@ describe("NGWAF discovery", () => {
       "about 20 seconds",
       "never the raw `request_headers`",
       "`reference_id`",
+      "no live check has confirmed yet",
     ]) {
       expect(searchDoc).toContain(phrase);
+    }
+    for (const name of [
+      "NgwafRequestsApi.getRequest",
+      "NgwafEventsApi.listEvents",
+      "NgwafEventsApi.getEvent",
+      "NgwafSignalsApi.listAccountSignals",
+      "NgwafSignalsApi.listWorkspaceSignals",
+    ]) {
+      expect(doc(name)).toContain("no live check has confirmed yet");
     }
     expect(doc("NgwafRequestsApi.getRequest")).toContain(
       "`ngwafSimulateApi.ngwafSimulateWafRequest`",
