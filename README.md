@@ -191,27 +191,33 @@ Clone the active version of service ABC123, add a backend named origin-api, and 
 If an answer looks too broad, ask the assistant to narrow the result in code before returning it.
 Targeted calls are easier to review and less likely to leak irrelevant information.
 
+### Next-Gen WAF investigations
+
+The server adds read-only NGWAF methods.
+
+They cover account and workspace rules, signals and lists; workspace settings and top attacks; event listing and detail; stored request search and detail; and workspace time series.
+
 ### Large results
 
 A result is returned in full whenever it fits in one response, no matter how many records it holds: a list of several hundred users comes back complete.
 
 A result too large for one response is still not thrown away.
+
 The server writes all of it to a JSON file, and the response carries the path in `resultFile` together with a short preview in `result`.
 Ask the assistant to read that file when you want every record, instead of running the query again.
 
 Files are written to `fastly-mcp-results` under the system temporary directory, one result per file, readable only by the account running the server.
+
 A single file holds at most 4 MB; a result larger than that is described in the response and the assistant is asked to return less.
 The same ceiling applies to what one Fastly API call may hand to the code: a larger response fails that call with an error asking for paging or filtering, rather than arriving with pieces silently missing.
+
 The newest twenty files are kept, and every file is removed after six hours whether or not the server has been busy since.
 When secret encryption is enabled, secrets are encrypted in the whole result before it is stored or cut down to a preview.
 Reading the file cannot reveal a value the response would have hidden, and neither can a preview that happens to stop in the middle of a token.
+
 Use `--result-dir <path>` to put them somewhere else, or `--result-dir off` to turn the feature off and have oversized results described rather than stored.
 
 A remote server never writes result files, because its callers could not read them.
-
-Results keep up to twelve levels of nesting.
-A deeper result is cut at that depth and flagged as incomplete.
-A Fastly API response nested deeper fails the call instead of arriving with pieces missing.
 
 ## Secret encryption
 
