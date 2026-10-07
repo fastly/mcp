@@ -11,13 +11,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  createAuditLog,
-  fileSink,
-  methodLabel,
-  streamSink,
-  toolLabel,
-} from "../src/audit.js";
+import { createAuditLog, methodLabel, toolLabel } from "../src/audit.js";
+import { fileSink, streamSink } from "../src/audit-sinks.js";
 
 const FIXED_TIME = "2026-09-22T10:20:30.456Z";
 const wallClock = () => new Date(FIXED_TIME);
