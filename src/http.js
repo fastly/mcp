@@ -7,10 +7,19 @@ import { toNodeHandler } from "@modelcontextprotocol/node";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { methodLabel, toolLabel } from "./audit.js";
 import { rateLimitKey, resolveClientAddress } from "./client-address.js";
+import {
+  authErrorHeaders,
+  corsHeaders,
+  describeMcpBody,
+  jsonRpcError,
+  MAX_BODY_BYTES,
+  MCP_PATH,
+  NO_STORE,
+  parseCsv,
+  TOO_LARGE,
+} from "./http-policy.js";
 import { RemoteAuthError, readFastlyKey } from "./remote-auth.js";
 import { requestContext } from "./request-context.js";
-
-const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
 export function isLoopbackHost(host) {
   if (!host) return false;
@@ -128,14 +137,6 @@ export function buildAllowedHosts({
   return hosts;
 }
 
-function parseCsv(value) {
-  if (!value) return [];
-  return value
-    .split(",")
-    .map((v) => v.trim())
-    .filter(Boolean);
-}
-
 const REMOTE_ONLY_FLAGS = [
   ["httpTrustedProxies", "--http-trusted-proxy"],
   ["auditLog", "--audit-log"],
@@ -196,7 +197,7 @@ export function resolveHttpOptions({ cliArgs, env = {}, defaults = {} }) {
     throw new Error(`Invalid --http-port value "${portRaw}"`);
   }
 
-  const path = cliArgs.httpPath ?? "/mcp";
+  const path = cliArgs.httpPath ?? MCP_PATH;
   if (!path.startsWith("/")) {
     throw new Error(`--http-path must start with "/", got "${path}"`);
   }
@@ -260,16 +261,7 @@ function writeJson(res, status, body, extraHeaders = {}) {
 }
 
 function writeJsonError(res, status, message, extraHeaders = {}) {
-  writeJson(
-    res,
-    status,
-    {
-      jsonrpc: "2.0",
-      error: { code: status, message },
-      id: null,
-    },
-    extraHeaders,
-  );
+  writeJson(res, status, jsonRpcError(status, message), extraHeaders);
 }
 
 function constantTimeEquals(a, b) {
@@ -287,8 +279,6 @@ function checkAuth(req, token) {
   if (!m) return false;
   return constantTimeEquals(m[1], token);
 }
-
-const TOO_LARGE = "Request body too large";
 
 const TOO_SLOW = "Request body took too long to arrive";
 
@@ -332,16 +322,11 @@ async function readBody(req, { timeoutMs } = {}) {
 }
 
 function applyCors(res, originHeader) {
-  res.setHeader("Access-Control-Allow-Origin", originHeader);
-  res.setHeader("Vary", "Origin");
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    "Content-Type, Accept, Authorization, Fastly-Key, Last-Event-ID, Mcp-Method, Mcp-Name, Mcp-Protocol-Version",
-  );
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+  for (const [name, value] of Object.entries(corsHeaders(originHeader))) {
+    res.setHeader(name, value);
+  }
 }
 
-const NO_STORE = "no-store, no-transform";
 const MAX_IN_FLIGHT_REQUESTS = 512;
 const REQUEST_BODY_TIMEOUT_MS = 30_000;
 
@@ -371,18 +356,6 @@ export function disconnectSignal(res) {
       controller.abort(new Error("Client disconnected"));
   });
   return controller.signal;
-}
-
-function describeMcpBody(body) {
-  if (Array.isArray(body)) return { method: "batch" };
-  if (body === null || typeof body !== "object") return {};
-  const method = typeof body.method === "string" ? body.method : undefined;
-  const name = body.params?.name;
-  return {
-    method,
-    tool:
-      method === "tools/call" && typeof name === "string" ? name : undefined,
-  };
 }
 
 function admitLocalRequest(req, res, { authToken, reqPath, path }) {
@@ -496,10 +469,12 @@ async function admitRemoteRequest(
     if (error.category === "key_rejected" || error.category === "key_expired") {
       budgets.recordFailure(source);
     }
-    const headers = {};
-    if (error.status === 401) headers["WWW-Authenticate"] = "FastlyKey";
-    if (error.retryAfter) headers["Retry-After"] = String(error.retryAfter);
-    refuse(error.status, error.category, error.message, headers);
+    refuse(
+      error.status,
+      error.category,
+      error.message,
+      authErrorHeaders(error),
+    );
     return undefined;
   }
 
