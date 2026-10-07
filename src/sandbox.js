@@ -3,7 +3,7 @@
 import { text } from "node:stream/consumers";
 import vm from "node:vm";
 import Fastly from "fastly";
-import { describeThrown, read } from "./errors.js";
+import { describeThrown, read, snippetLine } from "./errors.js";
 import {
   API_RESPONSE_BYTES,
   INLINE_RESULT_BYTES,
@@ -12,7 +12,6 @@ import {
 import { operationsOf, remoteDenial } from "./method-policy.js";
 import { NGWAF_API_CLASSES } from "./ngwaf.js";
 import { serializeResult } from "./serializer.js";
-import { truncateOutsideSecrets } from "./truncate.js";
 
 const { code, fastlyApiToken, policy } = JSON.parse(await text(process.stdin));
 
@@ -777,19 +776,8 @@ function rewriteError(err, source) {
   // A stack whose frames were all internal says nothing the message did not.
   if (kept.length > 1) out.stack = kept.join("\n");
 
-  if (firstUserFrame) {
-    const srcLines = source.split("\n");
-    const raw = srcLines[firstUserFrame.number - 1];
-    if (raw !== undefined) {
-      // Arguments are decrypted before the code runs, so this line can hold a secret the model only saw encrypted.
-      const trimmed = truncateOutsideSecrets(raw, 200, "…");
-      out.line = {
-        number: firstUserFrame.number,
-        column: firstUserFrame.column,
-        source: trimmed,
-      };
-    }
-  }
+  const line = firstUserFrame && snippetLine(source, firstUserFrame);
+  if (line) out.line = line;
 
   return out;
 }

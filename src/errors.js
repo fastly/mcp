@@ -126,3 +126,13 @@ export function describeThrown(err) {
 
   return out;
 }
+
+/**
+ * The source line a stack frame points at, for the `line` field of a snippet error.
+ * Arguments are decrypted before the code runs, so the line can hold a secret the model only saw encrypted, and the cut keeps tokens whole.
+ */
+export function snippetLine(source, { number, column }) {
+  const line = source.split("\n")[number - 1];
+  if (line === undefined) return undefined;
+  return { number, column, source: truncateOutsideSecrets(line, 200, "…") };
+}
