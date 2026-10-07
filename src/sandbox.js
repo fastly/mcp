@@ -1,3 +1,6 @@
+// Entry point of the execution child; nothing else imports it.
+
+import { text } from "node:stream/consumers";
 import vm from "node:vm";
 import Fastly from "fastly";
 import { describeThrown, read } from "./errors.js";
@@ -11,17 +14,7 @@ import { NGWAF_API_CLASSES } from "./ngwaf.js";
 import { serializeResult } from "./serializer.js";
 import { truncateOutsideSecrets } from "./truncate.js";
 
-const input =
-  typeof Bun !== "undefined"
-    ? await Bun.stdin.text()
-    : await new Promise((resolve) => {
-        const chunks = [];
-        process.stdin.on("data", (c) => chunks.push(c));
-        process.stdin.on("end", () =>
-          resolve(Buffer.concat(chunks).toString()),
-        );
-      });
-const { code, fastlyApiToken, policy } = JSON.parse(input);
+const { code, fastlyApiToken, policy } = JSON.parse(await text(process.stdin));
 
 // Only the host decides this; it arrives next to the code, never inside it.
 const remote = policy?.remote === true;

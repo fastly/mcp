@@ -579,7 +579,7 @@ export async function execute(
         .slice(0, MAX_STDERR + 1 - stderr.length);
     });
 
-    child.on("close", (exitCode, exitSignal) => {
+    child.on("close", function onChildClose(exitCode, exitSignal) {
       stdout += stdoutDecoder.end();
       if (stderr.length <= MAX_STDERR) {
         stderr += stderrDecoder.end().slice(0, MAX_STDERR + 1 - stderr.length);

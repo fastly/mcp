@@ -20,10 +20,14 @@
     "indentStyle": "space",
     "indentWidth": 2
   },
+  "plugins": ["./lint/no-token-env.grit"],
   "linter": {
     "enabled": true,
     "rules": {
-      "preset": "recommended"
+      "preset": "recommended",
+      "suspicious": {
+        "noVar": "error"
+      }
     }
   },
   "javascript": {

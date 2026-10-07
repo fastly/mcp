@@ -1,6 +1,5 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import pkg from "../package.json" with { type: "json" };
 import { admissionLimits, createAdmission } from "./admission.js";
 import { buildApiIndex } from "./api-index.js";
 import { createAuditLog, fileSink, streamSink } from "./audit.js";
@@ -25,13 +24,6 @@ import { resolveResultStore } from "./result-files.js";
 import { SecretShield } from "./secrets.js";
 import { createMcpServer } from "./server.js";
 import { execute, killAllExecutions } from "./tools/execute.js";
-
-const pkg = JSON.parse(
-  readFileSync(
-    join(import.meta.dirname ?? import.meta.dir, "../package.json"),
-    "utf-8",
-  ),
-);
 
 const EXECUTION_CPU_SECONDS = 30;
 const DEFAULT_MAX_EXECUTIONS = 8;

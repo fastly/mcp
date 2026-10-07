@@ -1,4 +1,5 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
+import { once } from "node:events";
 import { createServer } from "node:http";
 import { isIP } from "node:net";
 import { networkInterfaces, hostname as osHostname } from "node:os";
@@ -796,13 +797,8 @@ export async function startHttp(
     process.on(signal, () => shutdown(signal));
   }
 
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(port, host, () => {
-      server.off("error", reject);
-      resolve();
-    });
-  });
+  server.listen(port, host);
+  await once(server, "listening");
 
   const actual = server.address();
   const boundPort = actual && typeof actual === "object" ? actual.port : port;

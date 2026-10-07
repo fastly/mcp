@@ -3,7 +3,9 @@
   "version": "2.3.0",
   "description": "MCP server that gives AI agents full access to the Fastly API",
   "type": "module",
-  "main": "src/index.js",
+  "exports": {
+    "./package.json": "./package.json"
+  },
   "bin": {
     "fastly-mcp": "src/index.js"
   },
