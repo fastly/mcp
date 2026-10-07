@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import {
-  createTokenValidator,
-  KEY_HINT,
-  RemoteAuthError,
-  readFastlyKey,
-} from "../src/remote-auth.js";
+import { KEY_HINT, RemoteAuthError } from "../src/fastly-identity.js";
+import { createTokenValidator, readFastlyKey } from "../src/remote-auth.js";
 
 const TOKEN_A = "synthetic-token-A";
 const TOKEN_B = "synthetic-token-B";

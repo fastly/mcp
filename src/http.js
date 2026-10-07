@@ -7,6 +7,7 @@ import { toNodeHandler } from "@modelcontextprotocol/node";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { methodLabel, toolLabel } from "./audit.js";
 import { rateLimitKey, resolveClientAddress } from "./client-address.js";
+import { RemoteAuthError } from "./fastly-identity.js";
 import {
   authErrorHeaders,
   corsHeaders,
@@ -18,7 +19,7 @@ import {
   parseCsv,
   TOO_LARGE,
 } from "./http-policy.js";
-import { RemoteAuthError, readFastlyKey } from "./remote-auth.js";
+import { readFastlyKey } from "./remote-auth.js";
 import { requestContext } from "./request-context.js";
 
 export function isLoopbackHost(host) {
