@@ -1,10 +1,5 @@
 import { BUILTIN_PATTERNS, scan } from "fast-cipher/tokens";
-
-/** `text.slice(0, end)`, minus the first half of a character that takes two UTF-16 units, such as an emoji. */
-export function sliceWhole(text, end) {
-  const last = text.charCodeAt(end - 1);
-  return text.slice(0, last >= 0xd800 && last <= 0xdbff ? end - 1 : end);
-}
+import { sliceWhole } from "./text.js";
 
 /**
  * The first `limit` characters of `text` followed by `suffix`, or fewer when the cut would go through a secret.

@@ -1,4 +1,5 @@
 import { types } from "node:util";
+import { utf8Length } from "./text.js";
 import { truncateOutsideSecrets } from "./truncate.js";
 
 const mapEntries = Map.prototype.entries;
@@ -200,7 +201,7 @@ export function serializeResult(
     }
     const json = JSON.stringify(normalized);
     if (json === undefined) return { value: null };
-    const jsonBytes = Buffer.byteLength(json);
+    const jsonBytes = utf8Length(json);
     if (depthLimit === maxDepth) {
       if (jsonBytes <= maxSize) {
         return cappedDepth

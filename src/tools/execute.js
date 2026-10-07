@@ -15,7 +15,8 @@ import {
 } from "../limits.js";
 import { shieldJson, WITHHELD, WRAPPER_OPENER } from "../secrets.js";
 import { setKey } from "../serializer.js";
-import { sliceWhole, truncateOutsideSecrets } from "../truncate.js";
+import { sliceWhole } from "../text.js";
+import { truncateOutsideSecrets } from "../truncate.js";
 
 const TIMEOUT_MS = 30_000;
 // Extra time a child gives itself past the parent's deadline, in case the
