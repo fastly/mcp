@@ -1,4 +1,4 @@
-import { buildUsage, enrichMethod } from "../indexer.js";
+import { buildUsage, enrichMethod } from "../method-entry.js";
 
 const MAX_RESULTS = 10;
 

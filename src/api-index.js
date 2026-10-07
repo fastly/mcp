@@ -1,4 +1,5 @@
-import { buildIndex, enrichMethod } from "./indexer.js";
+import { buildIndex } from "./indexer.js";
+import { enrichMethod } from "./method-entry.js";
 import { ngwafMethods } from "./ngwaf.js";
 
 /**

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { buildIndex, enrichMethod } from "../src/indexer.js";
+import { buildIndex } from "../src/indexer.js";
+import { enrichMethod } from "../src/method-entry.js";
 import { operationsOf } from "../src/method-policy.js";
 import { NGWAF_API_CLASSES, ngwafMethods } from "../src/ngwaf.js";
 import { ngwafOptions } from "./helpers.js";

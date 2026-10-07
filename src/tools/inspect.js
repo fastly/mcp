@@ -1,4 +1,4 @@
-import { buildUsage, enrichMethod } from "../indexer.js";
+import { buildUsage, enrichMethod } from "../method-entry.js";
 import { remoteUnavailableOperations } from "../method-policy.js";
 
 // The remote index leaves these operations out, so without this the model

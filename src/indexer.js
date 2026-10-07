@@ -1,5 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { enrichMethod } from "./method-entry.js";
 
 const DOCS_DIR = join(import.meta.dirname ?? import.meta.dir, "../docs");
 
@@ -173,45 +174,6 @@ function parseApiDoc(content, apiClass) {
   }
 
   return methods;
-}
-
-function extractPathParams(httpPath) {
-  if (typeof httpPath !== "string") return [];
-  const out = [];
-  const re = /\{([^}]+)\}/g;
-  let m = re.exec(httpPath);
-  while (m !== null) {
-    out.push(m[1]);
-    m = re.exec(httpPath);
-  }
-  return out;
-}
-
-export function enrichMethod(method) {
-  if (!Array.isArray(method.params)) method.params = [];
-  if (method.methodLower !== undefined) return method;
-  const apiClass = method.apiClass;
-  method.shortcut = apiClass.charAt(0).toLowerCase() + apiClass.slice(1);
-  method.methodLower = method.method.toLowerCase();
-  method.classLower = apiClass.toLowerCase();
-  method.pathLower = (method.httpPath ?? "").toLowerCase();
-  method.descLower = (method.description ?? "").toLowerCase();
-  method.returnLower = (method.returnType ?? "").toLowerCase();
-  method.paramsLower = method.params.map((p) => p.name.toLowerCase());
-  method.requiredParams = method.params
-    .filter((p) => p.required === true)
-    .map((p) => p.name);
-  method.pathParams = extractPathParams(method.httpPath);
-  return method;
-}
-
-/** A call to an enriched method with placeholders for its required parameters. */
-export function buildUsage(method) {
-  const args =
-    method.requiredParams.length > 0
-      ? `{ ${method.requiredParams.map((p) => `${p}: '...'`).join(", ")} }`
-      : "";
-  return `return await ${method.shortcut}.${method.method}(${args});`;
 }
 
 export async function buildIndex(docsDir = DOCS_DIR) {
