@@ -22,6 +22,7 @@
 - HTTP defaults are loopback `127.0.0.1`, port `8231`, and `/mcp`; `--http-json` and `--http-sse` are mutually exclusive and affect only modern 2026-07-28 exchanges, while the 2025 fallback always uses SSE. Modern requests need `Mcp-Protocol-Version`, `Mcp-Method`, and `Mcp-Name` for `tools/call`; preserve the matching header/body validation and CORS allow-list entries.
 - Remote tests inject fake Fastly endpoints and host checks through code-only `runCli({ overrides })` seams. Never add a CLI flag or environment variable that weakens those checks; macOS skips Linux hardening coverage, so execution-profile release qualification also needs Linux/Docker coverage.
 - `docs/*Api.md` is generated input for the runtime index, not executable sandbox guidance. Do not copy upstream `apiInstance` promise examples; regenerate documentation with `bun run update-docs` rather than editing generated API docs by hand.
+- Methods this server implements itself live in `src/ngwaf.js` and `src/log-explorer.js`, both built on `src/api-adapter.js`. An owned class that the SDK also exports has to be listed in its module's `REPLACED_SDK_CLASSES`, which drops the generated operations from the index. Any undeclared overlap fails at startup, in `src/api-index.js` and in `src/sandbox.js`. Verify an adapter against the live API before writing its guidance, and say in the description which claims are unverified.
 
 ## Commit & Pull Request Guidelines
 

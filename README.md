@@ -288,6 +288,20 @@ The server adds read-only NGWAF methods covering:
 - Stored request search and detail.
 - Workspace time series.
 
+### Log Explorer and Insights
+
+The server adds read-only Log Explorer & Insights methods covering:
+
+- Request log search, narrowed by status, path, response time, POP, device, or bot.
+- Ready-made rankings, such as the busiest URLs or the slowest ones.
+- Your own grouped metrics, such as the p95 response time per POP.
+
+The service needs the Log Explorer & Insights product enabled.
+
+Fastly samples this data and keeps it for seven days.
+So these methods answer "what did the slow requests look like" rather than "how many requests were there".
+Ask for stats when you need exact counts.
+
 ### Large results
 
 A result is returned in full whenever it fits in one response, no matter how many records it holds: a list of several hundred users comes back complete.

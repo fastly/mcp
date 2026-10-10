@@ -1,106 +1,13 @@
-// Discovery imports this module in the server process, so keep the SDK import in the sandbox.
-
+import {
+  bytes,
+  describeOperations,
+  OwnedApi,
+  operationTable,
+  param,
+} from "./api-adapter.js";
 import { API_RESPONSE_BYTES, INLINE_RESULT_BYTES } from "./limits.js";
 
-const BASE_PATH = "https://api.fastly.com";
-
-function isType(value, type) {
-  if (type === "Number") return Number.isInteger(value);
-  return typeof value === type.toLowerCase();
-}
-
-// Refuse unknown options, so callers never mistake them for filters that were applied.
-function readOptions(method, options, params) {
-  if (options === undefined) return {};
-  if (
-    typeof options !== "object" ||
-    options === null ||
-    Array.isArray(options)
-  ) {
-    throw new TypeError(`${method} takes a single options object.`);
-  }
-  const values = {};
-  for (const [name, value] of Object.entries(options)) {
-    const param = params.find((p) => p.name === name);
-    if (param === undefined) {
-      const accepted = params.length
-        ? `Its options are ${params.map((p) => p.name).join(", ")}.`
-        : "It takes no options.";
-      throw new TypeError(`${method} does not accept '${name}'. ${accepted}`);
-    }
-    if (value === undefined || value === null) continue;
-    if (!isType(value, param.type)) {
-      const expected =
-        param.type === "Number"
-          ? "an integer"
-          : `a ${param.type.toLowerCase()}`;
-      throw new TypeError(`'${name}' must be ${expected}.`);
-    }
-    values[name] = value;
-  }
-  return values;
-}
-
-function requireValue(name, value) {
-  if (value === undefined || value === "") {
-    throw new Error(`Missing the required parameter '${name}'.`);
-  }
-}
-
-function requireId(name, id) {
-  requireValue(name, id);
-  // Dots survive path encoding and can change which endpoint receives the request.
-  if (id === "." || id === "..") {
-    throw new Error(`'${name}' must be an ID, not '${id}'.`);
-  }
-  return id;
-}
-
-async function request(apiClient, operation, options) {
-  const { method, httpMethod, httpPath, params } = operation;
-  const values = readOptions(method, options, params);
-  const pathParams = {};
-  const queryParams = { ...values };
-  for (const { name, required } of params) {
-    if (httpPath.includes(`{${name}}`)) {
-      pathParams[name] = requireId(name, values[name]);
-      delete queryParams[name];
-    } else if (required) {
-      requireValue(name, values[name]);
-    }
-  }
-  const response = await apiClient.callApi(
-    httpPath,
-    httpMethod,
-    pathParams,
-    {},
-    queryParams,
-    {},
-    {},
-    null,
-    ["token"],
-    [],
-    ["application/json"],
-    Object,
-    BASE_PATH,
-  );
-  return response.data;
-}
-
-// Snippets can only call a class's own methods, so nothing on this base class is reachable.
-class NgwafApi {
-  #apiClient;
-
-  constructor(apiClient) {
-    this.#apiClient = apiClient;
-  }
-
-  send(operation, options) {
-    return request(this.#apiClient, operation, options);
-  }
-}
-
-export class NgwafRulesApi extends NgwafApi {
+export class NgwafRulesApi extends OwnedApi {
   listAccountRules(options) {
     return this.send(OPERATIONS.listAccountRules, options);
   }
@@ -110,7 +17,7 @@ export class NgwafRulesApi extends NgwafApi {
   }
 }
 
-export class NgwafWorkspacesApi extends NgwafApi {
+export class NgwafWorkspacesApi extends OwnedApi {
   getWorkspace(options) {
     return this.send(OPERATIONS.getWorkspace, options);
   }
@@ -120,7 +27,7 @@ export class NgwafWorkspacesApi extends NgwafApi {
   }
 }
 
-export class NgwafEventsApi extends NgwafApi {
+export class NgwafEventsApi extends OwnedApi {
   listEvents(options) {
     return this.send(OPERATIONS.listEvents, options);
   }
@@ -130,7 +37,7 @@ export class NgwafEventsApi extends NgwafApi {
   }
 }
 
-export class NgwafRequestsApi extends NgwafApi {
+export class NgwafRequestsApi extends OwnedApi {
   searchWorkspaceRequests(options) {
     return this.send(OPERATIONS.searchWorkspaceRequests, options);
   }
@@ -140,13 +47,13 @@ export class NgwafRequestsApi extends NgwafApi {
   }
 }
 
-export class NgwafTimeseriesApi extends NgwafApi {
+export class NgwafTimeseriesApi extends OwnedApi {
   getWorkspaceTimeseries(options) {
     return this.send(OPERATIONS.getWorkspaceTimeseries, options);
   }
 }
 
-export class NgwafSignalsApi extends NgwafApi {
+export class NgwafSignalsApi extends OwnedApi {
   listAccountSignals(options) {
     return this.send(OPERATIONS.listAccountSignals, options);
   }
@@ -156,7 +63,7 @@ export class NgwafSignalsApi extends NgwafApi {
   }
 }
 
-export class NgwafListsApi extends NgwafApi {
+export class NgwafListsApi extends OwnedApi {
   listAccountLists(options) {
     return this.send(OPERATIONS.listAccountLists, options);
   }
@@ -196,13 +103,6 @@ const PAGING = [
 const WORKSPACE_LOOKUP =
   "Get a service's workspace ID from `configuration.workspace_id` in the result of " +
   "`productNgwafApi.getProductNgwafConfiguration({ service_id })`.";
-
-const param = (name, type, required, description) => ({
-  name,
-  type,
-  required,
-  description,
-});
 
 const WORKSPACE_ID = param(
   "workspace_id",
@@ -273,8 +173,6 @@ const SIGNAL_LIMIT = param(
 const TIMES =
   "Times are RFC 3339 strings, such as `new Date(Date.now() - 24 * 3600e3).toISOString()` for a day ago.";
 
-const bytes = (n) => n.toLocaleString("en-US");
-
 const RECORD_PAGES = [
   "Each call returns one page, with the records in `data` and their count in `meta.total`.",
   "Fix both ends of the time range before paging, since a range that ends now keeps growing and changes `meta.total`.",
@@ -333,304 +231,282 @@ const LIST_NAMES = [
   COMPLETE_LIST,
 ];
 
-// Keyed by method name, so method names must stay unique across classes.
-const OPERATIONS = Object.fromEntries(
-  [
-    {
-      apiClass: "NgwafRulesApi",
-      method: "listAccountRules",
-      httpPath: "/ngwaf/v1/rules",
-      params: RULE_FILTERS,
-      description: [
-        "List one page of account-level NGWAF rules, which can apply to several workspaces.",
-        ...PAGING,
-        "How `enabled`, `types` and `action` affect this list's `meta.total` is unverified.",
-        "Page without those filters to establish completeness, then apply them locally.",
-        "Until verified, never report a filtered account listing as complete.",
-        "Keep account rules whose `scope.applies_to` contains `'*'` or the target workspace ID.",
-        "Count distinct IDs on the account collection first, then keep the rules that apply.",
-        "The API's `scope` query filter is unverified, and this method does not send it.",
-        "Do not assume the workspace list includes account rules.",
-        "Deduplicate by rule ID when combining both lists.",
-        WORKSPACE_LOOKUP,
-      ],
-    },
-    {
-      apiClass: "NgwafRulesApi",
-      method: "listWorkspaceRules",
-      httpPath: "/ngwaf/v1/workspaces/{workspace_id}/rules",
-      params: [WORKSPACE_ID, ...RULE_FILTERS],
-      description: [
-        "List one page of the NGWAF rules defined in one workspace.",
-        ...PAGING,
-        "Here `meta.total` counts only rules matching `enabled`, `types` and `action`.",
-        "With these filters, a filtered listing is complete when its distinct IDs reach that total.",
-        "Account rules can also apply; list them with `ngwafRulesApi.listAccountRules()`.",
-        WORKSPACE_LOOKUP,
-      ],
-    },
-    {
-      apiClass: "NgwafWorkspacesApi",
-      method: "getWorkspace",
-      httpPath: "/ngwaf/v1/workspaces/{workspace_id}",
-      params: [WORKSPACE_ID],
-      description: [
-        "Get an NGWAF workspace's settings, including protection `mode` and attack thresholds.",
-        "Attack thresholds are in `attack_signal_thresholds`.",
-        WORKSPACE_LOOKUP,
-        "The configuration's `traffic_ramp` gives the share of traffic inspected, not protection mode.",
-        "Whether a rule blocks requests depends on the workspace mode and the rule's actions.",
-        "When describing rules, report enablement and blocking separately.",
-        "Report attack thresholds as workspace settings, not as rules.",
-      ],
-    },
-    {
-      apiClass: "NgwafWorkspacesApi",
-      method: "getTopAttacks",
-      httpPath: "/ngwaf/v1/workspaces/{workspace_id}/top-attacks",
-      params: [
-        WORKSPACE_ID,
-        param(
-          "field",
-          "String",
-          true,
-          "What to rank: `server_name_and_path`, `path`, `remote_ip` or `remote_country_code`.",
-        ),
-        FROM,
-        TO,
-        LIMIT,
-      ],
-      description: [
-        "Get a workspace's most attacked URLs or paths, or its top attacking IPs or countries, over up to seven days.",
-        "The API reference also lists `user_agent` for `field`, but the API refuses it.",
-        "`to` defaults to now, so pass it too when `from` is seven days back, or the few seconds until the request arrives make the range too long.",
-        "Older weeks work, such as a `from` 37 days back with a `to` 30 days back.",
-        TIMES,
-        "Each entry in `data` has a `value`, a `display_name` and a `count`, sorted by request count.",
-        "For attack counts across all workspaces, start with `ngwafReportsApi.getAttacksReport`, whose `top_attack_signals` use display names such as `Traversal` rather than tags.",
-        ERRORS,
-        WORKSPACE_LOOKUP,
-      ],
-    },
-    {
-      apiClass: "NgwafSignalsApi",
-      method: "listAccountSignals",
-      httpPath: "/ngwaf/v1/signals",
-      params: [SIGNAL_LIMIT],
-      description: [
-        "List the account's custom NGWAF signals, whose names start with `corp.`.",
-        ...SIGNAL_NAMES,
-        "An account signal applies to the workspaces in its `scope.applies_to`, where `'*'` means all of them.",
-      ],
-    },
-    {
-      apiClass: "NgwafSignalsApi",
-      method: "listWorkspaceSignals",
-      httpPath: "/ngwaf/v1/workspaces/{workspace_id}/signals",
-      params: [WORKSPACE_ID, SIGNAL_LIMIT],
-      description: [
-        "List one workspace's custom NGWAF signals, whose names start with `site.`.",
-        ...SIGNAL_NAMES,
-        "Account signals can also apply; list them with `ngwafSignalsApi.listAccountSignals({ limit: 200 })`.",
-        WORKSPACE_LOOKUP,
-      ],
-    },
-    {
-      apiClass: "NgwafListsApi",
-      method: "listAccountLists",
-      httpPath: "/ngwaf/v1/lists",
-      params: [],
-      description: [
-        "List the account's NGWAF lists with their entries, whose names start with `corp.`.",
-        ...LIST_NAMES,
-      ],
-    },
-    {
-      apiClass: "NgwafListsApi",
-      method: "listWorkspaceLists",
-      httpPath: "/ngwaf/v1/workspaces/{workspace_id}/lists",
-      params: [WORKSPACE_ID],
-      description: [
-        "List one workspace's NGWAF lists with their entries, whose names start with `site.`.",
-        ...LIST_NAMES,
-        "Rules can also use account lists; list them with `ngwafListsApi.listAccountLists()`.",
-        WORKSPACE_LOOKUP,
-      ],
-    },
-    {
-      apiClass: "NgwafEventsApi",
-      method: "listEvents",
-      httpPath: "/ngwaf/v1/workspaces/{workspace_id}/events",
-      params: [
-        WORKSPACE_ID,
-        FROM,
-        TO,
-        param("ip", "String", false, "Return only events for this IP."),
-        param(
-          "signal",
-          "String",
-          false,
-          "Return only events with this signal.",
-        ),
-        param(
-          "status",
-          "String",
-          false,
-          "Return only `active` or only `expired` events.",
-        ),
-        LIMIT,
-        PAGE,
-      ],
-      description: [
-        "List one page of NGWAF events, the actions the WAF took against an IP because of threshold-based blocking, templated rules or site alerts.",
-        "This is not the account's activity log, which is `eventsApi.listEvents`.",
-        TIMES,
-        "Filter with `ip`, `signal`, or `status`, which takes `active` or `expired`; any other `status` returns nothing rather than an error.",
-        "`signal` matches a tag exactly, so `TRAVERSAL` finds events and `traversal` does not.",
-        "Each event has its `action`, the IP in `source`, `reasons` with a `count` per signal in `signal_id`, `request_count`, `window`, `expires_at`, `is_expired` and a `sample_request`.",
-        "Whether `signal` also takes custom tags such as `site.<name>` is unverified.",
-        ...RECORD_PAGES,
-        ...SIGNAL_TAGS,
-        ...PRIVACY,
-        WORKSPACE_LOOKUP,
-      ],
-    },
-    {
-      apiClass: "NgwafEventsApi",
-      method: "getEvent",
-      httpPath: "/ngwaf/v1/workspaces/{workspace_id}/events/{event_id}",
-      params: [
-        WORKSPACE_ID,
-        param("event_id", "String", true, "The ID of the event."),
-      ],
-      description: [
-        "Get one NGWAF event by ID, with its reasons, request counts and a sample request.",
-        "This is not the account's activity log, which is `eventsApi.getEvent`.",
-        "Event IDs come from `ngwafEventsApi.listEvents`.",
-        "It has the listed fields plus `blocked_request_count` and `flagged_request_count`.",
-        ...SIGNAL_TAGS,
-        ...PRIVACY,
-      ],
-    },
-    {
-      apiClass: "NgwafRequestsApi",
-      method: "searchWorkspaceRequests",
-      httpPath: "/ngwaf/v1/workspaces/{workspace_id}/requests",
-      params: [
-        WORKSPACE_ID,
-        param(
-          "q",
-          "String",
-          false,
-          "Search query in the request search syntax, with the time range as `from:` and `until:`.",
-        ),
-        LIMIT,
-        PAGE,
-      ],
-      description: [
-        "Search the requests an NGWAF workspace stored, such as attacks and blocked requests, one page per call.",
-        "`q` uses the request search syntax, such as `'from:-1h ip:192.0.2.1 path:/login'`, `'from:-7d tag:SQLI'`, `'from:-1d tag:BLOCKED'` or `'from:-1d ruleid:<rule id>'`.",
-        "Other keys include `httpcode`, `method`, `country`, `useragent`, `server`, `payload` and `sort:time-asc`, and `-key:value` negates.",
-        "Put the time range in `q` as `from:` and `until:`, with values such as `-1h`, `-7d`, Unix timestamps or `YYYYMMDD`.",
-        "Always include `from:`: a query without it covered only the last six hours in testing.",
-        "When paging, use Unix timestamps computed once from `Math.floor(Date.now() / 1000)`, as in `from:1790000000 until:1790604800`.",
-        "One query covers at most seven days, and a longer range is refused with a 400, so split longer periods into seven-day windows.",
-        "The older Signal Sciences API capped a search at 10,000 requests; whether this one does is unverified, so treat a `meta.total` of exactly 10,000 as possibly capped and narrow the window.",
-        ...STORED,
-        ...RECORD_PAGES,
-        `\`limit\` goes up to 1,000, but 1,000 requests with their headers passed the ${bytes(API_RESPONSE_BYTES)}-byte response limit in testing while 500 came to 2.6 MB, so pages of 250 are a safe choice.`,
-        "At that size, a week of 2,734 requests took 11 pages and 17 seconds, so one execution reads roughly 3,000 requests.",
-        "Each request has `timestamp`, `remote_ip`, `country`, `method`, `server_name`, `path`, `user_agent`, `response_code` and `signals`, where each signal has its tag in `id`, a `location`, the matched `value` and a `detector`.",
-        DETECTORS,
-        ...SIGNAL_TAGS,
-        ERRORS,
-        ...PRIVACY,
-        WORKSPACE_LOOKUP,
-      ],
-    },
-    {
-      apiClass: "NgwafRequestsApi",
-      method: "getRequest",
-      httpPath: "/ngwaf/v1/workspaces/{workspace_id}/requests/{request_id}",
-      params: [
-        WORKSPACE_ID,
-        param("request_id", "String", true, "The ID of the request."),
-      ],
-      description: [
-        "Get one stored NGWAF request by ID, with its signals, headers and response details.",
-        "Request IDs come from `ngwafRequestsApi.searchWorkspaceRequests` or an event's `sample_request`, and search results already carry the same fields.",
-        "Each entry in `signals` has its tag in `id`, a `location`, the matched `value` and a `detector`.",
-        DETECTORS,
-        ...SIGNAL_TAGS,
-        "A matched rule only blocks when the workspace `mode` from `ngwafWorkspacesApi.getWorkspace` allows it.",
-        "To check whether a changed request would be blocked, replay it with `ngwafSimulateApi.ngwafSimulateWafRequest`.",
-        "Attack signals alone need not block: a request with `SQLI` and `TRAVERSAL` signals simulated as 200 in a workspace in block mode, since such requests are blocked once their IP is flagged.",
-        ...PRIVACY,
-      ],
-    },
-    {
-      apiClass: "NgwafTimeseriesApi",
-      method: "getWorkspaceTimeseries",
-      httpPath: "/ngwaf/v1/workspaces/{workspace_id}/timeseries",
-      params: [
-        WORKSPACE_ID,
-        param(
-          "start",
-          "String",
-          true,
-          "The start of the date-time range, in RFC 3339 format.",
-        ),
-        param(
-          "metrics",
-          "String",
-          true,
-          "Comma-separated metrics, such as `'requests_total,requests_attack'`.",
-        ),
-        param(
-          "end",
-          "String",
-          false,
-          "The end of the date-time range, in RFC 3339 format.",
-        ),
-        param(
-          "granularity",
-          "Number",
-          false,
-          "Bucket size in seconds, such as 3600 or 86400.",
-        ),
-      ],
-      description: [
-        "Get NGWAF metric counts over time for one workspace, such as attacks, blocked requests or a signal.",
-        "This is not `observabilityTimeseriesApi.timeseriesGet`, which returns general observability data.",
-        "This method takes `start` and `end`, where events and top attacks take `from` and `to`.",
-        TIMES,
-        "`metrics` is one comma-separated string, such as `'requests_total,requests_attack,requests_total_blocked'`, and also takes signal names such as `SQLI`, `XSS` or `HTTP404`.",
-        "Each point in `data` has a `timestamp` and a count under each metric's name.",
-        "Without `granularity`, buckets were one hour for up to seven days and two hours for 30 days in testing.",
-        "`granularity: 3600` and `86400` were honored, with daily buckets starting at midnight UTC, but 60 gave 10-minute buckets, so read the step from the timestamps.",
-        "The bucket still in progress is left out.",
-        "An unknown metric name is not refused and comes back as zeros, so check the names against the list above.",
-        "Time series also count requests that are never stored, so they can show attacks a request search cannot find.",
-        WORKSPACE_LOOKUP,
-      ],
-    },
-  ].map((operation) => [operation.method, { httpMethod: "GET", ...operation }]),
-);
+const OPERATIONS = operationTable([
+  {
+    apiClass: "NgwafRulesApi",
+    method: "listAccountRules",
+    httpPath: "/ngwaf/v1/rules",
+    params: RULE_FILTERS,
+    description: [
+      "List one page of account-level NGWAF rules, which can apply to several workspaces.",
+      ...PAGING,
+      "How `enabled`, `types` and `action` affect this list's `meta.total` is unverified.",
+      "Page without those filters to establish completeness, then apply them locally.",
+      "Until verified, never report a filtered account listing as complete.",
+      "Keep account rules whose `scope.applies_to` contains `'*'` or the target workspace ID.",
+      "Count distinct IDs on the account collection first, then keep the rules that apply.",
+      "The API's `scope` query filter is unverified, and this method does not send it.",
+      "Do not assume the workspace list includes account rules.",
+      "Deduplicate by rule ID when combining both lists.",
+      WORKSPACE_LOOKUP,
+    ],
+  },
+  {
+    apiClass: "NgwafRulesApi",
+    method: "listWorkspaceRules",
+    httpPath: "/ngwaf/v1/workspaces/{workspace_id}/rules",
+    params: [WORKSPACE_ID, ...RULE_FILTERS],
+    description: [
+      "List one page of the NGWAF rules defined in one workspace.",
+      ...PAGING,
+      "Here `meta.total` counts only rules matching `enabled`, `types` and `action`.",
+      "With these filters, a filtered listing is complete when its distinct IDs reach that total.",
+      "Account rules can also apply; list them with `ngwafRulesApi.listAccountRules()`.",
+      WORKSPACE_LOOKUP,
+    ],
+  },
+  {
+    apiClass: "NgwafWorkspacesApi",
+    method: "getWorkspace",
+    httpPath: "/ngwaf/v1/workspaces/{workspace_id}",
+    params: [WORKSPACE_ID],
+    description: [
+      "Get an NGWAF workspace's settings, including protection `mode` and attack thresholds.",
+      "Attack thresholds are in `attack_signal_thresholds`.",
+      WORKSPACE_LOOKUP,
+      "The configuration's `traffic_ramp` gives the share of traffic inspected, not protection mode.",
+      "Whether a rule blocks requests depends on the workspace mode and the rule's actions.",
+      "When describing rules, report enablement and blocking separately.",
+      "Report attack thresholds as workspace settings, not as rules.",
+    ],
+  },
+  {
+    apiClass: "NgwafWorkspacesApi",
+    method: "getTopAttacks",
+    httpPath: "/ngwaf/v1/workspaces/{workspace_id}/top-attacks",
+    params: [
+      WORKSPACE_ID,
+      param(
+        "field",
+        "String",
+        true,
+        "What to rank: `server_name_and_path`, `path`, `remote_ip` or `remote_country_code`.",
+      ),
+      FROM,
+      TO,
+      LIMIT,
+    ],
+    description: [
+      "Get a workspace's most attacked URLs or paths, or its top attacking IPs or countries, over up to seven days.",
+      "The API reference also lists `user_agent` for `field`, but the API refuses it.",
+      "`to` defaults to now, so pass it too when `from` is seven days back, or the few seconds until the request arrives make the range too long.",
+      "Older weeks work, such as a `from` 37 days back with a `to` 30 days back.",
+      TIMES,
+      "Each entry in `data` has a `value`, a `display_name` and a `count`, sorted by request count.",
+      "For attack counts across all workspaces, start with `ngwafReportsApi.getAttacksReport`, whose `top_attack_signals` use display names such as `Traversal` rather than tags.",
+      ERRORS,
+      WORKSPACE_LOOKUP,
+    ],
+  },
+  {
+    apiClass: "NgwafSignalsApi",
+    method: "listAccountSignals",
+    httpPath: "/ngwaf/v1/signals",
+    params: [SIGNAL_LIMIT],
+    description: [
+      "List the account's custom NGWAF signals, whose names start with `corp.`.",
+      ...SIGNAL_NAMES,
+      "An account signal applies to the workspaces in its `scope.applies_to`, where `'*'` means all of them.",
+    ],
+  },
+  {
+    apiClass: "NgwafSignalsApi",
+    method: "listWorkspaceSignals",
+    httpPath: "/ngwaf/v1/workspaces/{workspace_id}/signals",
+    params: [WORKSPACE_ID, SIGNAL_LIMIT],
+    description: [
+      "List one workspace's custom NGWAF signals, whose names start with `site.`.",
+      ...SIGNAL_NAMES,
+      "Account signals can also apply; list them with `ngwafSignalsApi.listAccountSignals({ limit: 200 })`.",
+      WORKSPACE_LOOKUP,
+    ],
+  },
+  {
+    apiClass: "NgwafListsApi",
+    method: "listAccountLists",
+    httpPath: "/ngwaf/v1/lists",
+    params: [],
+    description: [
+      "List the account's NGWAF lists with their entries, whose names start with `corp.`.",
+      ...LIST_NAMES,
+    ],
+  },
+  {
+    apiClass: "NgwafListsApi",
+    method: "listWorkspaceLists",
+    httpPath: "/ngwaf/v1/workspaces/{workspace_id}/lists",
+    params: [WORKSPACE_ID],
+    description: [
+      "List one workspace's NGWAF lists with their entries, whose names start with `site.`.",
+      ...LIST_NAMES,
+      "Rules can also use account lists; list them with `ngwafListsApi.listAccountLists()`.",
+      WORKSPACE_LOOKUP,
+    ],
+  },
+  {
+    apiClass: "NgwafEventsApi",
+    method: "listEvents",
+    httpPath: "/ngwaf/v1/workspaces/{workspace_id}/events",
+    params: [
+      WORKSPACE_ID,
+      FROM,
+      TO,
+      param("ip", "String", false, "Return only events for this IP."),
+      param("signal", "String", false, "Return only events with this signal."),
+      param(
+        "status",
+        "String",
+        false,
+        "Return only `active` or only `expired` events.",
+      ),
+      LIMIT,
+      PAGE,
+    ],
+    description: [
+      "List one page of NGWAF events, the actions the WAF took against an IP because of threshold-based blocking, templated rules or site alerts.",
+      "This is not the account's activity log, which is `eventsApi.listEvents`.",
+      TIMES,
+      "Filter with `ip`, `signal`, or `status`, which takes `active` or `expired`; any other `status` returns nothing rather than an error.",
+      "`signal` matches a tag exactly, so `TRAVERSAL` finds events and `traversal` does not.",
+      "Each event has its `action`, the IP in `source`, `reasons` with a `count` per signal in `signal_id`, `request_count`, `window`, `expires_at`, `is_expired` and a `sample_request`.",
+      "Whether `signal` also takes custom tags such as `site.<name>` is unverified.",
+      ...RECORD_PAGES,
+      ...SIGNAL_TAGS,
+      ...PRIVACY,
+      WORKSPACE_LOOKUP,
+    ],
+  },
+  {
+    apiClass: "NgwafEventsApi",
+    method: "getEvent",
+    httpPath: "/ngwaf/v1/workspaces/{workspace_id}/events/{event_id}",
+    params: [
+      WORKSPACE_ID,
+      param("event_id", "String", true, "The ID of the event."),
+    ],
+    description: [
+      "Get one NGWAF event by ID, with its reasons, request counts and a sample request.",
+      "This is not the account's activity log, which is `eventsApi.getEvent`.",
+      "Event IDs come from `ngwafEventsApi.listEvents`.",
+      "It has the listed fields plus `blocked_request_count` and `flagged_request_count`.",
+      ...SIGNAL_TAGS,
+      ...PRIVACY,
+    ],
+  },
+  {
+    apiClass: "NgwafRequestsApi",
+    method: "searchWorkspaceRequests",
+    httpPath: "/ngwaf/v1/workspaces/{workspace_id}/requests",
+    params: [
+      WORKSPACE_ID,
+      param(
+        "q",
+        "String",
+        false,
+        "Search query in the request search syntax, with the time range as `from:` and `until:`.",
+      ),
+      LIMIT,
+      PAGE,
+    ],
+    description: [
+      "Search the requests an NGWAF workspace stored, such as attacks and blocked requests, one page per call.",
+      "`q` uses the request search syntax, such as `'from:-1h ip:192.0.2.1 path:/login'`, `'from:-7d tag:SQLI'`, `'from:-1d tag:BLOCKED'` or `'from:-1d ruleid:<rule id>'`.",
+      "Other keys include `httpcode`, `method`, `country`, `useragent`, `server`, `payload` and `sort:time-asc`, and `-key:value` negates.",
+      "Put the time range in `q` as `from:` and `until:`, with values such as `-1h`, `-7d`, Unix timestamps or `YYYYMMDD`.",
+      "Always include `from:`: a query without it covered only the last six hours in testing.",
+      "When paging, use Unix timestamps computed once from `Math.floor(Date.now() / 1000)`, as in `from:1790000000 until:1790604800`.",
+      "One query covers at most seven days, and a longer range is refused with a 400, so split longer periods into seven-day windows.",
+      "The older Signal Sciences API capped a search at 10,000 requests; whether this one does is unverified, so treat a `meta.total` of exactly 10,000 as possibly capped and narrow the window.",
+      ...STORED,
+      ...RECORD_PAGES,
+      `\`limit\` goes up to 1,000, but 1,000 requests with their headers passed the ${bytes(API_RESPONSE_BYTES)}-byte response limit in testing while 500 came to 2.6 MB, so pages of 250 are a safe choice.`,
+      "At that size, a week of 2,734 requests took 11 pages and 17 seconds, so one execution reads roughly 3,000 requests.",
+      "Each request has `timestamp`, `remote_ip`, `country`, `method`, `server_name`, `path`, `user_agent`, `response_code` and `signals`, where each signal has its tag in `id`, a `location`, the matched `value` and a `detector`.",
+      DETECTORS,
+      ...SIGNAL_TAGS,
+      ERRORS,
+      ...PRIVACY,
+      WORKSPACE_LOOKUP,
+    ],
+  },
+  {
+    apiClass: "NgwafRequestsApi",
+    method: "getRequest",
+    httpPath: "/ngwaf/v1/workspaces/{workspace_id}/requests/{request_id}",
+    params: [
+      WORKSPACE_ID,
+      param("request_id", "String", true, "The ID of the request."),
+    ],
+    description: [
+      "Get one stored NGWAF request by ID, with its signals, headers and response details.",
+      "Request IDs come from `ngwafRequestsApi.searchWorkspaceRequests` or an event's `sample_request`, and search results already carry the same fields.",
+      "Each entry in `signals` has its tag in `id`, a `location`, the matched `value` and a `detector`.",
+      DETECTORS,
+      ...SIGNAL_TAGS,
+      "A matched rule only blocks when the workspace `mode` from `ngwafWorkspacesApi.getWorkspace` allows it.",
+      "To check whether a changed request would be blocked, replay it with `ngwafSimulateApi.ngwafSimulateWafRequest`.",
+      "Attack signals alone need not block: a request with `SQLI` and `TRAVERSAL` signals simulated as 200 in a workspace in block mode, since such requests are blocked once their IP is flagged.",
+      ...PRIVACY,
+    ],
+  },
+  {
+    apiClass: "NgwafTimeseriesApi",
+    method: "getWorkspaceTimeseries",
+    httpPath: "/ngwaf/v1/workspaces/{workspace_id}/timeseries",
+    params: [
+      WORKSPACE_ID,
+      param(
+        "start",
+        "String",
+        true,
+        "The start of the date-time range, in RFC 3339 format.",
+      ),
+      param(
+        "metrics",
+        "String",
+        true,
+        "Comma-separated metrics, such as `'requests_total,requests_attack'`.",
+      ),
+      param(
+        "end",
+        "String",
+        false,
+        "The end of the date-time range, in RFC 3339 format.",
+      ),
+      param(
+        "granularity",
+        "Number",
+        false,
+        "Bucket size in seconds, such as 3600 or 86400.",
+      ),
+    ],
+    description: [
+      "Get NGWAF metric counts over time for one workspace, such as attacks, blocked requests or a signal.",
+      "This is not `observabilityTimeseriesApi.timeseriesGet`, which returns general observability data.",
+      "This method takes `start` and `end`, where events and top attacks take `from` and `to`.",
+      TIMES,
+      "`metrics` is one comma-separated string, such as `'requests_total,requests_attack,requests_total_blocked'`, and also takes signal names such as `SQLI`, `XSS` or `HTTP404`.",
+      "Each point in `data` has a `timestamp` and a count under each metric's name.",
+      "Without `granularity`, buckets were one hour for up to seven days and two hours for 30 days in testing.",
+      "`granularity: 3600` and `86400` were honored, with daily buckets starting at midnight UTC, but 60 gave 10-minute buckets, so read the step from the timestamps.",
+      "The bucket still in progress is left out.",
+      "An unknown metric name is not refused and comes back as zeros, so check the names against the list above.",
+      "Time series also count requests that are never stored, so they can show attacks a request search cannot find.",
+      WORKSPACE_LOOKUP,
+    ],
+  },
+]);
 
-/**
- * Returns copies, so enriching the index never changes the parameters the adapters check against.
- */
 export function ngwafMethods() {
-  return Object.values(OPERATIONS).map(
-    ({ apiClass, method, httpMethod, httpPath, description, params }) => ({
-      apiClass,
-      method,
-      httpMethod,
-      httpPath,
-      description: description.join(" "),
-      params: params.map((entry) => ({ ...entry })),
-      constraints: [],
-      returnType: "Object",
-    }),
-  );
+  return describeOperations(OPERATIONS);
 }

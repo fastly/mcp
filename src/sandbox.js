@@ -9,6 +9,10 @@ import {
   INLINE_RESULT_BYTES,
   SANDBOX_MAX_DEPTH,
 } from "./limits.js";
+import {
+  LOG_EXPLORER_API_CLASSES,
+  REPLACED_SDK_CLASSES,
+} from "./log-explorer.js";
 import { operationsOf, remoteDenial } from "./method-policy.js";
 import { NGWAF_API_CLASSES } from "./ngwaf.js";
 import { serializeResult } from "./serializer.js";
@@ -59,13 +63,21 @@ if (remote) {
   });
 }
 
-const sdkCollisions = Object.keys(NGWAF_API_CLASSES).filter((name) =>
-  Object.hasOwn(Fastly, name),
+const OWNED_API_CLASSES = {
+  ...NGWAF_API_CLASSES,
+  ...LOG_EXPLORER_API_CLASSES,
+};
+
+// An adapter standing in for an SDK class is expected. Any other overlap means the SDK grew a class this server implements, and the two would disagree.
+const sdkCollisions = Object.keys(OWNED_API_CLASSES).filter(
+  (name) => Object.hasOwn(Fastly, name) && !REPLACED_SDK_CLASSES.includes(name),
 );
 
 const apiInstances = new Map();
 for (const name of Object.keys(Fastly)) {
   if (!/Api$/.test(name)) continue;
+  // An adapter below stands in for this one, so the SDK's version never gets built.
+  if (REPLACED_SDK_CLASSES.includes(name)) continue;
   const Ctor = Fastly[name];
   if (typeof Ctor !== "function") continue;
   try {
@@ -77,7 +89,7 @@ for (const name of Object.keys(Fastly)) {
     // Construction failed, so it stays out of the sandbox facade.
   }
 }
-for (const [name, Ctor] of Object.entries(NGWAF_API_CLASSES)) {
+for (const [name, Ctor] of Object.entries(OWNED_API_CLASSES)) {
   apiInstances.set(name, {
     instance: new Ctor(Fastly.ApiClient.instance),
     operations: operationsOf(Ctor),
