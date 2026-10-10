@@ -3,9 +3,12 @@ import { spawnSync } from "node:child_process";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Fastly from "fastly";
-import { buildApiIndex, ownedMethods } from "../src/api-index.js";
+import {
+  buildApiIndex,
+  ownedMethods,
+  REPLACED_SDK_CLASSES,
+} from "../src/api-index.js";
 import { buildIndex } from "../src/indexer.js";
-import { REPLACED_SDK_CLASSES } from "../src/log-explorer.js";
 import { inspect } from "../src/tools/inspect.js";
 import { search } from "../src/tools/search.js";
 import { tempDir } from "./helpers.js";
@@ -376,6 +379,56 @@ describe("NGWAF discovery", () => {
     expect(inspect(index, "getWorkspaceTimeseries").example).toBe(
       "return await ngwafTimeseriesApi.getWorkspaceTimeseries({ workspace_id: '...', start: '...', metrics: '...' });",
     );
+  });
+});
+
+describe("Observability Timeseries discovery", () => {
+  test("search publishes one owned method for both sources", () => {
+    for (const query of ["observability timeseries", "sustainability"]) {
+      expect(search(index, query).matches).toContainEqual(
+        expect.objectContaining({
+          apiClass: "ObservabilityTimeseriesApi",
+          method: "timeseriesGet",
+          httpPath: "/observability/timeseries",
+          requiredParams: ["source", "from", "to", "granularity", "series"],
+          hasServiceIdParam: true,
+          usage:
+            "return await observabilityTimeseriesApi.timeseriesGet({ source: '...', from: '...', to: '...', granularity: '...', series: '...' });",
+        }),
+      );
+    }
+    expect(
+      index.filter((entry) => entry.apiClass === "ObservabilityTimeseriesApi"),
+    ).toHaveLength(1);
+  });
+
+  test("inspect explains conditional options, pagination, and upstream limitations", () => {
+    const doc = inspect(index, "ObservabilityTimeseriesApi.timeseriesGet");
+    expect(doc.ok).toBe(true);
+    expect(doc.returnType).toBe("Object");
+    expect(doc.params).toContainEqual(
+      expect.objectContaining({
+        name: "service_id",
+        required: false,
+        description: "Required for logs; rejected for sustainability.",
+      }),
+    );
+    expect(doc.params).toContainEqual(
+      expect.objectContaining({ name: "filter", type: "Object" }),
+    );
+    for (const phrase of [
+      "sampled logs or sustainability",
+      "`second`, `minute`, `hour`, and `day`",
+      "`day` and `month`",
+      "`sum[bandwidth_gb]`",
+      "`meta.next_cursor`",
+      "one page per call",
+      "upstream bug",
+      "remain unverified",
+    ]) {
+      expect(doc.description).toContain(phrase);
+    }
+    expect(doc.description).not.toContain("filter cannot be sent");
   });
 });
 

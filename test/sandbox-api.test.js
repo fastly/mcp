@@ -872,6 +872,124 @@ describe("Log Explorer adapters through the sandbox bridge", () => {
   }, 15000);
 });
 
+describe("Observability Timeseries through the sandbox bridge", () => {
+  test("both sources keep their wire encoding and raw responses locally and remotely", async () => {
+    const cases = [
+      {
+        source: "logs",
+        service_id: "svc1",
+        granularity: "minute",
+        series: "avg[response_time],p99[response_time]",
+        filter: { response_status: [200, 404] },
+      },
+      {
+        source: "sustainability",
+        granularity: "month",
+        series: "sum[bandwidth_gb],sum[cputime_sec]",
+        dimensions: "country,product",
+        filter: { product: "delivery" },
+        cursor: "opaque+/=cursor",
+        limit: 1,
+      },
+    ];
+    for (const remote of [false, true]) {
+      for (const options of cases) {
+        const logs = options.source === "logs";
+        const body = {
+          data: [
+            {
+              dimensions: { time: "2026-10-09T00:00:00Z" },
+              values: logs
+                ? [{ "avg[response_time]": 0.5, "p99[response_time]": 2 }]
+                : { "sum[bandwidth_gb]": 3, "sum[cputime_sec]": 4 },
+            },
+          ],
+          meta: logs
+            ? {
+                service_id: "svc1",
+                field_filters: { response_status: [200, 404] },
+              }
+            : { next_cursor: "next-page" },
+        };
+        nextResponse = json(body);
+        const start = requests.length;
+        const out = await runSandbox(
+          `return await observabilityTimeseriesApi.timeseriesGet(${JSON.stringify(
+            {
+              from: "2026-10-09T00:00:00Z",
+              to: "2026-10-09T01:00:00Z",
+              ...options,
+            },
+          )});`,
+          {
+            fastlyApiToken: "token",
+            policy: { remote },
+            runtime: remote ? "node" : process.execPath,
+          },
+        );
+        expect(out.result).toEqual(body);
+        expect(requests.length).toBe(start + 1);
+        const request = requests[start];
+        expect(request.key).toBe("token");
+        expect(request.method).toBe("GET");
+        const url = new URL(request.url, "https://api.fastly.com");
+        expect(url.pathname).toBe("/observability/timeseries");
+        const query = url.searchParams;
+        expect(query.get("source")).toBe(options.source);
+        expect(query.has("filter")).toBe(false);
+        expect(query.getAll("series")).toEqual(
+          logs ? options.series.split(",") : [options.series],
+        );
+        if (logs) {
+          expect(query.get("service_id")).toBe("svc1");
+          expect(query.get("filter[response_status][in]")).toBe("200,404");
+          expect(query.has("cursor")).toBe(false);
+        } else {
+          expect(query.has("service_id")).toBe(false);
+          expect(query.get("dimensions")).toBe("country,product");
+          expect(query.get("filter[product]")).toBe("delivery");
+          expect(query.get("cursor")).toBe(options.cursor);
+          expect(query.get("limit")).toBe("1");
+        }
+      }
+    }
+  }, 30000);
+
+  test("invalid source options and SDK-only methods never send requests", async () => {
+    const start = requests.length;
+    const out = await runSandbox(
+      `const options = {
+         source: "logs", from: "2026-10-09", to: "2026-10-10",
+         granularity: "hour", series: "avg[response_time]",
+       };
+       const messages = [];
+       for (const call of [
+         () => observabilityTimeseriesApi.timeseriesGet(options),
+         () => observabilityTimeseriesApi.timeseriesGet({ ...options, service_id: "svc1", granularity: 3600 }),
+         () => observabilityTimeseriesApi.timeseriesGet({ ...options, source: "sustainability", service_id: "svc1" }),
+         () => observabilityTimeseriesApi.timeseriesGetWithHttpInfo(options),
+         () => observabilityTimeseriesApi.send({}, options),
+       ]) {
+         try { await call(); messages.push("sent"); } catch (e) { messages.push(e.message); }
+       }
+       return messages;`,
+      {
+        fastlyApiToken: "token",
+        policy: { remote: true },
+        runtime: "node",
+      },
+    );
+    expect(out.result).toEqual([
+      "Missing the required parameter 'service_id' for logs.",
+      "'granularity' must be a string.",
+      "'service_id' is not supported for sustainability.",
+      "Unknown Fastly API method: ObservabilityTimeseriesApi.timeseriesGetWithHttpInfo",
+      "Unknown Fastly API method: ObservabilityTimeseriesApi.send",
+    ]);
+    expect(requests.length).toBe(start);
+  }, 15000);
+});
+
 // The paging the method descriptions ask for, run against mock NGWAF collections that page in different ways.
 describe("the NGWAF paging flow", () => {
   const FLOW = `
