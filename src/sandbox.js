@@ -11,11 +11,20 @@ import {
 } from "./limits.js";
 import {
   LOG_EXPLORER_API_CLASSES,
-  REPLACED_SDK_CLASSES,
+  REPLACED_SDK_CLASSES as LOG_EXPLORER_REPLACEMENTS,
 } from "./log-explorer.js";
 import { operationsOf, remoteDenial } from "./method-policy.js";
 import { NGWAF_API_CLASSES } from "./ngwaf.js";
+import {
+  OBSERVABILITY_TIMESERIES_API_CLASSES,
+  REPLACED_SDK_CLASSES as TIMESERIES_REPLACEMENTS,
+} from "./observability-timeseries.js";
 import { serializeResult } from "./serializer.js";
+
+const REPLACED_SDK_CLASSES = [
+  ...LOG_EXPLORER_REPLACEMENTS,
+  ...TIMESERIES_REPLACEMENTS,
+];
 
 const { code, fastlyApiToken, policy } = JSON.parse(await text(process.stdin));
 
@@ -66,6 +75,7 @@ if (remote) {
 const OWNED_API_CLASSES = {
   ...NGWAF_API_CLASSES,
   ...LOG_EXPLORER_API_CLASSES,
+  ...OBSERVABILITY_TIMESERIES_API_CLASSES,
 };
 
 // An adapter standing in for an SDK class is expected. Any other overlap means the SDK grew a class this server implements, and the two would disagree.

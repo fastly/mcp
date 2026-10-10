@@ -1,10 +1,26 @@
 import { buildIndex } from "./indexer.js";
-import { logExplorerMethods, REPLACED_SDK_CLASSES } from "./log-explorer.js";
+import {
+  REPLACED_SDK_CLASSES as LOG_EXPLORER_REPLACEMENTS,
+  logExplorerMethods,
+} from "./log-explorer.js";
 import { enrichMethod } from "./method-entry.js";
 import { ngwafMethods } from "./ngwaf.js";
+import {
+  observabilityTimeseriesMethods,
+  REPLACED_SDK_CLASSES as TIMESERIES_REPLACEMENTS,
+} from "./observability-timeseries.js";
+
+export const REPLACED_SDK_CLASSES = [
+  ...LOG_EXPLORER_REPLACEMENTS,
+  ...TIMESERIES_REPLACEMENTS,
+];
 
 export function ownedMethods() {
-  return [...ngwafMethods(), ...logExplorerMethods()];
+  return [
+    ...ngwafMethods(),
+    ...logExplorerMethods(),
+    ...observabilityTimeseriesMethods(),
+  ];
 }
 
 /**

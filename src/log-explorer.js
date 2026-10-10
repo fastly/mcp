@@ -128,7 +128,7 @@ const PRODUCT = [
 const SAMPLED = [
   "Fastly samples these records at a rate that follows the service's requests per second, so shares and rates are estimates rather than totals.",
   "For exact request counts, use `historicalApi.getHistStats` or `realtimeApi.getStatsLast120Seconds`, which count every request.",
-  "`observabilityTimeseriesApi.timeseriesGet` reads this same sampled data, and its `filter` cannot be sent through the SDK either.",
+  "`observabilityTimeseriesApi.timeseriesGet` reads this same sampled data with `source: 'logs'` and supports structured filters.",
 ];
 
 const TIMES =
@@ -280,7 +280,7 @@ const OPERATIONS = operationTable([
       "Aggregate a service's sampled request logs into your own grouped metrics, such as the p95 response time per POP.",
       "Use this when `insightsApi.getLogInsights` has no ready-made ranking for the question.",
       "`observabilityTimeseriesApi.timeseriesGet` reads the same records with the same metrics, but buckets them by time instead of grouping them by field.",
-      "It is still an SDK method, so its `filter` cannot be sent and its `granularity` takes `minute`, `hour` or `day` rather than a number.",
+      "For logs, its `granularity` takes `second`, `minute`, `hour` or `day`, not a number of seconds.",
       TIMES,
       ...PRODUCT,
       ...SAMPLED,
