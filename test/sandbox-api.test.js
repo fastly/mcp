@@ -732,6 +732,146 @@ describe("NGWAF results through final delivery", () => {
   }, 30000);
 });
 
+// A log record as the API really sends it, with the fields the SDK's model drops and the array it flattens to a string.
+const LOG_RECORD = {
+  service_id: "svc1",
+  timestamp: "2026-10-10T10:00:00.5Z",
+  request_host: "example.com",
+  request_path: "/a",
+  response_status: 200,
+  response_time: 0.25,
+  origin_host: ["origin.example.com"],
+  bot_name: "GoogleBot",
+  bot_category: "search_engine",
+  is_h2: true,
+  is_bot_detected: false,
+  response_ttl: 3600,
+  response_bytes: 1145,
+};
+
+describe("Log Explorer adapters through the sandbox bridge", () => {
+  // The query string as it really went out. Object.fromEntries would lose the repeated parameters.
+  const queriesSince = (start) =>
+    requests
+      .slice(start)
+      .map(({ url }) => new URL(url, "https://api.fastly.com").search);
+
+  test("a filter becomes bracketed parameters and a metric list is repeated", async () => {
+    nextResponse = json({ data: [], meta: {} });
+    const start = requests.length;
+    const out = await runSandbox(
+      `await logExplorerApi.getLogRecords({
+         service_id: "svc1",
+         start: "2026-10-10T00:00:00Z",
+         end: "2026-10-10T01:00:00Z",
+         limit: 2,
+         filter: { response_status: 404, response_time: { gte: 0.5 }, request_method: ["GET", "HEAD"] },
+       });
+       await observabilityAggregationsForLogsApi.logAggregationsGet({
+         service_id: "svc1",
+         start: "2026-10-10T00:00:00Z",
+         end: "2026-10-10T01:00:00Z",
+         series: "avg[response_time],p95[response_time]",
+         dimensions: "fastly_pop",
+         sort: "-p95[response_time]",
+       });
+       return "done";`,
+      { fastlyApiToken: "token" },
+    );
+    expect(out.result).toBe("done");
+    const [records, aggregations] = queriesSince(start).map((search) =>
+      decodeURIComponent(search),
+    );
+    expect(records).toContain("filter[response_status]=404");
+    expect(records).toContain("filter[response_time][gte]=0.5");
+    expect(records).toContain("filter[request_method][in]=GET,HEAD");
+    expect(aggregations).toContain("source=logs");
+    expect(aggregations).toContain(
+      "series=avg[response_time]&series=p95[response_time]",
+    );
+    expect(aggregations).toContain("dimensions=fastly_pop");
+    expect(aggregations).toContain("sort=-p95[response_time]");
+  }, 15000);
+
+  test("a record arrives with every field the SDK model would drop", async () => {
+    nextResponse = json({
+      data: [LOG_RECORD],
+      meta: { filters: { next_cursor: "cursor2" } },
+    });
+    const out = await runSandbox(
+      `return await logExplorerApi.getLogRecords({
+         service_id: "svc1",
+         start: "2026-10-10T00:00:00Z",
+         end: "2026-10-10T01:00:00Z",
+       });`,
+      { fastlyApiToken: "token" },
+    );
+    expect(out.ok).toBe(true);
+    expect(out.result).toEqual({
+      data: [LOG_RECORD],
+      meta: { filters: { next_cursor: "cursor2" } },
+    });
+  }, 15000);
+
+  test("bad options fail before any request", async () => {
+    const start = requests.length;
+    const out = await runSandbox(
+      `const messages = [];
+       const range = { service_id: "svc1", start: "2026-10-10T00:00:00Z", end: "2026-10-10T01:00:00Z" };
+       for (const call of [
+         () => logExplorerApi.getLogRecords({ ...range, filter: { response_status: { ne: 404 } } }),
+         () => logExplorerApi.getLogRecords({ ...range, filter: "response_status=404" }),
+         () => logExplorerApi.getLogRecords({ ...range, source: "logs" }),
+         () => insightsApi.getLogInsights({ ...range, visualization: "top-url-by-duration-sum" }),
+         () => observabilityAggregationsForLogsApi.logAggregationsGet(range),
+         // JSON drops the undefined property on the way, so the adapter sees an empty filter.
+         () => logExplorerApi.getLogRecords({ ...range, filter: { response_status: undefined } }),
+         () => logExplorerApi.getLogRecords({ ...range, filter: {} }),
+       ]) {
+         try { await call(); messages.push("sent"); } catch (e) { messages.push(e.message); }
+       }
+       return messages;`,
+      { fastlyApiToken: "token" },
+    );
+    const emptyFilter =
+      "'filter' names no field. Leave the option out rather than passing an empty filter.";
+    expect(out.result).toEqual([
+      "'filter.response_status' uses the unknown operator 'ne'. The operators are eq, in, contains, ends-with, gt, gte, lt, lte.",
+      "'filter' must be an object.",
+      "getLogRecords does not accept 'source'. Its options are service_id, start, end, limit, next_cursor, filter.",
+      "'visualization' must be one of top-url-by-requests, top-url-by-bandwidth, top-url-by-duration, top-url-by-misses, top-url-by-cache-hit-ratio, bottom-url-by-cache-hit-ratio, top-4xx-urls, top-5xx-urls, top-503-responses, response-status-codes, country-statistics, top-browser-by-requests, top-device-by-requests, top-os-by-requests, top-content-type-by-requests.",
+      "Missing the required parameter 'series'.",
+      emptyFilter,
+      emptyFilter,
+    ]);
+    expect(requests.length).toBe(start);
+  }, 15000);
+
+  test("the adapters take the place of the SDK classes of the same name", async () => {
+    nextResponse = json({ data: [], meta: {} });
+    const out = await runSandbox(
+      `const messages = [];
+       for (const call of [
+         () => logExplorerApi.getLogRecordsWithHttpInfo({}),
+         () => insightsApi.getLogInsightsWithHttpInfo({}),
+         () => observabilityAggregationsForLogsApi.logAggregationsGetWithHttpInfo({}),
+         () => productLogExplorerInsightsApi.getServicesProductLogExplorerInsights(),
+       ]) {
+         try { await call(); messages.push("sent"); } catch (e) { messages.push(e.message); }
+       }
+       return messages;`,
+      { fastlyApiToken: "token" },
+    );
+    // The WithHttpInfo twins went away with the classes they belonged to, and the product class the adapters leave alone still works.
+    expect(out.result).toEqual([
+      "Unknown Fastly API method: LogExplorerApi.getLogRecordsWithHttpInfo",
+      "Unknown Fastly API method: InsightsApi.getLogInsightsWithHttpInfo",
+      "Unknown Fastly API method: ObservabilityAggregationsForLogsApi.logAggregationsGetWithHttpInfo",
+      "sent",
+    ]);
+  }, 15000);
+});
+
 // The paging the method descriptions ask for, run against mock NGWAF collections that page in different ways.
 describe("the NGWAF paging flow", () => {
   const FLOW = `

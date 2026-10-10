@@ -3,9 +3,9 @@ import { spawnSync } from "node:child_process";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Fastly from "fastly";
-import { buildApiIndex } from "../src/api-index.js";
+import { buildApiIndex, ownedMethods } from "../src/api-index.js";
 import { buildIndex } from "../src/indexer.js";
-import { ngwafMethods } from "../src/ngwaf.js";
+import { REPLACED_SDK_CLASSES } from "../src/log-explorer.js";
 import { inspect } from "../src/tools/inspect.js";
 import { search } from "../src/tools/search.js";
 import { tempDir } from "./helpers.js";
@@ -63,9 +63,42 @@ const owned = (apiClass, method) => ({
 });
 
 describe("the public index", () => {
-  test("adds the NGWAF adapters to the generated operations", async () => {
+  test("adds the owned adapters to the generated operations", async () => {
     const generated = await buildIndex();
-    expect(index.length).toBe(generated.length + ngwafMethods().length);
+    const standsIn = generated.filter((e) =>
+      REPLACED_SDK_CLASSES.includes(e.apiClass),
+    );
+    expect(standsIn.length).toBeGreaterThan(0);
+    expect(index.length).toBe(
+      generated.length - standsIn.length + ownedMethods().length,
+    );
+  });
+
+  // The adapter and the generated operation share a name, so the index has to offer one of the two, not both.
+  test("a replaced class comes from the adapters only", async () => {
+    const generated = await buildIndex();
+    for (const apiClass of REPLACED_SDK_CLASSES) {
+      const fromDocs = generated.filter((e) => e.apiClass === apiClass);
+      const published = index.filter((e) => e.apiClass === apiClass);
+      expect(fromDocs.length).toBeGreaterThan(0);
+      expect(published.map((e) => e.method).sort()).toEqual(
+        fromDocs.map((e) => e.method).sort(),
+      );
+      // The generated docs leave these blank.
+      for (const entry of published) {
+        for (const param of entry.params) {
+          expect(param.description).not.toBe("");
+        }
+      }
+    }
+  });
+
+  test("a replacement the generated docs no longer define is refused", async () => {
+    await expect(
+      buildApiIndex({ owned: [], replaced: ["GoneApi"] }),
+    ).rejects.toThrow(
+      "GoneApi stands in for an SDK class the generated docs no longer define.",
+    );
   });
 
   test("the generated docs name exactly the pinned SDK's API classes", async () => {
@@ -96,7 +129,7 @@ describe("the public index", () => {
   });
 
   test("an owned class the generated docs also define is refused, whatever its methods", async () => {
-    await expect(buildApiIndex({ docsDir })).rejects.toThrow(
+    await expect(buildApiIndex({ docsDir, replaced: [] })).rejects.toThrow(
       "NgwafRulesApi is both in the generated SDK docs and implemented by this server",
     );
   });
@@ -105,11 +138,13 @@ describe("the public index", () => {
     await expect(
       buildApiIndex({
         docsDir,
+        replaced: [],
         owned: [owned("OtherApi", "getX"), owned("OtherApi", "getX")],
       }),
     ).rejects.toThrow("OtherApi.getX is defined twice.");
     const fine = await buildApiIndex({
       docsDir,
+      replaced: [],
       owned: [owned("OtherApi", "getX"), owned("OtherApi", "getY")],
     });
     expect(fine.map((e) => `${e.apiClass}.${e.method}`)).toEqual([
@@ -244,9 +279,12 @@ describe("NGWAF discovery", () => {
   });
 
   test("every summary is a whole first sentence", () => {
-    for (const { apiClass, method, description } of ngwafMethods()) {
-      const [match] = search(index, `${apiClass} ${method}`).matches;
-      expect(`${match.apiClass}.${match.method}`).toBe(`${apiClass}.${method}`);
+    for (const { apiClass, method, description } of ownedMethods()) {
+      const { matches } = search(index, `${apiClass}.${method}`);
+      const match = matches.find(
+        (entry) => entry.apiClass === apiClass && entry.method === method,
+      );
+      expect(match).toBeDefined();
       expect(description.startsWith(match.summary)).toBe(true);
       expect(match.summary.endsWith(".")).toBe(true);
     }
@@ -254,7 +292,7 @@ describe("NGWAF discovery", () => {
 
   test("every method a description mentions exists", () => {
     const known = new Set(index.map((e) => `${e.shortcut}.${e.method}`));
-    const mentioned = ngwafMethods().flatMap(({ description }) =>
+    const mentioned = ownedMethods().flatMap(({ description }) =>
       [...description.matchAll(/`(\w+Api)\.(\w+)/g)].map(
         ([, api, m]) => `${api}.${m}`,
       ),
@@ -337,6 +375,116 @@ describe("NGWAF discovery", () => {
     );
     expect(inspect(index, "getWorkspaceTimeseries").example).toBe(
       "return await ngwafTimeseriesApi.getWorkspaceTimeseries({ workspace_id: '...', start: '...', metrics: '...' });",
+    );
+  });
+});
+
+describe("Log Explorer discovery", () => {
+  test("search finds each adapter method with ready-to-run usage", () => {
+    for (const [query, expected] of [
+      [
+        "log records",
+        {
+          apiClass: "LogExplorerApi",
+          method: "getLogRecords",
+          httpMethod: "GET",
+          httpPath: "/observability/log-explorer",
+          requiredParams: ["service_id", "start", "end"],
+          pathParams: [],
+          hasServiceIdParam: true,
+          usage:
+            "return await logExplorerApi.getLogRecords({ service_id: '...', start: '...', end: '...' });",
+        },
+      ],
+      [
+        "log insights",
+        {
+          apiClass: "InsightsApi",
+          method: "getLogInsights",
+          httpPath: "/observability/log-insights",
+          requiredParams: ["visualization", "service_id", "start", "end"],
+          usage:
+            "return await insightsApi.getLogInsights({ visualization: '...', service_id: '...', start: '...', end: '...' });",
+        },
+      ],
+      [
+        "log aggregations",
+        {
+          apiClass: "ObservabilityAggregationsForLogsApi",
+          method: "logAggregationsGet",
+          httpPath: "/observability/aggregations",
+          requiredParams: ["service_id", "start", "end", "series"],
+          usage:
+            "return await observabilityAggregationsForLogsApi.logAggregationsGet({ service_id: '...', start: '...', end: '...', series: '...' });",
+        },
+      ],
+    ]) {
+      expect(search(index, query).matches).toContainEqual(
+        expect.objectContaining(expected),
+      );
+    }
+  });
+
+  test("inspect carries the guidance a snippet needs", () => {
+    const shared = [
+      "Log Explorer & Insights product enabled",
+      "kept for seven days",
+      "samples these records",
+    ];
+    for (const [name, phrases] of [
+      [
+        "LogExplorerApi.getLogRecords",
+        [
+          ...shared,
+          "newest first",
+          "`meta.filters.next_cursor`",
+          "absent once the window holds nothing more",
+          "use the `is_` names above",
+          "about 65 fields",
+          "in a `Map`",
+          "`JSON.parse(e.body).errors[0].reason`",
+        ],
+      ],
+      [
+        "InsightsApi.getLogInsights",
+        [
+          ...shared,
+          "top-url-by-duration-sum",
+          "always answers 500",
+          "ignore `limit`",
+          "`top-4xx-urls` and `top-5xx-urls` have no `values`",
+        ],
+      ],
+      [
+        "ObservabilityAggregationsForLogsApi.logAggregationsGet",
+        [
+          ...shared,
+          "`avg`, `min`, `max`, `p95` and `p99`",
+          "no `count` and no `sum`",
+          "this method splits them",
+          "keeps only the first value",
+          "the field's type does not say which ones do",
+        ],
+      ],
+    ]) {
+      const doc = inspect(index, name);
+      expect(doc.ok).toBe(true);
+      expect(doc.returnType).toBe("Object");
+      for (const phrase of phrases) expect(doc.description).toContain(phrase);
+      const limit = doc.params.find((p) => p.name === "limit");
+      expect(limit.description).toContain("from 1 to 100");
+    }
+  });
+
+  // The adapters keep the SDK's class names, so check that the product class they leave alone is untouched.
+  test("the enablement class still comes from the generated docs", () => {
+    const doc = inspect(
+      index,
+      "ProductLogExplorerInsightsApi.getProductLogExplorerInsights",
+    );
+    expect(doc.ok).toBe(true);
+    expect(doc.description).toBe(
+      "Get the enablement status of the Log Explorer & Insights product on a service.",
     );
   });
 });
