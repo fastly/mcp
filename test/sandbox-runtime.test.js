@@ -528,9 +528,10 @@ for (const runtime of runtimes) {
         result = out.result;
       }, 15000);
 
-      // Bun 1.3.11 exposes a host TypeError here; an unexpected pass requires requalification.
-      test.failingIf(runtime.name === "Bun")(
-        "redefinition errors stay in the context (known Bun qualification blocker)",
+      // Bun 1.4.2 still fails this check on macOS, while Linux CI passes.
+      // An unexpected macOS pass requires requalification.
+      test.failingIf(runtime.name === "Bun" && process.platform === "darwin")(
+        "redefinition errors stay in the context",
         () => {
           expect(result).toMatchObject({
             localError: true,
