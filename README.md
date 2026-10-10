@@ -302,6 +302,16 @@ Fastly samples this data and keeps it for seven days.
 So these methods answer "what did the slow requests look like" rather than "how many requests were there".
 Ask for stats when you need exact counts.
 
+### Observability time series
+
+The server adds a read-only time series method, over two kinds of data:
+
+- Request logs for one service, bucketed by second, minute, hour, or day.
+- Sustainability figures for the whole account, such as bandwidth and CPU time, by day or month.
+
+Request log series need the Log Explorer & Insights product enabled.
+They come from the same sampled data, so they are estimates rather than totals.
+
 ### Large results
 
 A result is returned in full whenever it fits in one response, no matter how many records it holds: a list of several hundred users comes back complete.
