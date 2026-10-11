@@ -1,6 +1,8 @@
 // Shared plumbing for the API methods this server implements itself.
 // The server process imports these for discovery, so the SDK import has to stay in the sandbox.
 
+import { httpRoute } from "./method-entry.js";
+
 const BASE_PATH = "https://api.fastly.com";
 
 export const param = (name, type, required, description, values) => ({
@@ -21,11 +23,11 @@ const TYPES = {
   Number: { is: Number.isInteger, expected: "an integer" },
   Boolean: { is: (value) => typeof value === "boolean", expected: "a boolean" },
   Object: { is: isPlainObject, expected: "an object" },
+  Array: { is: Array.isArray, expected: "an array" },
 };
 
 // Refuse unknown options, so callers never mistake them for filters that were applied.
-function readOptions(method, options, params) {
-  if (options === undefined) return {};
+export function readOptions(method, options = {}, params) {
   if (!isPlainObject(options)) {
     throw new TypeError(`${method} takes a single options object.`);
   }
@@ -57,6 +59,9 @@ function readOptions(method, options, params) {
       throw new Error(`'${name}' must be one of ${spec.values.join(", ")}.`);
     }
     values[name] = value;
+  }
+  for (const { name, required } of params) {
+    if (required) requireValue(name, values[name]);
   }
   return values;
 }
@@ -191,12 +196,10 @@ async function request(apiClient, operation, options) {
   const values = readOptions(method, options, params);
   const pathParams = {};
   const rest = { ...values };
-  for (const { name, required } of params) {
+  for (const { name } of params) {
     if (httpPath.includes(`{${name}}`)) {
       pathParams[name] = requireId(name, values[name]);
       delete rest[name];
-    } else if (required) {
-      requireValue(name, values[name]);
     }
   }
   const response = await apiClient.callApi(
@@ -252,11 +255,10 @@ export function operationTable(operations) {
 /** Projects an operation table onto the shape the indexer produces. The copies matter, since enriching the index must not reach back into what the adapters check against. */
 export function describeOperations(operations) {
   return Object.values(operations).map(
-    ({ apiClass, method, httpMethod, httpPath, description, params }) => ({
+    ({ apiClass, method, description, params, ...route }) => ({
       apiClass,
       method,
-      httpMethod,
-      httpPath,
+      ...httpRoute(route),
       description: description.join(" "),
       params: params.map(({ name, type, required, description }) => ({
         name,

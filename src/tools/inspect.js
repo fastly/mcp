@@ -1,4 +1,4 @@
-import { buildUsage, enrichMethod } from "../method-entry.js";
+import { buildUsage, enrichMethod, httpRoute } from "../method-entry.js";
 import { remoteUnavailableOperations } from "../method-policy.js";
 
 // The remote index leaves these operations out, so without this the model
@@ -56,8 +56,7 @@ export function inspect(index, method, { remote = false } = {}) {
     ok: true,
     apiClass: match.apiClass,
     method: match.method,
-    httpMethod: match.httpMethod,
-    httpPath: match.httpPath,
+    ...httpRoute(match),
     description: match.description,
     returnType: match.returnType,
     params: match.params,

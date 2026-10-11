@@ -3,6 +3,7 @@
 import { text } from "node:stream/consumers";
 import vm from "node:vm";
 import Fastly from "fastly";
+import { COMPRESSION_ADVISOR_API_CLASSES } from "./compression-advisor.js";
 import { describeThrown, read, snippetLine } from "./errors.js";
 import {
   API_RESPONSE_BYTES,
@@ -28,6 +29,9 @@ const REPLACED_SDK_CLASSES = [
 
 const { code, fastlyApiToken, policy } = JSON.parse(await text(process.stdin));
 
+// Extra time past the parent's deadline, in case the parent is no longer there to kill us.
+const CHILD_GRACE_MS = 5_000;
+
 // Only the host decides this; it arrives next to the code, never inside it.
 const remote = policy?.remote === true;
 
@@ -44,8 +48,11 @@ const serializeOptions = {
 
 // The parent normally kills us at its deadline; if it died first, nothing
 // else would stop a snippet parked on a hung request.
-if (Number.isFinite(policy?.deadlineMs)) {
-  setTimeout(() => process.exit(1), policy.deadlineMs).unref();
+if (Number.isFinite(policy?.deadlineAt)) {
+  setTimeout(
+    () => process.exit(1),
+    policy.deadlineAt + CHILD_GRACE_MS - Date.now(),
+  ).unref();
 }
 
 if (fastlyApiToken) {
@@ -72,6 +79,9 @@ if (remote) {
   });
 }
 
+// Synthetic APIs run whole analyses on top of the other classes rather than sending one request.
+const SYNTHETIC_API_CLASSES = { ...COMPRESSION_ADVISOR_API_CLASSES };
+
 const OWNED_API_CLASSES = {
   ...NGWAF_API_CLASSES,
   ...LOG_EXPLORER_API_CLASSES,
@@ -79,7 +89,10 @@ const OWNED_API_CLASSES = {
 };
 
 // An adapter standing in for an SDK class is expected. Any other overlap means the SDK grew a class this server implements, and the two would disagree.
-const sdkCollisions = Object.keys(OWNED_API_CLASSES).filter(
+const sdkCollisions = Object.keys({
+  ...OWNED_API_CLASSES,
+  ...SYNTHETIC_API_CLASSES,
+}).filter(
   (name) => Object.hasOwn(Fastly, name) && !REPLACED_SDK_CLASSES.includes(name),
 );
 
@@ -102,6 +115,22 @@ for (const name of Object.keys(Fastly)) {
 for (const [name, Ctor] of Object.entries(OWNED_API_CLASSES)) {
   apiInstances.set(name, {
     instance: new Ctor(Fastly.ApiClient.instance),
+    operations: operationsOf(Ctor),
+  });
+}
+for (const [name, Ctor] of Object.entries(SYNTHETIC_API_CLASSES)) {
+  apiInstances.set(name, {
+    instance: new Ctor({
+      call: (apiClass, method, options) =>
+        operation(
+          apiClass,
+          method,
+        )(options).catch((err) => {
+          const failure = describeFailure(err, apiClass, method);
+          throw Object.assign(new Error(failure.error), failure);
+        }),
+      deadline: policy?.deadlineAt,
+    }),
     operations: operationsOf(Ctor),
   });
 }
@@ -154,8 +183,8 @@ function responseTooLarge(apiClass, method, bytes) {
   return `The response from ${apiClass}.${method} is ${size}more than the ${API_RESPONSE_BYTES} bytes a snippet can receive from one call. ${FETCH_LESS}`;
 }
 
-async function callFastly(payload) {
-  const { apiClass, method, args } = JSON.parse(payload);
+// Snippets and synthetic APIs reach an operation through the same checks, so a remote denial applies to both.
+function operation(apiClass, method) {
   const api = apiInstances.get(apiClass);
   if (!api?.operations.has(method)) {
     throw new Error(`Unknown Fastly API method: ${apiClass}.${method}`);
@@ -164,9 +193,25 @@ async function callFastly(payload) {
   if (denial) {
     throw new Error(`${apiClass}.${method} is unavailable here. ${denial}`);
   }
-  const { instance } = api;
+  return (...args) => api.instance[method](...args);
+}
+
+// Snippets and synthetic APIs get the same failure description, token hint included.
+function describeFailure(err, apiClass, method) {
+  const failure =
+    err?.error?.code === "ETOOLARGE"
+      ? { error: responseTooLarge(apiClass, method) }
+      : describeThrown(err);
+  const hint = authHint(failure.status);
+  if (hint) failure.hint = hint;
+  return failure;
+}
+
+async function callFastly(payload) {
+  const { apiClass, method, args } = JSON.parse(payload);
+  const send = operation(apiClass, method);
   try {
-    const result = await instance[method](...args);
+    const result = await send(...args);
     const { value, reduced } = serializeResult(result, {
       maxDepth: SANDBOX_MAX_DEPTH,
       maxSize: API_RESPONSE_BYTES,
@@ -183,13 +228,10 @@ async function callFastly(payload) {
     }
     return JSON.stringify({ ok: true, value });
   } catch (err) {
-    const failure =
-      err?.error?.code === "ETOOLARGE"
-        ? { error: responseTooLarge(apiClass, method) }
-        : describeThrown(err);
-    const hint = authHint(failure.status);
-    if (hint) failure.hint = hint;
-    return JSON.stringify({ ok: false, failure });
+    return JSON.stringify({
+      ok: false,
+      failure: describeFailure(err, apiClass, method),
+    });
   }
 }
 

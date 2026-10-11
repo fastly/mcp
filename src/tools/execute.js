@@ -19,9 +19,6 @@ import { sliceWhole } from "../text.js";
 import { truncateOutsideSecrets } from "../truncate.js";
 
 const TIMEOUT_MS = 30_000;
-// Extra time a child gives itself past the parent's deadline, in case the
-// parent is no longer there to kill it.
-const CHILD_GRACE_MS = 5_000;
 // The child may serialize up to a file's worth of result, so its whole stdout payload gets room above that.
 const MAX_STDOUT = 8_000_000;
 const MAX_STDERR = 100_000;
@@ -508,6 +505,8 @@ export async function execute(
   return new Promise((resolve) => {
     const [command, args] = launchCommand(runtime);
     const timeoutMs = runtime.timeoutMs ?? TIMEOUT_MS;
+    // The child takes a while to start, so it gets the time our timer fires rather than a duration.
+    const deadlineAt = Date.now() + timeoutMs;
     const child = spawn(command, args, {
       stdio: ["pipe", "pipe", "pipe"],
       env: runtime.env,
@@ -715,7 +714,7 @@ export async function execute(
         policy: {
           remote,
           resultBytes,
-          deadlineMs: timeoutMs + CHILD_GRACE_MS,
+          deadlineAt,
         },
       }),
     );

@@ -27,6 +27,8 @@ If you already know the method, call it directly. Otherwise, use \`search\` firs
 
 You MUST use \`return\` to produce output. API methods return values directly (arrays, objects), not wrapped in \`.result\`. Every Fastly.*Api class is pre-instantiated as a camelCase global: \`serviceApi\`, \`purgeApi\`, \`backendApi\`, etc.
 
+Synthetic APIs, such as \`compressionAdvisorApi.analyze\`, are globals too. One call runs a whole analysis over several API classes and returns compact findings, so prefer them to many calls aggregated in the snippet. Find them with \`search\`.
+
 Example: \`return await serviceApi.listServices();\`
 
 Results are returned in full whenever they fit, however many records they contain. A result too large for one response is written to a JSON file on the machine running this server and the response carries its path in \`resultFile\`, with only a short preview in \`result\`; read that file to get every record instead of re-running the query.`;

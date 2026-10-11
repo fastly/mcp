@@ -1,3 +1,4 @@
+import { compressionAdvisorMethods } from "./compression-advisor.js";
 import { buildIndex } from "./indexer.js";
 import {
   REPLACED_SDK_CLASSES as LOG_EXPLORER_REPLACEMENTS,
@@ -20,6 +21,7 @@ export function ownedMethods() {
     ...ngwafMethods(),
     ...logExplorerMethods(),
     ...observabilityTimeseriesMethods(),
+    ...compressionAdvisorMethods(),
   ];
 }
 

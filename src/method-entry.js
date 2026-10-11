@@ -34,11 +34,22 @@ export function enrichMethod(method) {
   return method;
 }
 
+/** The HTTP route, or a marker for a synthetic method, which has none. */
+export function httpRoute(method) {
+  if (method.synthetic) return { synthetic: true };
+  return { httpMethod: method.httpMethod, httpPath: method.httpPath };
+}
+
+const placeholder = (method, name) =>
+  method.params.find((p) => p.name === name).type === "Array"
+    ? "['...']"
+    : "'...'";
+
 /** A call to an enriched method with placeholders for its required parameters. */
 export function buildUsage(method) {
   const args =
     method.requiredParams.length > 0
-      ? `{ ${method.requiredParams.map((p) => `${p}: '...'`).join(", ")} }`
+      ? `{ ${method.requiredParams.map((name) => `${name}: ${placeholder(method, name)}`).join(", ")} }`
       : "";
   return `return await ${method.shortcut}.${method.method}(${args});`;
 }

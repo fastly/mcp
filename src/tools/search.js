@@ -1,4 +1,4 @@
-import { buildUsage, enrichMethod } from "../method-entry.js";
+import { buildUsage, enrichMethod, httpRoute } from "../method-entry.js";
 
 const MAX_RESULTS = 10;
 
@@ -146,8 +146,7 @@ function projectMatch(method) {
   const projected = {
     apiClass: method.apiClass,
     method: method.method,
-    httpMethod: method.httpMethod,
-    httpPath: method.httpPath,
+    ...httpRoute(method),
     summary: summarize(method.description),
     requiredParams: method.requiredParams,
     pathParams: method.pathParams,
