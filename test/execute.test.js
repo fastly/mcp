@@ -48,19 +48,28 @@ function remoteResponse(result) {
   }
 }
 
+// A launch profile that runs a stand-in child instead of the sandbox.
+const stubProfile = (entry, extra) => ({
+  executable: process.execPath,
+  args: [],
+  entry,
+  env: {},
+  cwd: import.meta.dir,
+  ...extra,
+});
+
 // Runs a stand-in child that writes the given stderr pieces and stdout instead of running code.
 function executeScripted(script, options) {
   return execute(JSON.stringify(script), {
     ...options,
-    profile: {
-      executable: process.execPath,
-      args: [],
-      entry: SCRIPTED_CHILD_PATH,
-      env: {},
-      cwd: import.meta.dir,
-    },
+    profile: stubProfile(SCRIPTED_CHILD_PATH),
   });
 }
+
+const POLICY_ECHO_PATH = join(
+  import.meta.dir,
+  "fixtures/policy-echo-child.mjs",
+);
 
 const LATE_REJECTION_CODE =
   'Promise.reject(new Error("late")); console.log("x".repeat(90000)); return 7;';
@@ -962,6 +971,18 @@ async function previewWithShield(code) {
     shield.destroy();
   }
 }
+
+describe("the execution policy", () => {
+  // Synthetic APIs wrap up before the parent kills the child, so the child needs to know when that is.
+  test("tells the child when the parent gives up", async () => {
+    const before = Date.now();
+    const result = await execute("return 1;", {
+      profile: stubProfile(POLICY_ECHO_PATH, { timeoutMs: 1234 }),
+    });
+    expect(result.result.deadlineAt).toBeGreaterThanOrEqual(before + 1234);
+    expect(result.result.deadlineAt).toBeLessThanOrEqual(Date.now() + 1234);
+  });
+});
 
 describe("previews never cut a wrapper", () => {
   test("the head of a scalar preview", async () => {

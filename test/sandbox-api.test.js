@@ -990,6 +990,233 @@ describe("Observability Timeseries through the sandbox bridge", () => {
   }, 15000);
 });
 
+// Answers every read the compression advisor makes for one VCL service with one gzip rule.
+function compressionWorld(req) {
+  const url = new URL(req.url, "https://api.fastly.com");
+  const query = url.searchParams;
+  const size = (value) => [{ "avg[response_bytes_body]": value }];
+  if (url.pathname === "/service/svc1/details") {
+    return json({
+      id: "svc1",
+      name: "storefront",
+      type: "vcl",
+      active_version: {
+        number: 42,
+        gzips: [
+          {
+            name: "compress-text",
+            content_types: "text/html",
+            extensions: "html",
+          },
+        ],
+        vcls: [],
+        snippets: [],
+        backends: [],
+      },
+    });
+  }
+  const field = url.pathname.match(
+    /^\/stats\/service\/svc1\/field\/(\w+)$/,
+  )?.[1];
+  if (field) {
+    const total = field === "bandwidth" ? 1_000e9 : 900e9;
+    return json({
+      status: "success",
+      meta: {},
+      msg: null,
+      data: [{ [field]: total, service_id: "svc1", start_time: 1 }],
+    });
+  }
+  if (url.pathname === "/enabled-products/v1/log_explorer_insights/services") {
+    return json({ services: ["svc1"] });
+  }
+  if (url.pathname === "/observability/log-insights") {
+    return json(
+      query.get("visualization") === "top-content-type-by-requests"
+        ? {
+            data: [
+              {
+                dimensions: { content_type: "text/html" },
+                values: [{ rate: 0.5 }],
+              },
+              {
+                dimensions: { content_type: "application/json" },
+                values: [{ rate: 0.5 }],
+              },
+            ],
+          }
+        : {
+            data: [
+              {
+                dimensions: { url: "GET /private/alice.json" },
+                values: [
+                  { average_bandwidth_bytes: 1, bandwidth_percentage: 1 },
+                ],
+              },
+            ],
+          },
+    );
+  }
+  if (url.pathname === "/observability/aggregations") {
+    if (query.has("filter[response_content_type][in]")) {
+      return json({ data: [{ values: size(3000) }] });
+    }
+    return json({
+      data: query.has("dimensions")
+        ? [
+            {
+              dimensions: { response_content_type: "text/html" },
+              values: size(1000),
+            },
+            {
+              dimensions: { response_content_type: "application/json" },
+              values: size(2900),
+            },
+            {
+              dimensions: {
+                response_content_type: "application/json; charset=utf-8",
+              },
+              values: size(3100),
+            },
+          ]
+        : [{ values: size(2000) }],
+    });
+  }
+  return { status: 404, contentType: "application/json", body: "{}" };
+}
+
+describe("the compression advisor through the sandbox bridge", () => {
+  const hour = Math.floor(Date.now() / 3_600_000) * 3_600_000;
+  const options = {
+    service_ids: ["svc1"],
+    from: new Date(hour - 2 * 86_400_000).toISOString(),
+    to: new Date(hour).toISOString(),
+  };
+
+  test("the global runs the whole analysis locally and remotely, with read-only requests", async () => {
+    for (const remote of [false, true]) {
+      nextResponse = compressionWorld;
+      const start = requests.length;
+      const out = await runSandbox(
+        `return await compressionAdvisorApi.analyze(${JSON.stringify(options)});`,
+        {
+          fastlyApiToken: "token",
+          policy: { remote },
+          runtime: remote ? "node" : process.execPath,
+        },
+      );
+      expect(out.ok).toBe(true);
+      const [candidate] = out.result.candidates;
+      expect(candidate.service).toEqual({
+        id: "svc1",
+        name: "storefront",
+        type: "vcl",
+        active_version: 42,
+        source: "service_configuration",
+      });
+      expect(candidate.configuration).toEqual(
+        expect.objectContaining({
+          status: "partially_covered",
+          gzip_rules: ["compress-text"],
+          missing_content_types: ["application/json"],
+          missing_extensions: ["json"],
+        }),
+      );
+      expect(candidate.traffic).toEqual(
+        expect.objectContaining({
+          total_bandwidth_bytes: 1_000e9,
+          delivered_body_bytes: 900e9,
+          candidate_share: 0.75,
+          candidate_bandwidth_bytes: 675e9,
+        }),
+      );
+      expect(candidate.projection.projected_savings_bytes).toBe(472.5e9);
+      expect(JSON.stringify(out.result)).not.toContain("alice");
+      const calls = requestsSince(start);
+      expect(calls.every((c) => c.method === "GET" && c.key === "token")).toBe(
+        true,
+      );
+      expect(calls.every((c) => c.host === "api.fastly.com")).toBe(true);
+      expect([...new Set(calls.map((c) => c.path))].sort()).toEqual([
+        "/enabled-products/v1/log_explorer_insights/services",
+        "/observability/aggregations",
+        "/observability/log-insights",
+        "/service/svc1/details",
+        "/stats/service/svc1/field/bandwidth",
+        "/stats/service/svc1/field/compute_resp_body_bytes",
+        "/stats/service/svc1/field/edge_resp_body_bytes",
+      ]);
+      expect(calls.some((c) => c.path === "/observability/log-explorer")).toBe(
+        false,
+      );
+      // Our aggregation adapter adds the source itself and writes the filter as a query parameter name.
+      const aggregations = calls.filter(
+        (c) => c.path === "/observability/aggregations",
+      );
+      expect(aggregations.every((c) => c.query.source === "logs")).toBe(true);
+      expect(
+        aggregations
+          .map((c) => c.query["filter[response_content_type][in]"])
+          .filter(Boolean),
+      ).toEqual(["application/json,application/json; charset=utf-8"]);
+    }
+  }, 30000);
+
+  test("the class works through Fastly too, and only analyze is reachable", async () => {
+    nextResponse = compressionWorld;
+    const out = await runSandbox(
+      `const messages = [];
+       const result = await new Fastly.CompressionAdvisorApi().analyze(${JSON.stringify(options)});
+       messages.push(result.candidates.length);
+       for (const call of [
+         () => compressionAdvisorApi.analyzeWithHttpInfo({}),
+         () => compressionAdvisorApi.analyze({ service_ids: ["svc1"] }),
+       ]) {
+         try { await call(); messages.push("sent"); } catch (e) { messages.push(e.message); }
+       }
+       return messages;`,
+      { fastlyApiToken: "token" },
+    );
+    expect(out.result).toEqual([
+      1,
+      "Unknown Fastly API method: CompressionAdvisorApi.analyzeWithHttpInfo",
+      "Missing the required parameter 'from'.",
+    ]);
+  }, 15000);
+
+  test("a refused token reaches the analysis with the hint a snippet would get", async () => {
+    nextResponse = (req) =>
+      req.url.startsWith("/service/")
+        ? { status: 401, contentType: "application/json", body: "{}" }
+        : compressionWorld(req);
+    const out = await runSandbox(
+      `return await compressionAdvisorApi.analyze(${JSON.stringify(options)});`,
+      { fastlyApiToken: "token" },
+    );
+    expect(out.result.other_services[0].errors).toEqual([
+      expect.objectContaining({
+        source: "service_configuration",
+        status: 401,
+        hint: expect.stringContaining("Fastly rejected the API token"),
+      }),
+    ]);
+  }, 15000);
+
+  test("the parent's deadline reaches the analysis", async () => {
+    nextResponse = compressionWorld;
+    const start = requests.length;
+    const out = await runSandbox(
+      `return await compressionAdvisorApi.analyze(${JSON.stringify(options)});`,
+      { fastlyApiToken: "token", policy: { deadlineAt: Date.now() + 1000 } },
+    );
+    expect(out.result.complete).toBe(false);
+    expect(out.result.other_services).toEqual([
+      { service: { id: "svc1" }, reason: "time_budget" },
+    ]);
+    expect(requests.length).toBe(start);
+  }, 15000);
+});
+
 // The paging the method descriptions ask for, run against mock NGWAF collections that page in different ways.
 describe("the NGWAF paging flow", () => {
   const FLOW = `

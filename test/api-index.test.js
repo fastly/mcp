@@ -541,3 +541,57 @@ describe("Log Explorer discovery", () => {
     );
   });
 });
+
+describe("Compression advisor discovery", () => {
+  test("search publishes the synthetic method with ready-to-run usage and no route", () => {
+    for (const query of [
+      "compression",
+      "gzip",
+      "bandwidth savings",
+      "compressionAdvisorApi",
+      "analyze",
+    ]) {
+      expect(search(index, query).matches).toContainEqual({
+        apiClass: "CompressionAdvisorApi",
+        method: "analyze",
+        synthetic: true,
+        summary:
+          "Rank services by the bytes they could save with more compression, in one call that returns compact findings rather than log records.",
+        requiredParams: ["service_ids", "from", "to"],
+        pathParams: [],
+        hasServiceIdParam: false,
+        usage:
+          "return await compressionAdvisorApi.analyze({ service_ids: ['...'], from: '...', to: '...' });",
+      });
+    }
+  });
+
+  test("inspect explains provenance, confidence and the output shape", () => {
+    const doc = inspect(index, "CompressionAdvisorApi.analyze");
+    expect(doc.ok).toBe(true);
+    expect(doc.synthetic).toBe(true);
+    expect(doc.httpMethod).toBeUndefined();
+    expect(doc.httpPath).toBeUndefined();
+    expect(doc.returnType).toBe("Object");
+    expect(doc.example).toBe(
+      "return await compressionAdvisorApi.analyze({ service_ids: ['...'], from: '...', to: '...' });",
+    );
+    expect(doc.params.map((p) => [p.name, p.type, p.required])).toEqual([
+      ["service_ids", "Array", true],
+      ["from", "String", true],
+      ["to", "String", true],
+      ["minimum_candidate_bandwidth_gb", "Number", false],
+      ["compression", "String", false],
+    ]);
+    for (const phrase of [
+      "rather than log records",
+      "`*_source`",
+      "fractions from 0 to 1",
+      "does not prove",
+      "case-sensitively",
+      "no request path or client detail",
+    ]) {
+      expect(doc.description).toContain(phrase);
+    }
+  });
+});
