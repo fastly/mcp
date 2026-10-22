@@ -2,7 +2,7 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "fastly-mcp",
   "version": "2.4.1",
-  "description": "Use the Fastly API through a local MCP server",
+  "description": "Manage Fastly services with a local MCP server",
   "author": {
     "name": "Fastly",
     "url": "https://www.fastly.com"
@@ -14,9 +14,9 @@
   "extensions": {
     "com.openai": {
       "interface": {
-        "displayName": "Fastly MCP",
-        "shortDescription": "Work with the Fastly API",
-        "longDescription": "Find Fastly API methods, inspect their parameters, and run focused JavaScript with a preconfigured Fastly client.\nInvestigate services, backends, TLS, caching, and traffic, or make changes with a token that permits them.\nThe MCP server runs locally and uses the Fastly API token you configure in your client environment.\nInstall either Bun or Node.js 24.12.0 or newer before connecting.\nThe bundled launcher uses bunx; see the README for Bun-only and Node.js-only launch settings.\nNode.js is recommended for remote mode.\nFor production changes, review the planned call and approve it before execution.",
+        "displayName": "Fastly",
+        "shortDescription": "Manage Fastly with MCP",
+        "longDescription": "Manage Fastly services with a local MCP server.\nAsk it to list your services, check traffic and usage, or review domains, backends, and TLS settings.\nIt can also purge cached content and update service settings, dictionaries, and access control lists.\n\nYou'll need a Fastly account and an API token with permission to access the resources you want to work with.\nA read-only token lets your assistant inspect resources; a token with write access can also allow changes and deletions in production.\n\nThe server runs on your computer and requires Bun or Node.js 24.12.0 or newer.\nSee the README for setup instructions.",
         "developerName": "Fastly",
         "category": "Developer Tools",
         "websiteURL": "https://github.com/fastly/mcp",
