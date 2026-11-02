@@ -357,6 +357,22 @@ Name | Type | Description | Notes
 **ddos_challenges_failed** | **Number** | Number of failed challenge solutions processed as a result of a DDoS action. For example, an incorrect CAPTCHA solution. | [optional]
 **ddos_challenges_pats_issued** | **Number** | Number of Private Access Token challenges issued as a result of a DDoS action. | [optional]
 **ddos_challenges_pats_succeeded** | **Number** | Number of successful Private Access Token challenge solutions processed as a result of a DDoS action. | [optional]
+**arc_ai_firewall_requests** | **Number** | Number of requests received by AI Firewall in AI Runtime Control. | [optional]
+**arc_ai_firewall_blocked** | **Number** | Number of requests blocked by AI Firewall in AI Runtime Control. | [optional]
+**bot_edge_challenge_complete_tokens_issued** | **Number** | The number of challenge-complete tokens issued as a result of a ContentGuard action. For example, issuing a challenge-complete token after a series of CAPTCHA challenges ending in success. | [optional]
+**bot_edge_challenges_issued** | **Number** | The number of challenges issued as a result of a ContentGuard action. | [optional]
+**bot_edge_challenges_succeeded** | **Number** | The number of successful challenge solutions processed as a result of a ContentGuard action. For example, a correct CAPTCHA solution. | [optional]
+**bot_edge_challenges_failed** | **Number** | The number of failed challenge solutions processed as a result of a ContentGuard action. For example, an incorrect CAPTCHA solution. | [optional]
+**bot_edge_challenges_pats_issued** | **Number** | The number of Private Access Token challenges issued as a result of a ContentGuard action. | [optional]
+**bot_edge_challenges_pats_succeeded** | **Number** | The number of successful Private Access Token challenge solutions processed as a result of a ContentGuard action. | [optional]
+**netprotect_gre_sent_bytes** | **Number** | Number of bytes sent via GRE tunnel. | [optional]
+**netprotect_gre_sent_packets** | **Number** | Number of packets sent via GRE tunnel. | [optional]
+**netprotect_received_bytes** | **Number** | Number of ingress bytes received for network protection. | [optional]
+**netprotect_received_packets** | **Number** | Number of ingress packets received for network protection. | [optional]
+**netprotect_firewall_dropped_bytes** | **Number** | Number of bytes dropped by network protection firewall. | [optional]
+**netprotect_firewall_dropped_packets** | **Number** | Number of packets dropped by network protection firewall. | [optional]
+**api_enforcement_allowed_requests_count** | **Number** | Number of requests allowed after evaluation by the API Enforcement engine. | [optional]
+**api_enforcement_flagged_requests_count** | **Number** | Number of requests flagged after evaluation by the API Enforcement engine. | [optional]
 
 
 [[Back to API list]](../../README.md#endpoints) [[Back to README]](../../README.md)

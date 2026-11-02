@@ -176,10 +176,10 @@ describe("buildIndex – parse correctness", () => {
 });
 
 describe("buildIndex – golden test", () => {
-  test("exactly 139 API classes are parsed", async () => {
+  test("exactly 148 API classes are parsed", async () => {
     const index = await buildIndex(DOCS_DIR);
     const classes = new Set(index.map((m) => m.apiClass));
-    expect(classes.size).toBe(139);
+    expect(classes.size).toBe(148);
   });
 });
 

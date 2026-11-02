@@ -13,6 +13,7 @@ Method | HTTP request | Description
 [**createAutomationToken**](AutomationTokensApi.md#createAutomationToken) | **POST** /automation-tokens | Create Automation Token
 [**getAutomationTokenId**](AutomationTokensApi.md#getAutomationTokenId) | **GET** /automation-tokens/{id} | Retrieve an Automation Token by ID
 [**getAutomationTokensIdServices**](AutomationTokensApi.md#getAutomationTokensIdServices) | **GET** /automation-tokens/{id}/services | List Automation Token Services
+[**getAutomationTokensIdWorkspaces**](AutomationTokensApi.md#getAutomationTokensIdWorkspaces) | **GET** /automation-tokens/{id}/workspaces | List Automation Token Workspaces
 [**listAutomationTokens**](AutomationTokensApi.md#listAutomationTokens) | **GET** /automation-tokens | List Customer Automation Tokens
 [**revokeAutomationTokenId**](AutomationTokensApi.md#revokeAutomationTokenId) | **DELETE** /automation-tokens/{id} | Revoke an Automation Token by ID
 
@@ -29,7 +30,7 @@ Creates a new automation token.
 
 ```javascript
 const options = {
-  automation_token_create_request: new Fastly.AutomationTokenCreateRequest(),
+  automation_token_create_request: {"name":"my_multi_role_token","expires_at":"2027-01-01T20:43:14Z","roles":["t4Gg2uUGZzb2W9Euo4mo0R","x9KzsrACXZv8tPwlEDsKb6"],"services":["SU1Z0isxPaozGVKXdv0eY"],"limit_services":true,"workspaces":["7rWPJST2KqFD37tnQANBo2"],"limit_workspaces":true},
 };
 
 apiInstance.createAutomationToken(options)
@@ -124,6 +125,45 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**InlineResponse2004**](InlineResponse2004.md)
+
+
+## `getAutomationTokensIdWorkspaces`
+
+```javascript
+getAutomationTokensIdWorkspaces({ id, [limit, ][cursor] })
+```
+
+Lists the Next-Gen WAF workspaces accessible by an automation token. Only applicable for tokens with roles that support workspace access (such as Next-Gen WAF roles).
+
+### Example
+
+```javascript
+const options = {
+  id: "id_example", // required
+  limit: 20,
+  cursor: "cursor_example",
+};
+
+apiInstance.getAutomationTokensIdWorkspaces(options)
+  .then((data) => {
+    console.log(data, "API called successfully.");
+  })
+  .catch((error) => {
+    console.error(error);
+  });
+```
+
+### Options
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+**id** | **String** | The alphanumeric string identifying the automation token. |
+**limit** | **Number** | Maximum number of workspaces to return per page. | [optional] [defaults to 20]
+**cursor** | **String** | Pagination cursor from a previous response. Pass the `next_cursor` value to retrieve the next page, or `previous_cursor` to go back. | [optional]
+
+### Return type
+
+[**AutomationTokenWorkspacesResponse**](AutomationTokenWorkspacesResponse.md)
 
 
 ## `listAutomationTokens`
