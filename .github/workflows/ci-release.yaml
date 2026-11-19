@@ -176,3 +176,31 @@ jobs:
           fi
 
           npm publish "${PUBLISH_ARGS[@]}"
+
+  github-release:
+    name: Create the GitHub release
+    needs: publish-npm
+    if: ${{ inputs.dry_run != true }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create the GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "The ${TAG} release already exists."
+            exit 0
+          fi
+
+          ARGS=(--repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --generate-notes)
+          if [[ "$TAG" == *-* ]]; then
+            ARGS+=(--prerelease)
+          fi
+
+          gh release create "$TAG" "${ARGS[@]}"
