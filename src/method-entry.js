@@ -40,16 +40,51 @@ export function httpRoute(method) {
   return { httpMethod: method.httpMethod, httpPath: method.httpPath };
 }
 
-const placeholder = (method, name) =>
-  method.params.find((p) => p.name === name).type === "Array"
-    ? "['...']"
-    : "'...'";
+const isList = (type) => type === "Array" || /^\[.*\]$/.test(type);
+
+// Search shows ten of these at once, so big bodies are cut down to `{}`.
+// `inspect` still has the full shape.
+const MAX_BODY_DEPTH = 4;
+const MAX_BODY_LENGTH = 240;
+
+// Same escaping as JSON, but with single quotes to match the `'...'` placeholders.
+const literal = (value) => {
+  if (typeof value !== "string") return JSON.stringify(value);
+  const escaped = JSON.stringify(value)
+    .slice(1, -1)
+    .replaceAll('\\"', '"')
+    .replaceAll("'", "\\'");
+  return `'${escaped}'`;
+};
+
+const propertyKey = (name) =>
+  /^[A-Za-z_$][\w$]*$/.test(name) ? name : literal(name);
+
+function requiredObject(fields, depth) {
+  const required = fields.filter((field) => field.required);
+  if (required.length === 0) return "{}";
+  return `{ ${required.map((field) => `${propertyKey(field.name)}: ${placeholder(field, depth)}`).join(", ")} }`;
+}
+
+// Bodies get an object with their required fields instead of a string.
+// When only one value is allowed, we use it.
+function placeholder(param, depth) {
+  let value = "'...'";
+  if (param.allowedValues?.length === 1) {
+    value = literal(param.allowedValues[0]);
+  } else if (param.type.startsWith("{")) {
+    return "{}";
+  } else if (param.fields) {
+    const body =
+      depth < MAX_BODY_DEPTH ? requiredObject(param.fields, depth + 1) : "{}";
+    value = body.length > MAX_BODY_LENGTH ? "{}" : body;
+  }
+  return isList(param.type) ? `[${value}]` : value;
+}
 
 /** A call to an enriched method with placeholders for its required parameters. */
 export function buildUsage(method) {
   const args =
-    method.requiredParams.length > 0
-      ? `{ ${method.requiredParams.map((name) => `${name}: ${placeholder(method, name)}`).join(", ")} }`
-      : "";
+    method.requiredParams.length > 0 ? requiredObject(method.params, 0) : "";
   return `return await ${method.shortcut}.${method.method}(${args});`;
 }

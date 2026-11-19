@@ -416,6 +416,12 @@ describe("Observability Timeseries discovery", () => {
     expect(doc.params).toContainEqual(
       expect.objectContaining({ name: "filter", type: "Object" }),
     );
+    expect(doc.params).toContainEqual(
+      expect.objectContaining({
+        name: "source",
+        allowedValues: ["logs", "sustainability"],
+      }),
+    );
     for (const phrase of [
       "sampled logs or sustainability",
       "`second`, `minute`, `hour`, and `day`",

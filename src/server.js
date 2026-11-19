@@ -46,7 +46,7 @@ const EXECUTE_INPUT_SCHEMA = z.object({
 });
 
 const INSPECT_DESCRIPTION =
-  "Get full documentation for a specific API method, including parameters, return type, and example code. Use this after search to understand how to call a method and what it returns. Accepts a method name (e.g. 'listServices') or ClassName.methodName (e.g. 'ServiceApi.listServices').";
+  "Get full documentation for a specific API method, including parameters, request body fields, allowed values, return type, and example code. Use this after search to understand how to call a method and what it returns. Accepts a method name (e.g. 'listServices') or ClassName.methodName (e.g. 'ServiceApi.listServices').";
 
 const INSPECT_INPUT_SCHEMA = z.object({
   method: z

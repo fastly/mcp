@@ -65,13 +65,15 @@ export function describeAdapterContract({
       for (const entry of ownedMethods()) {
         expect(Object.keys(entry).sort()).toEqual(parsedKeys);
         for (const param of entry.params) {
-          expect(Object.keys(param).sort()).toEqual([
+          const { allowedValues, ...rest } = param;
+          expect(Object.keys(rest).sort()).toEqual([
             "description",
             "name",
             "required",
             "type",
           ]);
           expect(param.description).not.toBe("");
+          if (allowedValues) expect(allowedValues.length).toBeGreaterThan(0);
         }
       }
     });

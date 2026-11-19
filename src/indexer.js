@@ -73,6 +73,97 @@ function cleanDocText(text) {
     .trim();
 }
 
+function parseValueList(text) {
+  try {
+    const values = JSON.parse(`[${text}]`);
+    return values.length > 0 ? values : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// `model` is just the type's last name, like `Backend` in `[Backend]`.
+// It only counts as a model if a doc with that name exists.
+function parseTableRow(line) {
+  const pm = line.match(/^\*\*(\w+)\*\*\s*\|\s*(.*?)\s*\|\s*([^|]*)\|(.*)$/);
+  if (!pm) return undefined;
+  const type = (pm[2].match(/\*\*([^*]+)\*\*/)?.[1] || "").trim();
+  const notes = pm[4].trim();
+  // Look for flags before the value list, so a value like "[optional]" isn't taken for one.
+  const oneOf = /\[one of: (.*)\]$/.exec(notes);
+  const flags = oneOf ? notes.slice(0, oneOf.index) : notes;
+  return {
+    name: pm[1],
+    type,
+    model: type.match(/(\w+)\W*$/)?.[1],
+    required: !flags.includes("[optional]"),
+    readOnly: flags.includes("[readonly]"),
+    description: cleanDocText(pm[3]),
+    allowedValues: oneOf ? parseValueList(oneOf[1]) : undefined,
+  };
+}
+
+function parseModelDoc(content) {
+  if (/^## Enum$/m.test(content)) {
+    const values = [
+      ...content.matchAll(/^\* `[^`]+` \(value: `(.*)`\)$/gm),
+    ].map((m) => m[1]);
+    return { allowedValues: parseValueList(values.join(",")) };
+  }
+  return {
+    properties: content
+      .split("\n")
+      .map(parseTableRow)
+      .filter((row) => row !== undefined),
+  };
+}
+
+// Only reads the model docs that parameters actually use.
+async function loadModels(docsDir, docFiles, rows) {
+  const models = new Map();
+  let pending = rows.map((row) => row.model);
+  while (pending.length > 0) {
+    const names = [...new Set(pending)].filter(
+      (name) => docFiles.has(`${name}.md`) && !models.has(name),
+    );
+    const docs = await Promise.all(
+      names.map((name) => readFile(join(docsDir, `${name}.md`), "utf-8")),
+    );
+    pending = [];
+    for (const [i, name] of names.entries()) {
+      const model = parseModelDoc(docs[i]);
+      models.set(name, model);
+      for (const property of model.properties ?? []) {
+        pending.push(property.model);
+      }
+    }
+  }
+  return models;
+}
+
+// Read-only fields are left out since the server fills them in.
+// Expansion stops when a model refers back to itself.
+function describeField(row, models, expanding = []) {
+  const field = {
+    name: row.name,
+    type: row.type,
+    required: row.required,
+    description: row.description,
+  };
+  const model = models.get(row.model);
+  const allowedValues = row.allowedValues ?? model?.allowedValues;
+  if (allowedValues) field.allowedValues = allowedValues;
+  if (model?.properties && !expanding.includes(row.model)) {
+    const fields = model.properties
+      .filter((property) => !property.readOnly)
+      .map((property) =>
+        describeField(property, models, [...expanding, row.model]),
+      );
+    if (fields.length > 0) field.fields = fields;
+  }
+  return field;
+}
+
 function parseApiDoc(content, apiClass) {
   const methods = [];
 
@@ -127,23 +218,9 @@ function parseApiDoc(content, apiClass) {
     if (optionsIdx !== -1) {
       const optionsEnd = returnIdx !== -1 ? returnIdx : section.length;
       const optionsBlock = section.slice(optionsIdx, optionsEnd);
-      const lines = optionsBlock.split("\n");
-      for (const line of lines) {
-        const pm = line.match(
-          /^\*\*(\w+)\*\*\s*\|\s*(.*?)\s*\|\s*([^|]*)\|(.*)$/,
-        );
-        if (!pm) continue;
-        const paramName = pm[1];
-        const paramType = (pm[2].match(/\*\*([^*]+)\*\*/)?.[1] || "").trim();
-        const paramDesc = cleanDocText(pm[3] || "");
-        const notes = (pm[4] || "").trim();
-        const required = !notes.includes("[optional]");
-        params.push({
-          name: paramName,
-          type: paramType,
-          required,
-          description: paramDesc,
-        });
+      for (const line of optionsBlock.split("\n")) {
+        const row = parseTableRow(line);
+        if (row) params.push(row);
       }
     }
 
@@ -218,8 +295,17 @@ export async function buildIndex(docsDir = DOCS_DIR) {
       }
     }
 
-    for (const method of methods) enrichMethod(method);
     index.push(...methods);
+  }
+
+  const models = await loadModels(
+    docsDir,
+    new Set(files.filter((f) => !f.endsWith("Api.md"))),
+    index.flatMap((method) => method.params),
+  );
+  for (const method of index) {
+    method.params = method.params.map((row) => describeField(row, models));
+    enrichMethod(method);
   }
 
   if (index.length === 0) {

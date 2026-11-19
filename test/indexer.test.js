@@ -3,6 +3,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildIndex } from "../src/indexer.js";
+import { buildUsage } from "../src/method-entry.js";
+import { tempDir } from "./helpers.js";
 
 const DOCS_DIR = join(import.meta.dir, "../docs");
 
@@ -270,6 +272,116 @@ describe("buildIndex – validation", () => {
       expect(method.httpPath).toBeTruthy();
       expect(typeof method.httpPath).toBe("string");
       expect(method.httpPath.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("buildIndex – body models", () => {
+  test("the bot category reset body is spelled out from the real docs", async () => {
+    const index = await buildIndex(DOCS_DIR);
+    const method = index.find(
+      (m) => m.method === "botManagementUpdateCategoryBots",
+    );
+    expect(method.params.at(-1)).toEqual({
+      name: "bot_management_category_bots",
+      type: "BotManagementCategoryBots",
+      required: true,
+      description: "",
+      fields: [
+        expect.objectContaining({
+          name: "action",
+          required: true,
+          fields: [
+            {
+              name: "type",
+              type: "String",
+              required: true,
+              description:
+                "The type of action to apply. Only `inherit` is supported.",
+              allowedValues: ["inherit"],
+            },
+          ],
+        }),
+      ],
+    });
+    expect(buildUsage(method)).toBe(
+      "return await botManagementApi.botManagementUpdateCategoryBots({ workspace_id: '...', category_id: '...', bot_management_category_bots: { action: { type: 'inherit' } } });",
+    );
+  });
+
+  test("models are found by their docs, not by the generator's links", async () => {
+    const files = {
+      "FakeApi.md": `# Fastly.FakeApi
+
+Method | HTTP request | Description
+------ | ------------ | -----------
+[**createThing**](FakeApi.md#createThing) | **POST** /things | Create a thing
+
+## \`createThing\`
+
+### Options
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+**thing** | [**Thing**](Thing.md) |  |
+**labels** | [**{String: Object}**](Object.md) | Free-form labels. |
+**ids** | [**[String]**](String.md) | Related IDs. |
+**mode** | **String** | How to create it. | [optional] [one of: "fast", "safe"]
+
+### Return type
+
+[**Thing**](Thing.md)
+`,
+      "Thing.md": `## Properties
+
+Name | Type | Description | Notes
+------------ | ------------- | ------------- | -------------
+**id** | **String** | Set by the server. | [optional] [readonly]
+**name** | **String** | The name. |
+**kind** | **ThingKind** | Not linked, like a few generated rows. |
+**parent** | [**Thing**](Thing.md) |  | [optional]
+**items** | [**[ThingItem]**](ThingItem.md) |  |
+**tricky** | **String** | Looks optional but is not. |  [one of: "[optional]"]
+`,
+      "ThingKind.md": `## Enum
+
+* \`WIDGET-ONE\` (value: \`"widget"\`)
+`,
+      "ThingItem.md": `## Properties
+
+Name | Type | Description | Notes
+------------ | ------------- | ------------- | -------------
+**2xx_code** | **Number** | A status code. |
+`,
+    };
+    const dir = tempDir("indexer-models");
+    try {
+      for (const [name, content] of Object.entries(files)) {
+        await writeFile(join(dir, name), content);
+      }
+      const [method] = await buildIndex(dir);
+      const [thing] = method.params;
+      expect(Object.keys(thing).sort()).toEqual([
+        "description",
+        "fields",
+        "name",
+        "required",
+        "type",
+      ]);
+      expect(thing.fields.map((f) => f.name)).toEqual([
+        "name",
+        "kind",
+        "parent",
+        "items",
+        "tricky",
+      ]);
+      expect(thing.fields[2].fields).toBeUndefined();
+      expect(method.params.at(-1).allowedValues).toEqual(["fast", "safe"]);
+      expect(buildUsage(method)).toBe(
+        "return await fakeApi.createThing({ thing: { name: '...', kind: 'widget', items: [{ '2xx_code': '...' }], tricky: '[optional]' }, labels: {}, ids: ['...'] });",
+      );
+    } finally {
+      await rm(dir, { recursive: true });
     }
   });
 });

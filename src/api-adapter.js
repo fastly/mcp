@@ -5,12 +5,12 @@ import { httpRoute } from "./method-entry.js";
 
 const BASE_PATH = "https://api.fastly.com";
 
-export const param = (name, type, required, description, values) => ({
+export const param = (name, type, required, description, allowedValues) => ({
   name,
   type,
   required,
   description,
-  ...(values === undefined ? {} : { values }),
+  ...(allowedValues === undefined ? {} : { allowedValues }),
 });
 
 export const bytes = (n) => n.toLocaleString("en-US");
@@ -52,11 +52,13 @@ export function readOptions(method, options = {}, params) {
     }
     // An empty option means "not given" here, so requireValue reports it.
     if (
-      spec.values !== undefined &&
+      spec.allowedValues !== undefined &&
       value !== "" &&
-      !spec.values.includes(value)
+      !spec.allowedValues.includes(value)
     ) {
-      throw new Error(`'${name}' must be one of ${spec.values.join(", ")}.`);
+      throw new Error(
+        `'${name}' must be one of ${spec.allowedValues.join(", ")}.`,
+      );
     }
     values[name] = value;
   }
@@ -260,12 +262,17 @@ export function describeOperations(operations) {
       method,
       ...httpRoute(route),
       description: description.join(" "),
-      params: params.map(({ name, type, required, description }) => ({
-        name,
-        type,
-        required,
-        description,
-      })),
+      params: params.map(
+        ({ name, type, required, description, allowedValues }) => ({
+          name,
+          type,
+          required,
+          description,
+          ...(allowedValues === undefined
+            ? {}
+            : { allowedValues: [...allowedValues] }),
+        }),
+      ),
       constraints: [],
       returnType: "Object",
     }),
