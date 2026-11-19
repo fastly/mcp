@@ -118,6 +118,16 @@ function parseModelDoc(content) {
   };
 }
 
+// fastly-js merges some "pick one of these" bodies into one model, so every field looks required.
+// These are the real options, default first, because usage examples show the first one.
+// Remove an entry once the generated docs are fixed.
+const ONE_OF_MODELS = new Map([
+  [
+    "ArcProviderConnectionRequest",
+    ["ArcProviderConnectionApiKey", "ArcProviderConnectionAwsIam"],
+  ],
+]);
+
 // Only reads the model docs that parameters actually use.
 async function loadModels(docsDir, docFiles, rows) {
   const models = new Map();
@@ -132,7 +142,9 @@ async function loadModels(docsDir, docFiles, rows) {
     pending = [];
     for (const [i, name] of names.entries()) {
       const model = parseModelDoc(docs[i]);
+      model.oneOf = ONE_OF_MODELS.get(name);
       models.set(name, model);
+      pending.push(...(model.oneOf ?? []));
       for (const property of model.properties ?? []) {
         pending.push(property.model);
       }
@@ -143,6 +155,15 @@ async function loadModels(docsDir, docFiles, rows) {
 
 // Read-only fields are left out since the server fills them in.
 // Expansion stops when a model refers back to itself.
+function writableFields(name, models, expanding) {
+  const properties = models.get(name)?.properties;
+  if (!properties || expanding.includes(name)) return undefined;
+  const fields = properties
+    .filter((property) => !property.readOnly)
+    .map((property) => describeField(property, models, [...expanding, name]));
+  return fields.length > 0 ? fields : undefined;
+}
+
 function describeField(row, models, expanding = []) {
   const field = {
     name: row.name,
@@ -153,13 +174,14 @@ function describeField(row, models, expanding = []) {
   const model = models.get(row.model);
   const allowedValues = row.allowedValues ?? model?.allowedValues;
   if (allowedValues) field.allowedValues = allowedValues;
-  if (model?.properties && !expanding.includes(row.model)) {
-    const fields = model.properties
-      .filter((property) => !property.readOnly)
-      .map((property) =>
-        describeField(property, models, [...expanding, row.model]),
-      );
-    if (fields.length > 0) field.fields = fields;
+  if (model?.oneOf) {
+    field.oneOf = model.oneOf.map((type) => ({
+      type,
+      fields: writableFields(type, models, expanding),
+    }));
+  } else {
+    const fields = writableFields(row.model, models, expanding);
+    if (fields) field.fields = fields;
   }
   return field;
 }

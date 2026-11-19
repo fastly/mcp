@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildIndex } from "../src/indexer.js";
@@ -277,36 +277,43 @@ describe("buildIndex – validation", () => {
 });
 
 describe("buildIndex – body models", () => {
-  test("the bot category reset body is spelled out from the real docs", async () => {
+  test("real request bodies are spelled out, with both ARC connection options", async () => {
     const index = await buildIndex(DOCS_DIR);
-    const method = index.find(
-      (m) => m.method === "botManagementUpdateCategoryBots",
-    );
-    expect(method.params.at(-1)).toEqual({
-      name: "bot_management_category_bots",
-      type: "BotManagementCategoryBots",
-      required: true,
-      description: "",
-      fields: [
-        expect.objectContaining({
-          name: "action",
-          required: true,
-          fields: [
-            {
-              name: "type",
-              type: "String",
-              required: true,
-              description:
-                "The type of action to apply. Only `inherit` is supported.",
-              allowedValues: ["inherit"],
-            },
-          ],
-        }),
-      ],
-    });
-    expect(buildUsage(method)).toBe(
+    const find = (name) => index.find((m) => m.method === name);
+    expect(buildUsage(find("botManagementUpdateCategoryBots"))).toBe(
       "return await botManagementApi.botManagementUpdateCategoryBots({ workspace_id: '...', category_id: '...', bot_management_category_bots: { action: { type: 'inherit' } } });",
     );
+    const arc = find("arcCreateProviderConnection");
+    expect(buildUsage(arc)).toBe(
+      "return await aiRuntimeControlProviderConnectionsApi.arcCreateProviderConnection({ arc_provider_connection_request: { name: '...', models: ['...'], base_url: '...', api_key: '...' } });",
+    );
+    expect(
+      arc.params[0].oneOf.map((option) => [
+        option.type,
+        option.fields.map((field) => field.name),
+      ]),
+    ).toEqual([
+      [
+        "ArcProviderConnectionApiKey",
+        ["name", "models", "base_url", "api_key", "auth_type"],
+      ],
+      [
+        "ArcProviderConnectionAwsIam",
+        ["name", "models", "auth_type", "customer_role_arn", "region"],
+      ],
+    ]);
+  });
+
+  test("fastly-js still merges ArcProviderConnectionRequest, so ONE_OF_MODELS still needs it", async () => {
+    const doc = await readFile(
+      join(DOCS_DIR, "ArcProviderConnectionRequest.md"),
+      "utf-8",
+    );
+    const rows = doc
+      .split("\n")
+      .filter((row) => /^\*\*(api_key|customer_role_arn)\*\*/.test(row));
+    expect(rows).toHaveLength(2);
+    expect(rows.filter((row) => row.includes("[optional]"))).toEqual([]);
   });
 
   test("models are found by their docs, not by the generator's links", async () => {

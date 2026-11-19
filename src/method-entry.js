@@ -69,14 +69,15 @@ function requiredObject(fields, depth) {
 // Bodies get an object with their required fields instead of a string.
 // When only one value is allowed, we use it.
 function placeholder(param, depth) {
+  const fields = param.fields ?? param.oneOf?.[0].fields;
   let value = "'...'";
   if (param.allowedValues?.length === 1) {
     value = literal(param.allowedValues[0]);
   } else if (param.type.startsWith("{")) {
     return "{}";
-  } else if (param.fields) {
+  } else if (fields) {
     const body =
-      depth < MAX_BODY_DEPTH ? requiredObject(param.fields, depth + 1) : "{}";
+      depth < MAX_BODY_DEPTH ? requiredObject(fields, depth + 1) : "{}";
     value = body.length > MAX_BODY_LENGTH ? "{}" : body;
   }
   return isList(param.type) ? `[${value}]` : value;
