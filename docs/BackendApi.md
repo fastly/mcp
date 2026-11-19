@@ -20,7 +20,7 @@ Method | HTTP request | Description
 ## `createBackend`
 
 ```javascript
-createBackend({ service_id, version_id, [address, ][auto_loadbalance, ][between_bytes_timeout, ][client_cert, ][comment, ][connect_timeout, ][first_byte_timeout, ][fetch_timeout, ][healthcheck, ][hostname, ][ipv4, ][ipv6, ][keepalive_time, ][max_conn, ][max_lifetime, ][max_tls_version, ][min_tls_version, ][max_use, ][name, ][override_host, ][port, ][prefer_ipv6, ][request_condition, ][share_key, ][shield, ][ssl_ca_cert, ][ssl_cert_hostname, ][ssl_check_cert, ][ssl_ciphers, ][ssl_client_cert, ][ssl_client_key, ][ssl_hostname, ][ssl_sni_hostname, ][tcp_keepalive_enable, ][tcp_keepalive_interval, ][tcp_keepalive_probes, ][tcp_keepalive_time, ][use_ssl, ][weight] })
+createBackend({ service_id, version_id, [address, ][auto_loadbalance, ][between_bytes_timeout, ][client_cert, ][comment, ][connect_timeout, ][first_byte_timeout, ][fetch_timeout, ][healthcheck, ][hostname, ][iam_external_id, ][iam_product, ][iam_region, ][iam_role, ][iam_vendor, ][ipv4, ][ipv6, ][keepalive_time, ][max_conn, ][max_lifetime, ][max_tls_version, ][min_tls_version, ][max_use, ][name, ][override_host, ][port, ][prefer_ipv6, ][request_condition, ][share_key, ][shield, ][ssl_ca_cert, ][ssl_cert_hostname, ][ssl_check_cert, ][ssl_ciphers, ][ssl_client_cert, ][ssl_client_key, ][ssl_hostname, ][ssl_sni_hostname, ][tcp_keepalive_enable, ][tcp_keepalive_interval, ][tcp_keepalive_probes, ][tcp_keepalive_time, ][use_ssl, ][weight] })
 ```
 
 Create a backend for a particular service and version.
@@ -41,6 +41,11 @@ const options = {
   fetch_timeout: 56,
   healthcheck: "healthcheck_example",
   hostname: "hostname_example",
+  iam_external_id: "iam_external_id_example",
+  iam_product: "iam_product_example",
+  iam_region: "iam_region_example",
+  iam_role: "iam_role_example",
+  iam_vendor: "aws",
   ipv4: "ipv4_example",
   ipv6: "ipv6_example",
   keepalive_time: 56,
@@ -97,6 +102,11 @@ Name | Type | Description  | Notes
 **fetch_timeout** | **Number** | Maximum duration in milliseconds to wait for the entire response to be received after a TCP connection is established and the request has been sent. If exceeded, the connection is aborted and a synthetic `503` response will be presented instead. May be set at runtime using `bereq.fetch_timeout`. | [optional]
 **healthcheck** | **String** | The name of the healthcheck to use with this backend. | [optional]
 **hostname** | **String** | The hostname of the backend. May be used as an alternative to `address` to set the backend location. | [optional]
+**iam_external_id** | **String** | If the backend is using IAM authentication and the IAM system policy requires a matching external identifier, it should match this value. Your Fastly customer ID will be used if this attribute is not set. | [optional]
+**iam_product** | **String** | If the backend is using IAM authentication, the IAM signature will use this as the product element. | [optional]
+**iam_region** | **String** | If the backend is using IAM authentication, this region will be used for signing and access. | [optional]
+**iam_role** | **String** | If the backend is using IAM authentication, the fully qualified role string supplied by the storage vendor. | [optional]
+**iam_vendor** | **String** | A label that identifies the storage vendor. Providing a value in this field enables IAM usage, and all other IAM fields depend on its value. | [optional] [one of: "aws"]
 **ipv4** | **String** | IPv4 address of the backend. May be used as an alternative to `address` to set the backend location. | [optional]
 **ipv6** | **String** | IPv6 address of the backend. May be used as an alternative to `address` to set the backend location. | [optional]
 **keepalive_time** | **Number** | How long (in seconds) to keep a persistent connection to the backend between requests. By default, Fastly keeps connections open as long as it can. | [optional]
@@ -250,7 +260,7 @@ Name | Type | Description  | Notes
 ## `updateBackend`
 
 ```javascript
-updateBackend({ service_id, version_id, backend_name, [address, ][auto_loadbalance, ][between_bytes_timeout, ][client_cert, ][comment, ][connect_timeout, ][first_byte_timeout, ][fetch_timeout, ][healthcheck, ][hostname, ][ipv4, ][ipv6, ][keepalive_time, ][max_conn, ][max_lifetime, ][max_tls_version, ][min_tls_version, ][max_use, ][name, ][override_host, ][port, ][prefer_ipv6, ][request_condition, ][share_key, ][shield, ][ssl_ca_cert, ][ssl_cert_hostname, ][ssl_check_cert, ][ssl_ciphers, ][ssl_client_cert, ][ssl_client_key, ][ssl_hostname, ][ssl_sni_hostname, ][tcp_keepalive_enable, ][tcp_keepalive_interval, ][tcp_keepalive_probes, ][tcp_keepalive_time, ][use_ssl, ][weight] })
+updateBackend({ service_id, version_id, backend_name, [address, ][auto_loadbalance, ][between_bytes_timeout, ][client_cert, ][comment, ][connect_timeout, ][first_byte_timeout, ][fetch_timeout, ][healthcheck, ][hostname, ][iam_external_id, ][iam_product, ][iam_region, ][iam_role, ][iam_vendor, ][ipv4, ][ipv6, ][keepalive_time, ][max_conn, ][max_lifetime, ][max_tls_version, ][min_tls_version, ][max_use, ][name, ][override_host, ][port, ][prefer_ipv6, ][request_condition, ][share_key, ][shield, ][ssl_ca_cert, ][ssl_cert_hostname, ][ssl_check_cert, ][ssl_ciphers, ][ssl_client_cert, ][ssl_client_key, ][ssl_hostname, ][ssl_sni_hostname, ][tcp_keepalive_enable, ][tcp_keepalive_interval, ][tcp_keepalive_probes, ][tcp_keepalive_time, ][use_ssl, ][weight] })
 ```
 
 Update the backend for a particular service and version.
@@ -272,6 +282,11 @@ const options = {
   fetch_timeout: 56,
   healthcheck: "healthcheck_example",
   hostname: "hostname_example",
+  iam_external_id: "iam_external_id_example",
+  iam_product: "iam_product_example",
+  iam_region: "iam_region_example",
+  iam_role: "iam_role_example",
+  iam_vendor: "aws",
   ipv4: "ipv4_example",
   ipv6: "ipv6_example",
   keepalive_time: 56,
@@ -329,6 +344,11 @@ Name | Type | Description  | Notes
 **fetch_timeout** | **Number** | Maximum duration in milliseconds to wait for the entire response to be received after a TCP connection is established and the request has been sent. If exceeded, the connection is aborted and a synthetic `503` response will be presented instead. May be set at runtime using `bereq.fetch_timeout`. | [optional]
 **healthcheck** | **String** | The name of the healthcheck to use with this backend. | [optional]
 **hostname** | **String** | The hostname of the backend. May be used as an alternative to `address` to set the backend location. | [optional]
+**iam_external_id** | **String** | If the backend is using IAM authentication and the IAM system policy requires a matching external identifier, it should match this value. Your Fastly customer ID will be used if this attribute is not set. | [optional]
+**iam_product** | **String** | If the backend is using IAM authentication, the IAM signature will use this as the product element. | [optional]
+**iam_region** | **String** | If the backend is using IAM authentication, this region will be used for signing and access. | [optional]
+**iam_role** | **String** | If the backend is using IAM authentication, the fully qualified role string supplied by the storage vendor. | [optional]
+**iam_vendor** | **String** | A label that identifies the storage vendor. Providing a value in this field enables IAM usage, and all other IAM fields depend on its value. | [optional] [one of: "aws"]
 **ipv4** | **String** | IPv4 address of the backend. May be used as an alternative to `address` to set the backend location. | [optional]
 **ipv6** | **String** | IPv6 address of the backend. May be used as an alternative to `address` to set the backend location. | [optional]
 **keepalive_time** | **Number** | How long (in seconds) to keep a persistent connection to the backend between requests. By default, Fastly keeps connections open as long as it can. | [optional]

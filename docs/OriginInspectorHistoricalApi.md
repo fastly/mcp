@@ -59,7 +59,7 @@ Name | Type | Description  | Notes
 **group_by** | **String** | Dimensions to return in the query. Multiple dimensions may be separated by commas. For example, `group_by&#x3D;host` will return one timeseries for every origin host, as a total across all POPs.  | [optional] [one of: "host", "datacenter", "region", "none"]
 **limit** | **String** | Number of results per page. The maximum is 200. | [optional] [defaults to '100']
 **cursor** | **String** | Cursor value from the `next_cursor` field of a previous response, used to retrieve the next page. To request the first page, this should be empty. | [optional]
-**region** | **String** | Limit query to one or more specific geographic regions. Values should be comma-separated.  | [optional] [one of: "africa_std", "anzac", "asia", "asia_india", "asia_southkorea", "europe", "mexico", "southamerica_std", "usa"]
+**region** | **String** | Limit query to one or more specific geographic regions. Values should be comma-separated.  | [optional] [one of: "africa_std", "anzac", "asia", "asia_india", "asia_southkorea", "saudi_arabia", "europe", "mexico", "southamerica_std", "usa"]
 **datacenter** | **String** | Limit query to one or more specific POPs. Values should be comma-separated. | [optional]
 **host** | **String** | Limit query to one or more specific origin hosts. Values should be comma-separated. | [optional]
 

@@ -59,7 +59,7 @@ Name | Type | Description  | Notes
 **group_by** | **String** | Field to group by in the query. For example, `group_by&#x3D;bot_id` will return entries grouped by `timestamp` and `bot_id`.  | [optional] [one of: "datacenter", "bot_id"]
 **datacenter** | **String** | Limit query to one or more specific POPs. Values should be comma-separated. | [optional]
 **bot** | **String** | Filter results based by Bot ID. | [optional]
-**region** | **String** | Limit query to one or more specific geographic regions. Values should be comma-separated.  | [optional] [one of: "africa_std", "anzac", "asia", "asia_india", "asia_southkorea", "europe", "mexico", "southamerica_std", "usa"]
+**region** | **String** | Limit query to one or more specific geographic regions. Values should be comma-separated.  | [optional] [one of: "africa_std", "anzac", "asia", "asia_india", "asia_southkorea", "saudi_arabia", "europe", "mexico", "southamerica_std", "usa"]
 **cursor** | **String** | Cursor value from the `next_cursor` field of a previous response, used to retrieve the next page. To request the first page, this should be empty. | [optional]
 **metric** | **String** | One or more metrics to retrieve. Multiple values should be comma-separated. | [optional]
 **metric_set** | **String** | The metric set to retrieve. | [optional] [one of: "content_guard"]

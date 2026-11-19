@@ -380,6 +380,8 @@ Name | Type | Description | Notes
 **netprotect_firewall_dropped_packets** | **Number** | Number of packets dropped by network protection firewall. | [optional]
 **api_enforcement_allowed_requests_count** | **Number** | Number of requests allowed after evaluation by the API Enforcement engine. | [optional]
 **api_enforcement_flagged_requests_count** | **Number** | Number of requests flagged after evaluation by the API Enforcement engine. | [optional]
+**origin_fetch_iam_success_count** | **Number** | Count of successful IAM authenticated backend requests. | [optional]
+**origin_fetch_iam_failure_count** | **Number** | Count of failed IAM authenticated backend requests. | [optional]
 **service_id** | **String** |  | [optional] [readonly]
 **start_time** | **Number** | Timestamp for the start of the time period being reported | [optional]
 

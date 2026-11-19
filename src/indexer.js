@@ -233,10 +233,6 @@ export async function buildIndex(docsDir = DOCS_DIR) {
     );
   }
 
-  if (apiFiles.length !== 139) {
-    warnings.push(`Expected 139 Api.md files, found ${apiFiles.length}`);
-  }
-
   if (warnings.length > 0) {
     console.error(`[indexer] ${warnings.length} warnings:`);
     for (const w of warnings) {

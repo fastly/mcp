@@ -19,6 +19,7 @@ Method | HTTP request | Description
 [**botManagementListWorkspaces**](BotManagementApi.md#botManagementListWorkspaces) | **GET** /bot-management/v1/workspaces | List workspaces
 [**botManagementUpdateBot**](BotManagementApi.md#botManagementUpdateBot) | **PATCH** /bot-management/v1/workspaces/{workspace_id}/policy/categories/{category_id}/bots/{bot_id} | Set a bot action
 [**botManagementUpdateCategory**](BotManagementApi.md#botManagementUpdateCategory) | **PATCH** /bot-management/v1/workspaces/{workspace_id}/policy/categories/{category_id} | Set a category action
+[**botManagementUpdateCategoryBots**](BotManagementApi.md#botManagementUpdateCategoryBots) | **PATCH** /bot-management/v1/workspaces/{workspace_id}/policy/categories/{category_id}/bots | Set the action for all bots in a category
 [**botManagementUpdateWorkspace**](BotManagementApi.md#botManagementUpdateWorkspace) | **PATCH** /bot-management/v1/workspaces/{workspace_id} | Update a workspace
 
 
@@ -178,7 +179,7 @@ Name | Type | Description  | Notes
 botManagementListCategories({ workspace_id, [limit, ][cursor] })
 ```
 
-List all bot categories in a workspace's policy. Each category has an action that applies to every bot in the category. To list the bots themselves, use [list all bots in a workspace](#bot-management-list-bots) or [list bots in a category](#bot-management-list-category-bots).
+List all bot categories in a workspace's policy. Each category has an action that applies to every bot in the category that is set to `inherit`. To list the bots themselves, use [list all bots in a workspace](#bot-management-list-bots) or [list bots in a category](#bot-management-list-category-bots).
 
 ### Example
 
@@ -338,7 +339,7 @@ Name | Type | Description  | Notes
 botManagementUpdateCategory({ workspace_id, category_id, bot_management_category })
 ```
 
-Set the action for a bot category. Every bot in the category configured with the 'inherit' action uses the action set for the category.
+Set the default action for a bot category. Bots set to `inherit` follow this action. Bots with their own action keep it. To remove every bot's own action in the category, use [set the action for all bots in a category](#bot-management-update-category-bots).
 
 ### Example
 
@@ -369,6 +370,45 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**BotManagementCategoryResponse**](BotManagementCategoryResponse.md)
+
+
+## `botManagementUpdateCategoryBots`
+
+```javascript
+botManagementUpdateCategoryBots({ workspace_id, category_id, bot_management_category_bots })
+```
+
+Set the action for every bot in a category. Setting `inherit` removes each bot's own action, so every bot follows the category's action. The category's own action is unchanged. The update applies to every bot in the category or to none, and repeating it gives the same result. The response lists every bot in the category, including bots that already inherited, and is not paginated.
+
+### Example
+
+```javascript
+const options = {
+  workspace_id: SU1Z0isxPaozGVKXdv0eY, // required
+  category_id: ai_crawlers, // required
+  bot_management_category_bots: new Fastly.BotManagementCategoryBots(), // required
+};
+
+apiInstance.botManagementUpdateCategoryBots(options)
+  .then((data) => {
+    console.log(data, "API called successfully.");
+  })
+  .catch((error) => {
+    console.error(error);
+  });
+```
+
+### Options
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+**workspace_id** | **String** | The ID of the bot management workspace. |
+**category_id** | **String** | The ID of the bot category. |
+**bot_management_category_bots** | [**BotManagementCategoryBots**](BotManagementCategoryBots.md) |  |
+
+### Return type
+
+[**BotManagementBotsResponse**](BotManagementBotsResponse.md)
 
 
 ## `botManagementUpdateWorkspace`
